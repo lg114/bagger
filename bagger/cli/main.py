@@ -318,3 +318,44 @@ def rebuild_index():
         )
     finally:
         storage.close()
+
+
+# ---- serve ----
+
+@cli.command()
+@click.option("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+@click.option("--port", default=8723, help="Listen port (default: 8723)")
+@click.option("--no-open", is_flag=True, help="Do not open browser automatically")
+def serve(host, port, no_open):
+    """Start the Bagger web API and visual memory browser.
+
+    Launches a FastAPI server on the given host/port, then opens
+    the interactive API docs in your browser.
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        click.echo("  uvicorn not installed. Run: pip install bagger[web]", err=True)
+        return
+
+    if not DB_PATH.exists():
+        click.echo("  Run 'bagger init' and 'bagger scan' first.", err=True)
+        return
+
+    if not no_open:
+        import webbrowser
+        url = f"http://{host}:{port}/docs"
+        webbrowser.open(url)
+
+    click.echo(click.style(f"\n  Bagger API starting at http://{host}:{port}", bold=True))
+    click.echo(f"  Swagger UI:    http://{host}:{port}/docs")
+    click.echo(f"  API base:      http://{host}:{port}/api")
+    click.echo(click.style("  Press Ctrl+C to stop\n", dim=True))
+
+    uvicorn.run(
+        "bagger.api.app:create_app",
+        host=host,
+        port=port,
+        factory=True,
+        log_level="info",
+    )

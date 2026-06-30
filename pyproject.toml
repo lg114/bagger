@@ -13,6 +13,10 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
 ]
+web = [
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+]
 
 [project.scripts]
 bagger = "bagger.cli.main:cli"
