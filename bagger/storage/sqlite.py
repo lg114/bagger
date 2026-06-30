@@ -235,15 +235,87 @@ class SqliteStorage:
     ) -> list[dict]:
         """Full-text search with FTS5 (English) or LIKE fallback (CJK).
 
-        SQLite FTS5 unicode61 tokenizer cannot segment CJK text,
-        so queries containing Chinese/Japanese/Korean characters
-        fall back to LIKE. Pure ASCII/English queries use FTS5
-        with BM25 ranking, snippet highlighting, and pagination.
+        Returns a flat list for CLI use. For paginated API results,
+        use search_paginated().
         """
         if self._fts_enabled() and not _contains_cjk(query):
             result = self.search_fts(query, session_id=session_id, limit=limit)
             return result["data"]
         return self._search_like(query, session_id=session_id, limit=limit)
+
+    def search_paginated(
+        self,
+        query: str,
+        session_id: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict:
+        """Full-text search with FTS5/LIKE routing and pagination metadata.
+
+        Returns {data: [...], meta: {page, per_page, total, pages}} for API use.
+        """
+        if self._fts_enabled() and not _contains_cjk(query):
+            return self.search_fts(query, session_id=session_id,
+                                   page=page, limit=per_page)
+
+        # LIKE fallback with manual pagination
+        offset = (page - 1) * per_page
+        like_pattern = f"%{query}%"
+
+        # Count
+        count_sql = (
+            "SELECT COUNT(*) FROM events e "
+            "WHERE e.content_text LIKE ?"
+        )
+        count_params: list = [like_pattern]
+        if session_id:
+            count_sql += " AND e.session_id = ?"
+            count_params.append(session_id)
+        total = self.conn.execute(count_sql, count_params).fetchone()[0]
+
+        # Fetch page
+        sql = (
+            "SELECT e.id, e.event_id, e.session_id, s.summary as session_summary, "
+            "e.timestamp, e.role, e.content_json, e.content_text, "
+            "e.token_input, e.token_output, s.project_path "
+            "FROM events e "
+            "LEFT JOIN sessions s ON s.id = e.session_id "
+            "WHERE e.content_text LIKE ?"
+        )
+        params = [like_pattern]
+        if session_id:
+            sql += " AND e.session_id = ?"
+            params.append(session_id)
+        sql += " ORDER BY e.timestamp DESC LIMIT ? OFFSET ?"
+        params.extend([per_page, offset])
+
+        rows = self.conn.execute(sql, params).fetchall()
+        results = [
+            {
+                "db_id": r[0],
+                "event_id": r[1],
+                "session_id": r[2],
+                "session_summary": r[3],
+                "timestamp": r[4],
+                "role": r[5],
+                "content_json": r[6],
+                "content_text": r[7],
+                "token_input": r[8],
+                "token_output": r[9],
+                "project_path": r[10],
+            }
+            for r in rows
+        ]
+
+        return {
+            "data": results,
+            "meta": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "pages": max(1, (total + per_page - 1) // per_page),
+            },
+        }
 
     def _fts_enabled(self) -> bool:
         """Check if the FTS5 virtual table exists and has entries."""
