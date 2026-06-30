@@ -26,10 +26,17 @@ def get_stats() -> dict:
 def get_daily_stats(
     days: int = Query(30, ge=1, le=365, description="Number of days to include"),
 ) -> dict:
-    """Daily event and token counts for charting.
-
-    Returns time-series data sorted by date ascending.
-    """
+    """Daily event and token counts for charting."""
     with get_storage() as storage:
         rows = storage.get_daily_stats(days=days)
     return {"data": rows, "meta": {"days": days}}
+
+
+@router.get("/stats/tools")
+def get_tool_usage(
+    limit: int = Query(15, ge=1, le=100, description="Max tools to return"),
+) -> dict:
+    """Most frequently used tools."""
+    with get_storage() as storage:
+        rows = storage.get_tool_usage_stats(limit=limit)
+    return {"data": rows, "meta": {"limit": limit}}

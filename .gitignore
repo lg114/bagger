@@ -10,3 +10,11 @@ build/
 env/
 .bagger/
 bagger.egg-info/
+
+# Frontend
+ui/dist/
+ui/node_modules/
+
+# Tauri
+ui/src-tauri/target/
+
