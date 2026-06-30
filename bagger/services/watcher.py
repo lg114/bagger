@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from bagger.exporters.jsonl import JsonlExporter
 from bagger.services.scanner import discover_sessions, _read_from_offset
 from bagger.storage.sqlite import SqliteStorage
 
@@ -17,6 +18,7 @@ class Watcher:
         self.projects_dir = projects_dir
         self._offsets: dict[str, int] = {}
         self._running = False
+        self._exporter = JsonlExporter(Path.home() / ".bagger" / "events.jsonl")
 
     def watch(self, interval: float = 1.0) -> None:
         """Start watching. Runs until Ctrl+C."""
@@ -58,6 +60,7 @@ class Watcher:
                 continue
 
             count = self.storage.insert_events(new_events)
+            self._export(new_events)
 
             from bagger.parser.claude import extract_summary
             from bagger.models.event import Session
@@ -91,3 +94,11 @@ class Watcher:
 
     def _on_stop(self, signum, frame):
         self._running = False
+
+    def _export(self, events: list) -> None:
+        """Export events to JSONL backup, ignoring errors."""
+        for ev in events:
+            try:
+                self._exporter.export_event(ev)
+            except Exception:
+                pass

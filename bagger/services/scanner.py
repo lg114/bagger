@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from bagger.exporters.jsonl import JsonlExporter
 from bagger.models.event import WatchState
 from bagger.parser.claude import parse_jsonl, extract_summary
 from bagger.storage.sqlite import SqliteStorage
@@ -45,6 +46,7 @@ def scan_all(
     projects_dir: Optional[Path] = None,
     full: bool = False,
     state_path: Optional[Path] = None,
+    jsonl_path: Optional[Path] = None,
 ) -> dict:
     """Scan all sessions and import events.
 
@@ -53,13 +55,17 @@ def scan_all(
         projects_dir: Directory containing JSONL files.
         full: If True, reprocess all files from scratch.
         state_path: Path to watch state JSON file for incremental mode.
+        jsonl_path: Path for JSONL exporter backup. Defaults to ~/.bagger/events.jsonl.
 
     Returns:
         Stats dict with counts.
     """
     if state_path is None:
         state_path = Path.home() / ".bagger" / "state.json"
+    if jsonl_path is None:
+        jsonl_path = Path.home() / ".bagger" / "events.jsonl"
 
+    exporter = JsonlExporter(jsonl_path)
     state = _load_state(state_path) if not full else WatchState()
     files = discover_sessions(projects_dir)
 
@@ -86,6 +92,7 @@ def scan_all(
             continue
 
         new_count = storage.insert_events(events)
+        _export_events(exporter, events)
 
         summary = extract_summary(filepath)
         first_ts = events[0].timestamp
@@ -152,3 +159,12 @@ def _load_state(path: Path) -> WatchState:
 def _save_state(state: WatchState, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+
+
+def _export_events(exporter, events: list) -> None:
+    """Export events to JSONL backup, ignoring errors."""
+    for ev in events:
+        try:
+            exporter.export_event(ev)
+        except Exception:
+            pass
