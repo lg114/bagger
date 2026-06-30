@@ -62,12 +62,14 @@ bagger search "token expiration"
                     │
               MemoryEvent
                     │
-                    ▼
-               SQLite + LIKE
-                    │
-          ┌─────────┼─────────┐
-          ▼         ▼         ▼
-       search     replay    stats
+          ┌─────────┴─────────┐
+          ▼                   ▼
+     SQLite + LIKE      ~/.bagger/events.jsonl
+          │              (raw backup)
+          │
+          ├──────────┐──────────┐
+          ▼          ▼          ▼
+       search     replay     stats
 ```
 
 ## Data captured
