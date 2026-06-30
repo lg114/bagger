@@ -32,6 +32,10 @@ bagger scan
 
 # 4. Search
 bagger search "token expiration"
+bagger search "登录" -s abc123     # filter by session prefix
+
+# 5. Replay a session
+bagger replay abc123               # supports prefix matching
 ```
 
 ## Commands
