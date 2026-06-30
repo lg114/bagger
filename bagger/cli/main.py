@@ -116,6 +116,7 @@ def search(query, session, limit):
             summary = r.get("session_summary", "(no summary)")
             ts = r["timestamp"][:19].replace("T", " ")
             role = r["role"]
+            # Use FTS5 snippet if available, otherwise fall back to raw text
             snippet = r.get("snippet", r["content_text"][:200])
 
             click.echo(
@@ -245,6 +246,23 @@ def doctor():
             click.echo(click.style(f"  {s['total_sessions']} sessions in DB", fg="green"))
             click.echo(click.style(f"  {s['total_events']} events in DB", fg="green"))
 
+            # Check FTS
+            fts_ok = storage._fts_enabled()
+            click.echo(
+                click.style(
+                    f"  FTS5 {'enabled' if fts_ok else 'not enabled'}",
+                    fg="green" if fts_ok else "yellow",
+                )
+            )
+            if not fts_ok:
+                click.echo(
+                    click.style(
+                        "    Run 'bagger rebuild-index' to create FTS5 index",
+                        fg="yellow",
+                    )
+                )
+                issues_found = True
+
             click.echo(
                 click.style(
                     f"  SQLite {'OK' if not any(i['level']=='error' for i in issues) else 'ISSUES'}",
@@ -276,3 +294,27 @@ def doctor():
     if not issues_found:
         click.echo(click.style("  All checks passed.", fg="green", bold=True))
     click.echo()
+
+
+# ---- rebuild-index ----
+
+@cli.command()
+def rebuild_index():
+    """Rebuild the FTS5 full-text search index from all events."""
+    if not DB_PATH.exists():
+        click.echo("  Run 'bagger init' and 'bagger scan' first.", err=True)
+        return
+
+    storage = SqliteStorage(DB_PATH)
+    storage.connect()
+
+    try:
+        click.echo("  Rebuilding FTS5 index ...")
+        count = storage.rebuild_fts_index()
+        click.echo(
+            click.style(
+                f"  Index rebuilt: {count} events indexed", fg="green"
+            )
+        )
+    finally:
+        storage.close()

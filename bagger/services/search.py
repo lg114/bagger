@@ -1,4 +1,4 @@
-"""Full-text search service (LIKE-based for MVP, FTS5 later)."""
+"""Full-text search service (FTS5 with BM25 ranking)."""
 
 from typing import Optional
 
@@ -11,5 +11,8 @@ def search_events(
     session_id: Optional[str] = None,
     limit: int = 20,
 ) -> list[dict]:
-    """Search events by keyword matching in content_text."""
+    """Search events via FTS5 with BM25 ranking and snippet highlighting.
+
+    Falls back to LIKE if FTS5 table is unavailable.
+    """
     return storage.search(query, session_id=session_id, limit=limit)
