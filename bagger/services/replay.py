@@ -1,10 +1,8 @@
 """Terminal-based conversation replay."""
 
 import json
-from typing import Optional
 
 from bagger.storage.sqlite import SqliteStorage
-
 
 try:
     import click
@@ -13,15 +11,16 @@ except ImportError:
     _HAS_COLOR = False
 
 
+def _style(text: str, **kwargs) -> str:
+    """Apply click styling if available, else return plain text."""
+    return click.style(text, **kwargs) if _HAS_COLOR else text
+
+
 def replay_session(
     storage: SqliteStorage,
     session_id: str,
-    use_color: bool = True,
 ) -> str:
-    """Replay a full session as formatted terminal output.
-
-    Returns the formatted string.
-    """
+    """Replay a full session as formatted terminal output."""
     events = storage.get_session_events(session_id)
     if not events:
         return f"No events found for session {session_id}"
@@ -36,64 +35,34 @@ def replay_session(
 
     for ev in events:
         ts = ev["timestamp"][:19].replace("T", " ")
-        role_label = "User" if ev["role"] == "user" else "Assistant"
+        role = ev["role"]
 
-        if use_color and _HAS_COLOR:
-            if ev["role"] == "user":
-                role_line = click.style(f"[{ts}]  User:", fg="cyan", bold=True)
-            else:
-                role_line = click.style(f"[{ts}]  Assistant:", fg="green", bold=True)
+        # Role header
+        if role == "user":
+            lines.append(_style(f"[{ts}]  User:", fg="cyan", bold=True))
         else:
-            role_line = f"[{ts}]  {role_label}:"
+            lines.append(_style(f"[{ts}]  Assistant:", fg="green", bold=True))
 
-        lines.append(role_line)
-
-        content_blocks = json.loads(ev["content_json"])
-        for block in content_blocks:
+        # Content blocks
+        blocks = json.loads(ev["content_json"])
+        for block in blocks:
             bt = block.get("block_type", "")
-            if bt in ("text", "thinking"):
-                text = block.get("text", "")
-                if bt == "thinking":
-                    if use_color and _HAS_COLOR:
-                        lines.append(
-                            "  " + click.style(f"[thinking] {text}", dim=True)
-                        )
-                    else:
-                        lines.append(f"  [thinking] {text}")
-                else:
-                    for line in text.split("\n"):
-                        lines.append(f"  {line}")
-            elif bt == "tool_use":
-                if use_color and _HAS_COLOR:
-                    lines.append(
-                        "  "
-                        + click.style(
-                            f"tool_use: {block.get('tool_name', '')}",
-                            fg="yellow",
-                        )
-                    )
-                else:
-                    lines.append(
-                        f"  tool_use: {block.get('tool_name', '')}"
-                    )
-            elif bt == "tool_result":
-                text = block.get("text", "")
-                if use_color and _HAS_COLOR:
-                    lines.append(
-                        "  " + click.style(f"result: {text[:120]}", dim=True)
-                    )
-                else:
-                    lines.append(f"  result: {text[:120]}")
+            text = block.get("text", "")
+            tool_name = block.get("tool_name", "")
 
-        token_info = ""
+            if bt == "thinking":
+                lines.append(_style(f"  [thinking] {text}", dim=True))
+            elif bt == "text":
+                lines.extend(f"  {l}" for l in text.split("\n"))
+            elif bt == "tool_use":
+                lines.append(_style(f"  tool_use: {tool_name}", fg="yellow"))
+            elif bt == "tool_result":
+                lines.append(_style(f"  result: {text[:120]}", dim=True))
+
+        # Tokens
         if ev.get("token_input") or ev.get("token_output"):
-            token_info = (
-                f"  [tokens: in={ev['token_input']} out={ev['token_output']}]"
-            )
-            if use_color and _HAS_COLOR:
-                token_info = click.style(token_info, dim=True)
-        if token_info:
-            lines.append(token_info)
+            info = f"  [tokens: in={ev['token_input']} out={ev['token_output']}]"
+            lines.append(_style(info, dim=True))
 
         lines.append("")
 

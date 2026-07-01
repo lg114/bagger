@@ -1,13 +1,11 @@
 """Session discovery and incremental scanning."""
 
 import json
-import os
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from bagger.exporters.jsonl import JsonlExporter
-from bagger.models.event import WatchState
+from bagger.models.event import Session, WatchState
 from bagger.parser.claude import parse_jsonl, extract_summary
 from bagger.storage.sqlite import SqliteStorage
 
@@ -20,25 +18,43 @@ def discover_sessions(projects_dir: Optional[Path] = None) -> list[Path]:
 
     Excludes agent-* files and files containing 'warmup'.
     """
-    if projects_dir is None:
-        projects_dir = CLAUDE_PROJECTS_DIR
-
+    projects_dir = projects_dir or CLAUDE_PROJECTS_DIR
     if not projects_dir.exists():
         return []
 
     files: list[Path] = []
-    for root, _, filenames in os.walk(projects_dir):
+    for root, _, filenames in _walk(projects_dir):
         for name in filenames:
-            if not name.endswith(".jsonl"):
-                continue
-            if name.startswith("agent-"):
-                continue
-            if "warmup" in name.lower():
-                continue
-            files.append(Path(root) / name)
+            if name.endswith(".jsonl") and not name.startswith("agent-") and "warmup" not in name.lower():
+                files.append(Path(root) / name)
 
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return files
+
+
+def _walk(projects_dir: Path):
+    """os.walk wrapper (avoiding direct os import in public API)."""
+    import os
+    yield from os.walk(projects_dir)
+
+
+def upsert_session_from_events(
+    storage: SqliteStorage, session_id: str, filepath: Path, events: list,
+) -> None:
+    """Upsert session metadata derived from a list of parsed events."""
+    summary = extract_summary(filepath)
+    first_ts = events[0].timestamp
+    last_ts = events[-1].timestamp
+    project_path = events[0].cwd or ""
+
+    storage.upsert_session(Session(
+        session_id=session_id,
+        summary=summary,
+        project_path=project_path,
+        message_count=storage.get_event_count(session_id),
+        first_message_at=first_ts,
+        last_message_at=last_ts,
+    ))
 
 
 def scan_all(
@@ -55,15 +71,13 @@ def scan_all(
         projects_dir: Directory containing JSONL files.
         full: If True, reprocess all files from scratch.
         state_path: Path to watch state JSON file for incremental mode.
-        jsonl_path: Path for JSONL exporter backup. Defaults to ~/.bagger/events.jsonl.
+        jsonl_path: Path for JSONL exporter backup.
 
     Returns:
         Stats dict with counts.
     """
-    if state_path is None:
-        state_path = Path.home() / ".bagger" / "state.json"
-    if jsonl_path is None:
-        jsonl_path = Path.home() / ".bagger" / "events.jsonl"
+    state_path = state_path or Path.home() / ".bagger" / "state.json"
+    jsonl_path = jsonl_path or Path.home() / ".bagger" / "events.jsonl"
 
     exporter = JsonlExporter(jsonl_path)
     state = _load_state(state_path) if not full else WatchState()
@@ -81,10 +95,11 @@ def scan_all(
             continue
 
         try:
-            if last_offset == 0 or full:
-                events = parse_jsonl(filepath)
-            else:
-                events = _read_from_offset(filepath, last_offset)
+            events = (
+                parse_jsonl(filepath)
+                if last_offset == 0 or full
+                else _parse_new_lines(filepath, last_offset)
+            )
         except Exception:
             continue
 
@@ -93,23 +108,7 @@ def scan_all(
 
         new_count = storage.insert_events(events)
         _export_events(exporter, events)
-
-        summary = extract_summary(filepath)
-        first_ts = events[0].timestamp
-        last_ts = events[-1].timestamp
-        project_path = events[0].cwd or ""
-
-        from bagger.models.event import Session
-
-        session = Session(
-            session_id=session_id,
-            summary=summary,
-            project_path=project_path,
-            message_count=storage.get_event_count(session_id),
-            first_message_at=first_ts,
-            last_message_at=last_ts,
-        )
-        storage.upsert_session(session)
+        upsert_session_from_events(storage, session_id, filepath, events)
 
         state.sessions[session_id] = file_size
 
@@ -121,37 +120,36 @@ def scan_all(
     return stats
 
 
-def _read_from_offset(filepath: Path, offset: int) -> list:
-    """Read only new lines from a JSONL file starting at byte offset."""
-    from bagger.parser.claude import parse_jsonl as _parse
+def _parse_new_lines(filepath: Path, offset: int) -> list:
+    """Parse only new lines appended after a byte offset — no temp file needed."""
+    import json as _json
 
     with open(filepath, "r", encoding="utf-8") as f:
         f.seek(offset)
-        new_content = f.read()
+        new_lines = f.readlines()
 
-    if not new_content:
-        return []
+    raw_entries = []
+    for line in new_lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            raw = _json.loads(line)
+        except _json.JSONDecodeError:
+            continue
+        if raw.get("type") in ("user", "assistant"):
+            raw_entries.append(raw)
 
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
-    ) as tmp:
-        tmp.write(new_content)
-        tmp_path = tmp.name
-
-    try:
-        return _parse(Path(tmp_path))
-    finally:
-        os.unlink(tmp_path)
+    from bagger.parser.claude import _parse_entry
+    events = [e for raw in raw_entries if (e := _parse_entry(raw)) is not None]
+    return events
 
 
 def _load_state(path: Path) -> WatchState:
     if not path.exists():
         return WatchState()
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return WatchState(**data)
+        return WatchState(**json.loads(path.read_text(encoding="utf-8")))
     except Exception:
         return WatchState()
 

@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Optional
 
 from bagger.exporters.jsonl import JsonlExporter
-from bagger.services.scanner import discover_sessions, _read_from_offset
+from bagger.models.event import Session
+from bagger.parser.claude import extract_summary
+from bagger.services.scanner import discover_sessions, upsert_session_from_events
 from bagger.storage.sqlite import SqliteStorage
 
 
@@ -51,8 +53,10 @@ class Watcher:
             if file_size <= last_offset:
                 continue
 
+            from bagger.services.scanner import _parse_new_lines
+
             try:
-                new_events = _read_from_offset(filepath, last_offset)
+                new_events = _parse_new_lines(filepath, last_offset)
             except Exception:
                 continue
 
@@ -62,31 +66,12 @@ class Watcher:
             count = self.storage.insert_events(new_events)
             self._export(new_events)
 
-            from bagger.parser.claude import extract_summary
-            from bagger.models.event import Session
-
-            summary = extract_summary(filepath)
             if count > 0:
-                existing = self.storage.get_event_count(session_id)
-                project_path = (
-                    new_events[0].cwd or ""
-                    if new_events
-                    else ""
+                upsert_session_from_events(
+                    self.storage, session_id, filepath, new_events,
                 )
-                first_ts = new_events[0].timestamp if new_events else None
-                last_ts = new_events[-1].timestamp if new_events else None
-
-                session = Session(
-                    session_id=session_id,
-                    summary=summary,
-                    project_path=project_path,
-                    message_count=existing,
-                    first_message_at=first_ts,
-                    last_message_at=last_ts,
-                )
-                self.storage.upsert_session(session)
-
                 if last_offset == 0:
+                    summary = extract_summary(filepath)
                     print(f"  [new] session {session_id[:8]} \"{summary}\"")
                 print(f"    +{count} events synced")
 
@@ -96,7 +81,6 @@ class Watcher:
         self._running = False
 
     def _export(self, events: list) -> None:
-        """Export events to JSONL backup, ignoring errors."""
         for ev in events:
             try:
                 self._exporter.export_event(ev)
