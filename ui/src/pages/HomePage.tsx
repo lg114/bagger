@@ -2,10 +2,10 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  MessageSquare,
-  Users,
-  Zap,
-  Hash,
+  FolderOpen,
+  MessageCircle,
+  Activity,
+  Coins,
   AlertCircle,
   RefreshCw,
   Clock,
@@ -145,10 +145,10 @@ export default function HomePage() {
 
 function HeroStats({ stats, isLoading, error }: { stats: any; isLoading: boolean; error: any }) {
   const cards = [
-    { label: "Sessions", value: stats?.total_sessions, icon: MessageSquare, color: "text-success", bg: "bg-success/8" },
-    { label: "Events", value: stats?.total_events, icon: Zap, color: "text-primary", bg: "bg-primary/10" },
-    { label: "Messages", value: stats?.user_events, icon: Users, color: "text-info", bg: "bg-info/10" },
-    { label: "Tokens", value: stats ? formatTokens(stats.total_tokens) : undefined, icon: Hash, color: "text-accent", bg: "bg-accent/10" },
+    { label: "Sessions", value: stats?.total_sessions, icon: FolderOpen, color: "text-primary", bg: "bg-primary/10", border: "border-primary/15" },
+    { label: "Events", value: stats?.total_events, icon: Activity, color: "text-pink-400", bg: "bg-pink-500/10", border: "border-pink-500/15" },
+    { label: "Messages", value: stats?.user_events, icon: MessageCircle, color: "text-success", bg: "bg-success/8", border: "border-success/15" },
+    { label: "Tokens", value: stats ? formatTokens(stats.total_tokens) : undefined, icon: Coins, color: "text-accent", bg: "bg-accent/10", border: "border-accent/15" },
   ];
 
   return (
@@ -160,7 +160,7 @@ function HeroStats({ stats, isLoading, error }: { stats: any; isLoading: boolean
       ) : cards.map((card) => (
         <div key={card.label} className="glass-card p-5">
           <div className="flex items-center gap-2.5 mb-4">
-            <div className={cn("w-9 h-9 rounded-element flex items-center justify-center border border-primary/15", card.bg)}>
+            <div className={cn("w-9 h-9 rounded-element flex items-center justify-center border", card.bg, card.border)}>
               <card.icon className={cn("w-[18px] h-[18px]", card.color)} />
             </div>
             <span className="text-xs text-muted-foreground uppercase tracking-wider font-mono">{card.label}</span>
@@ -210,7 +210,7 @@ function ErrorBlock({ message, detail }: { message: string; detail?: string }) {
 function EmptyState({ onScan, scanning }: { onScan: () => void; scanning: boolean }) {
   return (
     <div className="text-center py-12 text-muted-foreground glass-card-static p-10">
-      <MessageSquare className="w-10 h-10 mx-auto mb-4 text-primary/15" />
+      <FolderOpen className="w-10 h-10 mx-auto mb-4 text-primary/15" />
       <p className="text-sm mb-1">No sessions yet</p>
       <Button
         variant="outline"

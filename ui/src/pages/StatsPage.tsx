@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
-import { Zap, Hash, MessageSquare, Users, Wrench, TrendingUp, AlertCircle, Bot } from "lucide-react";
+import { Activity, Coins, FolderOpen, MessageCircle, Wrench, TrendingUp, AlertCircle, Bot } from "lucide-react";
 import { getStats, getDailyStats, getToolUsageStats } from "@/lib/api";
 import { cn, formatTokens } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -40,12 +40,12 @@ function StatsGrid() {
   });
 
   const cards = [
-    { label: "Sessions", value: stats?.total_sessions, icon: MessageSquare, color: "text-success", bg: "bg-success/8" },
-    { label: "Events", value: stats?.total_events, icon: Zap, color: "text-primary", bg: "bg-primary/10" },
-    { label: "User Messages", value: stats?.user_events, icon: Users, color: "text-info", bg: "bg-info/10" },
-    { label: "Assistant", value: stats?.assistant_events, icon: Bot, color: "text-accent", bg: "bg-accent/10" },
-    { label: "Tool Uses", value: stats?.tool_uses, icon: Wrench, color: "text-warning", bg: "bg-warning/8" },
-    { label: "Tokens", value: stats ? formatTokens(stats.total_tokens) : undefined, icon: Hash, color: "text-primary/70", bg: "bg-primary/15" },
+    { label: "Sessions", value: stats?.total_sessions, icon: FolderOpen, color: "text-primary", bg: "bg-primary/10", border: "border-primary/15" },
+    { label: "Events", value: stats?.total_events, icon: Activity, color: "text-pink-400", bg: "bg-pink-500/10", border: "border-pink-500/15" },
+    { label: "User Messages", value: stats?.user_events, icon: MessageCircle, color: "text-success", bg: "bg-success/8", border: "border-success/15" },
+    { label: "Assistant", value: stats?.assistant_events, icon: Bot, color: "text-cyan-400", bg: "bg-cyan-500/10", border: "border-cyan-500/15" },
+    { label: "Tool Uses", value: stats?.tool_uses, icon: Wrench, color: "text-violet-400", bg: "bg-violet-500/10", border: "border-violet-500/15" },
+    { label: "Tokens", value: stats ? formatTokens(stats.total_tokens) : undefined, icon: Coins, color: "text-accent", bg: "bg-accent/10", border: "border-accent/15" },
   ];
 
   return (
@@ -57,7 +57,7 @@ function StatsGrid() {
       ) : cards.map((card) => (
         <div key={card.label} className="glass-card p-5">
           <div className="flex items-center gap-2.5 mb-3">
-            <div className={cn("w-8 h-8 rounded-element flex items-center justify-center border", card.bg, "border-primary/15")}>
+            <div className={cn("w-8 h-8 rounded-element flex items-center justify-center border", card.bg, card.border)}>
               <card.icon className={cn("w-[16px] h-[16px]", card.color)} />
             </div>
             <span className="text-xs text-muted-foreground uppercase tracking-wider font-mono">{card.label}</span>
