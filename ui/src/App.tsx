@@ -5,6 +5,8 @@ import SessionsPage from "./pages/SessionsPage";
 import SessionDetailPage from "./pages/SessionDetailPage";
 import SearchPage from "./pages/SearchPage";
 import StatsPage from "./pages/StatsPage";
+import ImportPage from "./pages/ImportPage";
+import SettingsPage from "./pages/SettingsPage";
 
 export default function App() {
   return (
@@ -16,6 +18,8 @@ export default function App() {
           <Route path="sessions/:id" element={<SessionDetailPage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="stats" element={<StatsPage />} />
+          <Route path="import" element={<ImportPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </HashRouter>

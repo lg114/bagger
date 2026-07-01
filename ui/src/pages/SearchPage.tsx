@@ -1,5 +1,5 @@
 import { useSearchParams } from "react-router-dom";
-import { Search as SearchIcon, AlertCircle } from "lucide-react";
+import { Search as SearchIcon, AlertCircle, Clock } from "lucide-react";
 import { useSearch } from "@/hooks/useSearch";
 import SearchBar from "@/components/SearchBar";
 import SearchResults from "@/components/SearchResults";
@@ -11,7 +11,6 @@ export default function SearchPage() {
   const page = parseInt(searchParams.get("page") || "1", 10);
 
   const { data, isLoading, error } = useSearch(query, page);
-
   const results = data?.data ?? [];
   const meta = data?.meta;
 
@@ -20,15 +19,17 @@ export default function SearchPage() {
   };
 
   const handlePage = (p: number) => {
-    setSearchParams({ q: query, page: String(p) });
+    const params = new URLSearchParams(searchParams);
+    params.set("page", String(p));
+    setSearchParams(params);
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 animate-fade-in-up">
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in-up">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight mb-2">Search</h1>
+        <h1 className="text-2xl font-semibold tracking-tight mb-1">Search</h1>
         <p className="text-sm text-muted-foreground">
-          Full-text search across all conversations
+          Full-text search with BM25 ranking. Supports English and CJK.
         </p>
       </div>
 
@@ -48,14 +49,21 @@ export default function SearchPage() {
             </div>
           ) : (
             <>
+              {/* Results header */}
               {!isLoading && meta && (
-                <p className="text-sm text-muted-foreground font-mono">
-                  {meta.total} result{meta.total !== 1 ? "s" : ""} for{" "}
-                  <span className="text-primary font-medium">"{query}"</span>
-                  {meta.pages > 1 && (
-                    <span className="ml-1 opacity-60">(page {meta.page} of {meta.pages})</span>
-                  )}
-                </p>
+                <div className="flex items-center gap-4">
+                  <p className="text-sm text-muted-foreground font-mono">
+                    <span className="text-primary font-medium">{meta.total}</span> result{meta.total !== 1 ? "s" : ""} for{" "}
+                    <span className="text-primary font-medium">"{query}"</span>
+                    {meta.pages > 1 && (
+                      <span className="ml-2 opacity-50">(page {meta.page}/{meta.pages})</span>
+                    )}
+                  </p>
+                  <div className="flex items-center gap-1 text-[10px] text-muted-foreground font-mono">
+                    <Clock className="w-3 h-3" />
+                    FTS5 BM25
+                  </div>
+                </div>
               )}
 
               <SearchResults results={results} isLoading={isLoading} query={query} />
@@ -64,20 +72,18 @@ export default function SearchPage() {
                 <div className="text-center py-20 text-muted-foreground glass-card-static p-16">
                   <SearchIcon className="w-12 h-12 mx-auto mb-4 text-primary/15" />
                   <p className="text-sm mb-2">No results found</p>
-                  <p className="text-xs opacity-50">
-                    Try different keywords or broader terms
-                  </p>
+                  <p className="text-xs opacity-50">Try different keywords or broader terms</p>
                 </div>
               )}
 
               {meta && meta.pages > 1 && (
-                <div className="flex items-center justify-center gap-3 pt-6">
+                <div className="flex items-center justify-center gap-3 pt-4">
                   <Button
                     variant="outline"
                     size="sm"
                     disabled={page <= 1}
                     onClick={() => handlePage(page - 1)}
-                    className="border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-300 ease-apple"
+                    className="border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-200"
                   >
                     Previous
                   </Button>
@@ -89,7 +95,7 @@ export default function SearchPage() {
                     size="sm"
                     disabled={page >= meta.pages}
                     onClick={() => handlePage(page + 1)}
-                    className="border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-300 ease-apple"
+                    className="border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-200"
                   >
                     Next
                   </Button>

@@ -5,69 +5,69 @@
    Bagger — Design System (Blue / Neutral Dark + Light)
    ═══════════════════════════════════════════════════════════════ */
 
-/* ── Dark theme (default) ── */
+/* ── Dark theme — Grok ultra-deep ── */
 :root {
-  --bg-base: #0f1117;
-  --bg-surface: #161822;
-  --bg-elevated: #1c1f2e;
-  --bg-code: #12141f;
-  --border-subtle: #23263a;
-  --border-strong: #2e3250;
-  --text-primary: #e8eaf0;
-  --text-secondary: #8b8fa8;
-  --text-tertiary: #555a73;
+  /* Backgrounds */
+  --bg-base: #050505;
+  --bg-surface: #0a0a0a;
+  --bg-elevated: #111113;
+  --bg-code: #050505;
+  --bg-subtle: #0f0f0f;
 
-  --brand-500: #4f8cff;
-  --brand-400: #7aabff;
-  --brand-600: #3670d9;
-  --brand-bg: rgba(79, 140, 255, 0.10);
-  --accent-500: #f59e0b;
-  --accent-bg: rgba(245, 158, 11, 0.12);
+  /* Text */
+  --text-primary: #f8f9fa;
+  --text-secondary: #d1d5db;
+  --text-tertiary: #9ca3af;
+  --text-muted: #6b7280;
+  --text-placeholder: #6b7280;
 
-  --success: #34d399;
+  /* Borders */
+  --border-subtle: #1f1f22;
+  --border-medium: #2a2a2f;
+  --border-strong: #3f3f46;
+
+  /* Brand */
+  --brand-400: #60a5fa;
+  --brand-500: #3b82f6;
+  --brand-600: #2563eb;
+  --brand-700: #1e40af;
+  --brand-bg: rgba(59, 130, 246, 0.12);
+  --accent-500: #fbbf24;
+  --accent-bg: rgba(251, 191, 36, 0.15);
+
+  /* Semantic */
+  --success: #4ade80;
+  --success-subtle: #14532d;
   --warning: #fbbf24;
+  --warning-subtle: #78350f;
   --error: #f87171;
+  --error-subtle: #7f1d1d;
   --info: #60a5fa;
 
+  /* Fixed foregounds */
   --primary-foreground: #ffffff;
   --destructive-foreground: #ffffff;
-  --accent-foreground: #1a1a2e;
+  --accent-foreground: #0f172a;
 
-  /* Graph node colors */
-  --node-session: #4f8cff;
+  /* Interaction */
+  --nav-active-bg: rgba(59, 130, 246, 0.10);
+  --nav-active-text: #60a5fa;
+  --nav-active-border: rgba(59, 130, 246, 0.25);
+  --focus-ring: #3b82f6;
+  --card-hover-shadow:
+    0 10px 35px -10px rgba(59, 130, 246, 0.15),
+    0 4px 15px -5px rgba(0, 0, 0, 0.8);
+
+  /* Graph */
+  --node-session: #3b82f6;
   --node-file: #60a5fa;
-  --node-topic: #f59e0b;
-  --node-model-opus: #34d399;
+  --node-topic: #fbbf24;
+  --node-model-opus: #4ade80;
   --node-model-sonnet: #60a5fa;
   --edge-session-file: rgba(96, 165, 250, 0.4);
-  --edge-session-project: rgba(79, 140, 255, 0.2);
-  --edge-session-topic: rgba(245, 158, 11, 0.3);
-  --edge-session-session: rgba(85, 90, 115, 0.15);
-
-  /* Card hover shadow */
-  --card-hover-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-}
-
-/* ── Light theme ── */
-[data-theme="light"] {
-  --bg-base: #f9fafb;
-  --bg-surface: #ffffff;
-  --bg-elevated: #f3f4f6;
-  --bg-code: #1e1e2e;
-  --border-subtle: #e5e7eb;
-  --border-strong: #d1d5db;
-  --text-primary: #1a1a2e;
-  --text-secondary: #6b7280;
-  --text-tertiary: #9ca3af;
-  --brand-400: #3670d9;
-  --brand-600: #3670d9;
-  --success: #059669;
-  --warning: #d97706;
-  --error: #dc2626;
-  --info: #3b82f6;
-
-  /* Card hover shadow */
-  --card-hover-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --edge-session-project: rgba(59, 130, 246, 0.2);
+  --edge-session-topic: rgba(251, 191, 36, 0.3);
+  --edge-session-session: rgba(113, 113, 122, 0.12);
 }
 
 /* ── Tailwind v4 theme tokens ── */
@@ -83,14 +83,14 @@
   --color-secondary: var(--bg-elevated);
   --color-secondary-foreground: var(--text-secondary);
   --color-muted: var(--bg-elevated);
-  --color-muted-foreground: var(--text-secondary);
+  --color-muted-foreground: var(--text-tertiary);
   --color-accent: var(--accent-500);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--error);
   --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border-subtle);
+  --color-border: var(--border-medium);
   --color-input: var(--border-strong);
-  --color-ring: var(--brand-500);
+  --color-ring: var(--focus-ring);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
@@ -109,11 +109,27 @@
 }
 
 /* ── Base ── */
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  background: #000000;
+}
 body {
-  background: var(--bg-base);
+  background: #000000;
   color: var(--text-primary);
   font-family: var(--font-display);
   font-feature-settings: "rlig" 1, "calt" 1;
+}
+#root {
+  height: 100%;
+  border: 1px solid var(--border-subtle);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 4px 20px -4px rgba(0, 0, 0, 0.5);
+  background: var(--bg-surface);
+  overflow: hidden;
 }
 
 /* ── Scrollbar ── */
@@ -122,21 +138,22 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--text-tertiary); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 
-/* ── Cards (flat, replaces old glassmorphism) ── */
+/* ── Cards ── */
 .glass-card {
   background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-medium);
   border-radius: var(--radius-card);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 .glass-card:hover {
-  border-color: rgba(79, 140, 255, 0.30);
-  box-shadow: 0 0 0 1px rgba(79, 140, 255, 0.12), var(--card-hover-shadow);
+  border-color: var(--brand-500);
+  box-shadow: var(--card-hover-shadow);
+  transform: translateY(-1px);
 }
 
 .glass-card-static {
   background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-medium);
   border-radius: var(--radius-card);
 }
 

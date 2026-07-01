@@ -116,30 +116,32 @@ function DailyChartSection() {
       ) : (
         <div className="glass-card-static p-6">
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={days} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(79, 140, 255, 0.08)" />
+            <BarChart
+              data={days}
+              margin={{ top: 5, right: 10, left: -20, bottom: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" />
               <XAxis
                 dataKey="shortDate"
                 tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
                 interval={Math.floor(days.length / 6)}
-                axisLine={{ stroke: "rgba(79, 140, 255, 0.12)" }}
+                axisLine={{ stroke: "var(--border-medium)" }}
                 tickLine={false}
               />
               <YAxis
                 tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-                axisLine={{ stroke: "rgba(79, 140, 255, 0.12)" }}
+                axisLine={{ stroke: "var(--border-medium)" }}
                 tickLine={false}
                 width={40}
               />
               <Tooltip
                 contentStyle={{
                   background: "hsl(var(--card))",
-                  border: "1px solid rgba(79, 140, 255, 0.15)",
+                  border: "1px solid var(--border-medium)",
                   borderRadius: 8,
                   fontSize: 12,
                   color: "hsl(var(--foreground))",
                   boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-                  backdropFilter: "blur(16px)",
                 }}
                 labelStyle={{ color: "var(--brand-400)", fontFamily: "JetBrains Mono, monospace" }}
                 formatter={(value, name) => {
@@ -148,7 +150,18 @@ function DailyChartSection() {
                   return [num, "Events"];
                 }}
               />
-              <Bar dataKey="events" fill="rgba(79, 140, 255, 0.35)" radius={[4, 4, 0, 0]} />
+              <Bar
+                dataKey="events"
+                fill="var(--brand-500)"
+                fillOpacity={0.35}
+                radius={[4, 4, 0, 0]}
+                activeBar={{
+                  fill: "var(--brand-400)",
+                  fillOpacity: 0.9,
+                  stroke: "var(--brand-400)",
+                  strokeWidth: 1,
+                }}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>

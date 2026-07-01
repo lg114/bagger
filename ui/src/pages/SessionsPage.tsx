@@ -4,9 +4,12 @@ import { useSessions } from "@/hooks/useSessions";
 import SessionCard, { SessionCardSkeleton } from "@/components/SessionCard";
 import { Button } from "@/components/ui/button";
 
+type SortKey = "last_message_at" | "message_count" | "first_message_at";
+
 export default function SessionsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const page = parseInt(searchParams.get("page") || "1", 10);
+  const sort = (searchParams.get("sort") || "last_message_at") as SortKey;
 
   const { data, isLoading, error } = useSessions(page);
 
@@ -14,22 +17,62 @@ export default function SessionsPage() {
   const meta = data?.meta;
 
   const goToPage = (p: number) => {
-    setSearchParams({ page: String(p) });
+    const params = new URLSearchParams(searchParams);
+    params.set("page", String(p));
+    setSearchParams(params);
   };
 
+  const setSort = (key: SortKey) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("sort", key);
+    params.set("page", "1");
+    setSearchParams(params);
+  };
+
+  const sortOptions: { key: SortKey; label: string }[] = [
+    { key: "last_message_at", label: "Recent" },
+    { key: "message_count", label: "Most Messages" },
+    { key: "first_message_at", label: "Oldest" },
+  ];
+
   return (
-    <div className="max-w-5xl mx-auto space-y-8 animate-fade-in-up">
+    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in-up">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight mb-2">Sessions</h1>
+          <h1 className="text-2xl font-semibold tracking-tight mb-1">Conversations</h1>
           {meta && (
             <p className="text-sm text-muted-foreground font-mono">
               {meta.total} session{meta.total !== 1 ? "s" : ""}
+              {meta.pages > 1 && (
+                <span className="ml-2 opacity-50">page {meta.page} of {meta.pages}</span>
+              )}
             </p>
           )}
         </div>
       </div>
 
+      {/* Filter bar */}
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 bg-muted rounded-element p-0.5">
+          {sortOptions.map((opt) => (
+            <button
+              key={opt.key}
+              onClick={() => setSort(opt.key)}
+              className={`px-3 py-1.5 rounded text-xs font-mono transition-all duration-200 ${
+                sort === opt.key
+                  ? "bg-surface text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1" />
+      </div>
+
+      {/* Content */}
       {error ? (
         <div className="flex flex-col items-center py-20 text-muted-foreground">
           <AlertCircle className="w-10 h-10 mb-4 text-warning/60" />
@@ -37,7 +80,7 @@ export default function SessionsPage() {
           <p className="text-xs mt-2 opacity-50 font-mono">{(error as Error).message}</p>
         </div>
       ) : isLoading ? (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {Array.from({ length: 8 }).map((_, i) => (
             <SessionCardSkeleton key={i} />
           ))}
@@ -51,21 +94,22 @@ export default function SessionsPage() {
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {sessions.map((session) => (
             <SessionCard key={session.id} session={session} />
           ))}
         </div>
       )}
 
+      {/* Pagination */}
       {meta && meta.pages > 1 && (
-        <div className="flex items-center justify-center gap-3 pt-6">
+        <div className="flex items-center justify-center gap-3 pt-4">
           <Button
             variant="outline"
             size="sm"
             disabled={page <= 1}
             onClick={() => goToPage(page - 1)}
-            className="border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-300 ease-apple"
+            className="border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-200"
           >
             Previous
           </Button>
@@ -77,7 +121,7 @@ export default function SessionsPage() {
             size="sm"
             disabled={page >= meta.pages}
             onClick={() => goToPage(page + 1)}
-            className="border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-300 ease-apple"
+            className="border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-200"
           >
             Next
           </Button>
