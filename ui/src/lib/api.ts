@@ -89,6 +89,14 @@ async function fetchApi<T>(
   return res.json();
 }
 
+async function postApi<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: "POST" });
+  if (!res.ok) {
+    throw new Error(`API error: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
 // ── Endpoints ──────────────────────────────────────────
 
 export function getHealth(): Promise<Health> {
@@ -146,4 +154,14 @@ export function getToolUsageStats(
   limit = 15,
 ): Promise<{ data: ToolUsage[] }> {
   return fetchApi<{ data: ToolUsage[] }>("/stats/tools", { limit });
+}
+
+// ── Sync (scan) ────────────────────────────────────────
+
+export function triggerScan(): Promise<{ status: string; sessions: number; events: number; skipped: number }> {
+  return postApi<{ status: string; sessions: number; events: number; skipped: number }>("/scan");
+}
+
+export function triggerFullScan(): Promise<{ status: string; sessions: number; events: number; skipped: number }> {
+  return postApi<{ status: string; sessions: number; events: number; skipped: number }>("/scan/full");
 }

@@ -22,7 +22,9 @@ export default function Layout() {
   const { data: health } = useQuery({
     queryKey: ["health"],
     queryFn: getHealth,
-    refetchInterval: 60_000,
+    // Poll aggressively until backend is ready, then slow down
+    refetchInterval: (query) => query.state.data ? 60_000 : 2_000,
+    retry: true,
   });
 
   return (

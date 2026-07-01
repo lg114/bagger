@@ -1,8 +1,6 @@
-import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { MessageSquare } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { getSessions } from "@/lib/api";
+import { MessageSquare, AlertCircle } from "lucide-react";
+import { useSessions } from "@/hooks/useSessions";
 import SessionCard, { SessionCardSkeleton } from "@/components/SessionCard";
 import { Button } from "@/components/ui/button";
 
@@ -10,10 +8,7 @@ export default function SessionsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const page = parseInt(searchParams.get("page") || "1", 10);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["sessions", page],
-    queryFn: () => getSessions(page),
-  });
+  const { data, isLoading, error } = useSessions(page);
 
   const sessions = data?.data ?? [];
   const meta = data?.meta;
@@ -35,7 +30,13 @@ export default function SessionsPage() {
         </div>
       </div>
 
-      {isLoading ? (
+      {error ? (
+        <div className="flex flex-col items-center py-16 text-muted-foreground">
+          <AlertCircle className="w-8 h-8 mb-3 text-red-400/60" />
+          <p className="text-sm">Failed to load sessions</p>
+          <p className="text-xs mt-1 opacity-60">{(error as Error).message}</p>
+        </div>
+      ) : isLoading ? (
         <div className="space-y-2">
           {Array.from({ length: 8 }).map((_, i) => (
             <SessionCardSkeleton key={i} />

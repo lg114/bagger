@@ -1,8 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { Zap, Hash, MessageSquare, Users, Wrench, TrendingUp } from "lucide-react";
+import { Zap, Hash, MessageSquare, Users, Wrench, TrendingUp, AlertCircle } from "lucide-react";
 import { getStats, getDailyStats, getToolUsageStats } from "@/lib/api";
 import { cn, formatTokens } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+
+function ErrorBlock({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center py-8 text-muted-foreground">
+      <AlertCircle className="w-6 h-6 mb-2 text-red-400/60" />
+      <p className="text-sm">{message}</p>
+    </div>
+  );
+}
 
 export default function StatsPage() {
   return (
@@ -20,7 +29,7 @@ export default function StatsPage() {
 }
 
 function StatsGrid() {
-  const { data: stats, isLoading } = useQuery({
+  const { data: stats, isLoading, error } = useQuery({
     queryKey: ["stats"],
     queryFn: getStats,
   });
@@ -36,7 +45,11 @@ function StatsGrid() {
 
   return (
     <div className="grid grid-cols-3 gap-3">
-      {cards.map((card) => (
+      {error ? (
+        <div className="col-span-3">
+          <ErrorBlock message="Failed to load statistics" />
+        </div>
+      ) : cards.map((card) => (
         <div key={card.label} className="bg-card border border-border rounded-lg p-4">
           <div className="flex items-center gap-2 mb-2">
             <div className={cn("w-7 h-7 rounded-md flex items-center justify-center", card.bg)}>
@@ -58,14 +71,13 @@ function StatsGrid() {
 }
 
 function DailyChartSection() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["dailyStats"],
     queryFn: () => getDailyStats(30),
   });
 
   const days = data?.data ?? [];
   const maxCount = Math.max(...days.map((d) => d.count), 1);
-  const maxTokens = Math.max(...days.map((d) => d.tokens), 1);
 
   return (
     <section className="space-y-4">
@@ -73,7 +85,9 @@ function DailyChartSection() {
         <TrendingUp className="w-4 h-4 text-green-400" />
         Daily Activity
       </h2>
-      {isLoading ? (
+      {error ? (
+        <ErrorBlock message="Failed to load daily stats" />
+      ) : isLoading ? (
         <Skeleton className="h-48 w-full rounded-lg" />
       ) : days.length === 0 ? (
         <div className="text-center py-8 text-sm text-muted-foreground border border-dashed border-border rounded-lg">
@@ -118,7 +132,7 @@ function DailyChartSection() {
 }
 
 function ToolUsageSection() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["toolUsage"],
     queryFn: () => getToolUsageStats(15),
   });
@@ -131,7 +145,9 @@ function ToolUsageSection() {
         <Wrench className="w-4 h-4 text-amber-400" />
         Top Tools
       </h2>
-      {isLoading ? (
+      {error ? (
+        <ErrorBlock message="Failed to load tool usage" />
+      ) : isLoading ? (
         <div className="space-y-1.5">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-8 w-full rounded" />

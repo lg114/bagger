@@ -17,6 +17,9 @@ web = [
     "fastapi>=0.111",
     "uvicorn>=0.30",
 ]
+bundle = [
+    "pyinstaller>=6.0",
+]
 
 [project.scripts]
 bagger = "bagger.cli.main:cli"

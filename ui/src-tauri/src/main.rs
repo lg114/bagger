@@ -1,6 +1,9 @@
 // Never show a console window on Windows — even in debug builds.
 #![windows_subsystem = "windows"]
 
+use std::fs::File;
+use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -12,61 +15,182 @@ use tauri::{
     Manager, RunEvent,
 };
 
-struct BackendProcess(Mutex<Option<Child>>);
+// ── Platform constants for sidecar naming ──
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+const TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+const TARGET_TRIPLE: &str = "x86_64-apple-darwin";
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const TARGET_TRIPLE: &str = "x86_64-unknown-linux-gnu";
+
+#[cfg(target_os = "windows")]
+const EXE_EXT: &str = ".exe";
+#[cfg(not(target_os = "windows"))]
+const EXE_EXT: &str = "";
 
 const BACKEND_PORT: u16 = 8723;
 
-fn spawn_backend() -> Option<Child> {
-    // Strategy 1: bagger CLI (if installed via pip)
-    let mut cmd = Command::new("bagger");
-    cmd.args(["serve", "--port", &BACKEND_PORT.to_string(), "--no-open"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    suppress_console(&mut cmd);
-    let result = cmd.spawn();
+// ── Backend mode: Sidecar (production) vs HostPython (development) ──
 
-    let child = match result {
-        Ok(c) => {
-            println!("Bagger backend started via CLI (PID: {})", c.id());
-            Some(c)
+enum BackendMode {
+    Sidecar,      // Bundled exe in resource dir
+    HostPython,   // Host Python + pip install (dev mode)
+}
+
+/// Detect mode by checking if a real sidecar binary (>1MB) exists.
+/// A placeholder file (a few bytes) satisfies Tauri's build check but
+/// won't trigger Sidecar mode — dev mode remains HostPython.
+fn detect_backend_mode(app: &tauri::AppHandle) -> BackendMode {
+    if let Ok(dir) = app.path().resource_dir() {
+        let name = format!("bagger-server-{}{}", TARGET_TRIPLE, EXE_EXT);
+        let path = dir.join("binaries").join(&name);
+        // Real PyInstaller bundles are 30-40MB; placeholders are tiny.
+        if path.exists() && path.metadata().map(|m| m.len() > 1_000_000).unwrap_or(false) {
+            println!("Detected sidecar binary ({} bytes) - production mode",
+                     path.metadata().map(|m| m.len()).unwrap_or(0));
+            return BackendMode::Sidecar;
         }
-        Err(_) => {
-            // Strategy 2: python -m bagger (needs __main__.py and pip install)
-            let mut cmd = Command::new("python");
-            cmd.args(["-m", "bagger", "serve", "--port", &BACKEND_PORT.to_string(), "--no-open"])
+    }
+    println!("No real sidecar binary - development mode (requires pip install)");
+    BackendMode::HostPython
+}
+
+struct BackendProcess(Mutex<Option<Child>>);
+
+// ── Backend log file ──
+
+/// Open ~/.bagger/backend.log for appending. In dev mode, backend stderr
+/// is redirected here so startup errors are visible. In production, stderr
+/// goes to null (sidecar is self-contained).
+fn open_backend_log() -> Option<File> {
+    let log_path = home_dir().join(".bagger").join("backend.log");
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    File::options()
+        .append(true)
+        .create(true)
+        .open(&log_path)
+        .ok()
+        .map(|f| {
+            println!("Backend stderr → {}", log_path.display());
+            f
+        })
+}
+
+fn home_dir() -> PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .or_else(|_| std::env::var("HOMEDRIVE").map(|d| {
+            let path = std::env::var("HOMEPATH").unwrap_or_default();
+            format!("{}{}", d, path)
+        }))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+// ── Backend spawning ──
+
+fn spawn_backend(app: &tauri::AppHandle, mode: &BackendMode) -> Option<Child> {
+    let port = BACKEND_PORT.to_string();
+
+    match mode {
+        BackendMode::Sidecar => {
+            // Resolve sidecar path from resource directory
+            let resource_dir = app.path().resource_dir()
+                .expect("resource directory not available");
+            let sidecar_name = format!("bagger-server-{}{}", TARGET_TRIPLE, EXE_EXT);
+            let sidecar_path = resource_dir.join("binaries").join(&sidecar_name);
+
+            let mut cmd = Command::new(&sidecar_path);
+            cmd.args(["serve", "--port", &port, "--no-open"])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
             suppress_console(&mut cmd);
-            let result = cmd.spawn();
 
-            match result {
+            match cmd.spawn() {
                 Ok(c) => {
-                    println!("Bagger backend started via python -m (PID: {})", c.id());
+                    println!("Bagger backend started via sidecar (PID: {})", c.id());
                     Some(c)
                 }
                 Err(e) => {
-                    eprintln!(
-                        "Failed to start Bagger API server: {}\n\
-                         Make sure bagger is installed in this Python environment:\n\
-                           cd path/to/bagger && pip install -e \".[web]\"",
-                        e
-                    );
+                    eprintln!("Sidecar spawn failed: {} - binary may be corrupted.", e);
                     None
                 }
             }
         }
-    };
+        BackendMode::HostPython => {
+            // In dev mode, redirect stderr to ~/.bagger/backend.log
+            // so startup errors are visible instead of silently swallowed.
+            let stderr_dest: Stdio = open_backend_log()
+                .map(Stdio::from)
+                .unwrap_or(Stdio::null());
 
-    // Do NOT block the main thread waiting for the backend — that would
-    // freeze the window as "Not Responding". The frontend shows loading
-    // skeletons until the API becomes available.
-    child
+            // Strategy 1: bagger CLI (with --reload for hot code changes)
+            let mut cmd = Command::new("bagger");
+            cmd.args(["serve", "--port", &port, "--reload", "--no-open"])
+                .stdout(Stdio::null())
+                .stderr(stderr_dest);
+            suppress_console(&mut cmd);
+
+            match cmd.spawn() {
+                Ok(c) => {
+                    println!("Bagger backend started via CLI (dev, hot reload ON, PID: {})", c.id());
+                    Some(c)
+                }
+                Err(_) => {
+                    // Strategy 2: python -m bagger (fallback for pip install -e)
+                    // Re-open log for second attempt
+                    let stderr_dest2: Stdio = open_backend_log()
+                        .map(Stdio::from)
+                        .unwrap_or(Stdio::null());
+
+                    let mut cmd = Command::new("python");
+                    cmd.args(["-m", "bagger", "serve", "--port", &port, "--reload", "--no-open"])
+                        .stdout(Stdio::null())
+                        .stderr(stderr_dest2);
+                    suppress_console(&mut cmd);
+
+                    match cmd.spawn() {
+                        Ok(c) => {
+                            println!("Bagger backend started via python -m (dev, hot reload ON, PID: {})", c.id());
+                            Some(c)
+                        }
+                        Err(e) => {
+                            // Write the error to the log file too
+                            if let Some(mut log) = open_backend_log() {
+                                let msg = format!(
+                                    "Development mode failed: {}\nInstall bagger: pip install -e \".[web]\"\n",
+                                    e
+                                );
+                                log.write_all(msg.as_bytes()).ok();
+                            }
+                            eprintln!(
+                                "Development mode failed: {}\n\
+                                 Install bagger: pip install -e \".[web]\"\n\
+                                 Check ~/.bagger/backend.log for details.",
+                                e
+                            );
+                            None
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
-/// Background health monitor. Runs on a separate thread; logs when the
-/// backend becomes available (or warns if it never does).
-fn monitor_backend_health() {
+// ── Health monitor ──
+
+fn monitor_backend_health(mode: BackendMode) {
     let url = format!("http://127.0.0.1:{}/api/health", BACKEND_PORT);
+    let hint = match mode {
+        BackendMode::Sidecar => "The bundled binary may be corrupted. Check ~/.bagger/backend.log.",
+        BackendMode::HostPython => "Make sure `pip install -e \".[web]\"` has been run. Check ~/.bagger/backend.log.",
+    };
     std::thread::spawn(move || {
         for i in 0..30 {
             std::thread::sleep(Duration::from_millis(200));
@@ -78,14 +202,17 @@ fn monitor_backend_health() {
                 Err(_) => continue,
             }
         }
-        eprintln!(
-            "Warning: Bagger backend did not become healthy within 6 seconds. \
-             Make sure `pip install -e \".[web]\"` has been run."
-        );
+        eprintln!("Warning: backend not healthy within 6s. {}", hint);
+        // Also write to log
+        if let Some(mut log) = open_backend_log() {
+            let msg = format!("Backend health check failed after 6s. {}\n", hint);
+            log.write_all(msg.as_bytes()).ok();
+        }
     });
 }
 
-/// Prevent a spawned Command from opening a console window on Windows.
+// ── Console suppression (Windows only) ──
+
 #[cfg(windows)]
 fn suppress_console(cmd: &mut Command) {
     use std::os::windows::process::CommandExt;
@@ -98,8 +225,6 @@ fn suppress_console(_cmd: &mut Command) {}
 
 // ── Single-instance guard (Windows: named mutex; other: port check) ──
 
-/// Try to acquire the global application mutex (Windows) or lock file (other).
-/// Returns `true` if this is the only instance.
 #[cfg(windows)]
 fn acquire_single_instance_lock() -> bool {
     use std::ffi::OsStr;
@@ -125,16 +250,13 @@ fn acquire_single_instance_lock() -> bool {
     unsafe {
         let handle = CreateMutexW(std::ptr::null(), 1, wide.as_ptr());
         if handle == 0 {
-            // Mutex creation itself failed — allow startup (shouldn't happen)
             return true;
         }
         if GetLastError() == ERROR_ALREADY_EXISTS {
             CloseHandle(handle);
             return false;
         }
-        // We own the mutex. The raw handle (isize) stays alive until the
-        // process exits; the OS will release the kernel mutex automatically.
-        let _ = handle; // suppress unused-variable warning
+        let _ = handle;
         true
     }
 }
@@ -142,11 +264,9 @@ fn acquire_single_instance_lock() -> bool {
 #[cfg(not(windows))]
 fn acquire_single_instance_lock() -> bool {
     use std::net::TcpStream;
-    // Fallback: check if the backend port is already occupied.
     let addr = format!("127.0.0.1:{}", BACKEND_PORT)
         .parse()
         .expect("invalid backend address");
-    // Give the old instance a moment to shut down during dev restarts.
     for _ in 0..10 {
         match TcpStream::connect_timeout(&addr, Duration::from_millis(200)) {
             Ok(_) => std::thread::sleep(Duration::from_millis(500)),
@@ -157,7 +277,6 @@ fn acquire_single_instance_lock() -> bool {
 }
 
 fn main() {
-    // Prevent duplicate windows: use a named mutex so only one instance runs.
     if !acquire_single_instance_lock() {
         eprintln!("Another Bagger instance is already running. Exiting.");
         std::process::exit(1);
@@ -167,22 +286,20 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            // Spawn the Python backend (do NOT block — window must stay responsive).
-            let child = spawn_backend();
+            let mode = detect_backend_mode(app.handle());
+            let child = spawn_backend(app.handle(), &mode);
             app.manage(BackendProcess(Mutex::new(child)));
-            monitor_backend_health();
+            monitor_backend_health(mode);
 
-            // Build tray menu
             let show = MenuItemBuilder::with_id("show", "Show Bagger").build(app)?;
             let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
-            let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
+            let quit = MenuItemBuilder::with_id("quit", "Quit Bagger").build(app)?;
             let menu = MenuBuilder::new(app)
                 .item(&show)
                 .item(&separator)
                 .item(&quit)
                 .build()?;
 
-            // Build tray icon
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
@@ -195,7 +312,6 @@ fn main() {
                         }
                     }
                     "quit" => {
-                        // Kill the Python backend
                         if let Some(backend) = app_handle.try_state::<BackendProcess>() {
                             if let Some(mut child) = backend.0.lock().unwrap().take() {
                                 child.kill().ok();
@@ -225,11 +341,10 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // In dev mode, allow real close to avoid duplicate windows.
-                // In release mode, hide to tray.
                 if cfg!(debug_assertions) {
-                    // Let the window close normally; RunEvent::Exit will kill backend.
+                    // Dev: let window close normally
                 } else {
+                    // Release: hide to tray
                     window.hide().ok();
                     api.prevent_close();
                 }
@@ -238,7 +353,6 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error building tauri app")
         .run(|_app, event| {
-            // Clean up backend process on exit
             if let RunEvent::Exit = event {
                 if let Some(backend) = _app.try_state::<BackendProcess>() {
                     if let Some(mut child) = backend.0.lock().unwrap().take() {

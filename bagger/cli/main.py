@@ -283,9 +283,10 @@ def rebuild_index(storage):
 @cli.command()
 @click.option("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
 @click.option("--port", default=8723, help="Listen port (default: 8723)")
+@click.option("--reload", "do_reload", is_flag=True, help="Auto-reload on code changes (dev mode)")
 @click.option("--no-open", is_flag=True, help="Do not open browser automatically")
 @require_db()
-def serve(host, port, no_open):
+def serve(host, port, do_reload, no_open):
     """Start the Bagger web API and visual memory browser."""
     try:
         import uvicorn
@@ -300,6 +301,13 @@ def serve(host, port, no_open):
     click.echo(click.style(f"\n  Bagger API starting at http://{host}:{port}", bold=True))
     click.echo(f"  Swagger UI:    http://{host}:{port}/docs")
     click.echo(f"  API base:      http://{host}:{port}/api")
+    if do_reload:
+        click.echo(click.style("  Hot reload:    ON (code changes auto-restart)", fg="green"))
     click.echo(click.style("  Press Ctrl+C to stop\n", dim=True))
 
-    uvicorn.run("bagger.api.app:create_app", host=host, port=port, factory=True, log_level="info")
+    uvicorn.run(
+        "bagger.api.app:create_app",
+        host=host, port=port, factory=True,
+        log_level="info",
+        reload=do_reload,
+    )

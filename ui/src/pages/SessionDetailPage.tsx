@@ -1,15 +1,12 @@
 import { useParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Calendar,
   Folder,
-  GitBranch,
-  Cpu,
-  Hash,
   MessageSquare,
+  AlertCircle,
 } from "lucide-react";
-import { getSession, getSessionEvents } from "@/lib/api";
+import { useSession, useSessionEvents } from "@/hooks/useSessions";
 import { formatDateShort } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,24 +20,22 @@ export default function SessionDetailPage() {
     data: session,
     isLoading: sessionLoading,
     error: sessionError,
-  } = useQuery({
-    queryKey: ["session", id],
-    queryFn: () => getSession(id!),
-    enabled: !!id,
-  });
+  } = useSession(id);
 
-  const { data: eventsData, isLoading: eventsLoading } = useQuery({
-    queryKey: ["sessionEvents", id],
-    queryFn: () => getSessionEvents(id!),
-    enabled: !!id,
-  });
+  const {
+    data: eventsData,
+    isLoading: eventsLoading,
+    error: eventsError,
+  } = useSessionEvents(id);
 
   const events = eventsData?.data ?? [];
 
   if (sessionError) {
     return (
-      <div className="max-w-3xl mx-auto p-8 text-center text-muted-foreground">
-        <p className="text-sm">Session not found</p>
+      <div className="flex flex-col items-center py-16 text-muted-foreground">
+        <AlertCircle className="w-8 h-8 mb-3 text-red-400/60" />
+        <p className="text-sm">Failed to load session</p>
+        <p className="text-xs mt-1 opacity-60">{(sessionError as Error).message}</p>
         <Button variant="ghost" size="sm" asChild className="mt-4">
           <Link to="/sessions">Back to sessions</Link>
         </Button>
@@ -91,7 +86,13 @@ export default function SessionDetailPage() {
       <Separator />
 
       {/* Conversation */}
-      {eventsLoading ? (
+      {eventsError ? (
+        <div className="flex flex-col items-center py-12 text-muted-foreground">
+          <AlertCircle className="w-8 h-8 mb-3 text-red-400/60" />
+          <p className="text-sm">Failed to load events</p>
+          <p className="text-xs mt-1 opacity-60">{(eventsError as Error).message}</p>
+        </div>
+      ) : eventsLoading ? (
         <div className="space-y-6">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="flex gap-3">

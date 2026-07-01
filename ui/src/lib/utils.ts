@@ -16,8 +16,10 @@ export function formatDate(iso: string): string {
   }).format(date);
 }
 
-export function formatDateShort(iso: string): string {
+export function formatDateShort(iso: string | null | undefined): string {
+  if (!iso) return "—";
   const date = new Date(iso);
+  if (isNaN(date.getTime())) return "—";
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60_000);

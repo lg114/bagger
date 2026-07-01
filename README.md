@@ -47,7 +47,7 @@ bagger ships as a native desktop app with tray support:
 
 - **Window**: 1200×800, dev mode closes normally, release hides to tray
 - **Tray**: Left-click to show, right-click menu (Show / Quit)
-- **Backend**: Auto-spawns Python FastAPI sidecar (port 8723)
+- **Backend**: Two modes — **dev** (host Python + hot reload) or **production** (bundled sidecar exe)
 - **Single instance**: Named mutex prevents duplicate windows on restart
 - **UI**: React + Tailwind dark theme, Fira Sans + Fira Code
 
@@ -57,11 +57,28 @@ bagger ships as a native desktop app with tray support:
 # Prerequisites: Rust, Node.js 22+, Python 3.12+
 pip install -e ".[web,dev]"
 cd ui && npm install
+npm run tauri dev               # Auto-spawns backend with --reload (hot reload ON)
+```
 
-# Run (or just `npm run tauri dev`)
-bagger serve --no-open          # Terminal 1: API
+Or start backend manually if you want to see logs:
+
+```bash
+bagger serve --reload           # Terminal 1: API (hot reload ON)
 npm run tauri dev               # Terminal 2: Desktop
 ```
+
+### Production build
+
+```bash
+# 1. Bundle Python backend into standalone sidecar exe
+pip install -e ".[web,bundle]"
+python scripts/build-backend.py
+
+# 2. Build the desktop app (sidecar is automatically included)
+cd ui && npm run tauri build
+```
+
+The resulting `.msi` installer is fully self-contained — no Python installation required on the user's machine.
 
 ## Commands
 
@@ -76,6 +93,7 @@ npm run tauri dev               # Terminal 2: Desktop
 | `bagger doctor` | Run diagnostics (DB integrity, FTS status, Claude config) |
 | `bagger rebuild-index` | Rebuild the FTS5 search index from all events |
 | `bagger serve` | Start the REST API server (requires `pip install -e ".[web]"`) |
+| `bagger serve --reload` | Start with hot reload — code changes auto-restart (dev mode) |
 
 ## REST API
 
@@ -91,6 +109,8 @@ npm run tauri dev               # Terminal 2: Desktop
 | `GET /api/stats` | Aggregate stats (events, roles, tokens) |
 | `GET /api/stats/daily?days=30` | Daily event/token time series |
 | `GET /api/stats/tools?limit=15` | Most frequently used tools |
+| `POST /api/scan` | Trigger incremental scan of new sessions |
+| `POST /api/scan/full` | Trigger full re-scan of all sessions |
 
 ## Architecture
 
@@ -139,7 +159,7 @@ From each Claude Code transcript, bagger extracts:
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -v            # 28 tests
+pytest tests/ -v            # 33 tests
 ```
 
 ## License

@@ -7,10 +7,19 @@ interface SearchResultsProps {
   query: string;
 }
 
+/** Escape HTML special characters, then style FTS5 <mark> tags. */
+function renderSnippet(raw: string): string {
+  return raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/&lt;mark&gt;/g, '<mark class="bg-green-500/20 text-green-300 rounded px-0.5">')
+    .replace(/&lt;\/mark&gt;/g, "</mark>");
+}
+
 export default function SearchResults({
   results,
   isLoading,
-  query,
 }: SearchResultsProps) {
   if (isLoading) {
     return (
@@ -63,12 +72,7 @@ export default function SearchResults({
           {event.snippet ? (
             <p
               className="text-sm text-foreground/90 leading-relaxed"
-              dangerouslySetInnerHTML={{
-                __html: event.snippet.replace(
-                  /<mark>/g,
-                  '<mark class="bg-green-500/20 text-green-300 rounded px-0.5">',
-                ),
-              }}
+              dangerouslySetInnerHTML={{ __html: renderSnippet(event.snippet) }}
             />
           ) : (
             <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">

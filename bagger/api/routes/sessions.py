@@ -26,13 +26,10 @@ def get_session(session_id: str) -> dict:
     with get_storage() as storage:
         session = storage.get_session(session_id)
         if session is None:
-            # Try prefix match
-            sessions = storage.list_sessions(limit=100)
-            prefix = session_id.lower()
-            matches = [s for s in sessions if s["id"].lower().startswith(prefix)]
-            if len(matches) == 1:
-                return matches[0]
-            raise HTTPException(status_code=404, detail="Session not found")
+            # Try prefix match via SQL LIKE
+            session = storage.find_session_by_prefix(session_id)
+            if session is None:
+                raise HTTPException(status_code=404, detail="Session not found")
         return session
 
 
@@ -43,17 +40,15 @@ def get_session_events(session_id: str) -> dict:
     Returns content_blocks parsed from JSON for direct rendering.
     """
     with get_storage() as storage:
-        # Resolve session ID (support prefix matching)
+        # Resolve session ID (support prefix matching via SQL LIKE)
         session = storage.get_session(session_id)
         if session is None:
-            sessions = storage.list_sessions(limit=100)
-            prefix = session_id.lower()
-            matches = [s for s in sessions if s["id"].lower().startswith(prefix)]
-            if len(matches) == 1:
-                session_id = matches[0]["id"]
-            else:
+            session = storage.find_session_by_prefix(session_id)
+            if session is None:
                 raise HTTPException(status_code=404, detail="Session not found")
+            session_id = session["id"]
 
+        total = storage.get_event_count(session_id)
         events = storage.get_session_events(session_id)
 
     # Parse content_json into content_blocks for the frontend
@@ -66,4 +61,4 @@ def get_session_events(session_id: str) -> dict:
             evt["content_blocks"] = []
         parsed_events.append(evt)
 
-    return {"data": parsed_events, "meta": {"total": len(parsed_events)}}
+    return {"data": parsed_events, "meta": {"total": total}}

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from bagger.api.routes import health, search, sessions, stats
+from bagger.api.routes import health, search, sessions, stats, sync
 
 
 def create_app() -> FastAPI:
@@ -25,5 +25,6 @@ def create_app() -> FastAPI:
     app.include_router(sessions.router, prefix="/api", tags=["sessions"])
     app.include_router(search.router, prefix="/api", tags=["search"])
     app.include_router(stats.router, prefix="/api", tags=["stats"])
+    app.include_router(sync.router, prefix="/api", tags=["sync"])
 
     return app

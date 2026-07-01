@@ -142,9 +142,17 @@ class SqliteStorage:
         self._conn: Optional[sqlite3.Connection] = None
 
     def connect(self) -> None:
-        self._conn = sqlite3.connect(str(self.db_path))
+        # Ensure parent directory exists (needed for WAL file creation)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(self.db_path.resolve()))
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            # WAL can fail on some Windows configurations (restricted fs,
+            # network drives, etc.). Fall back to DELETE (default) mode —
+            # slightly less concurrent but fully functional.
+            self._conn.execute("PRAGMA journal_mode=DELETE")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
         self._conn.executescript(FTS_SCHEMA)
@@ -202,6 +210,16 @@ class SqliteStorage:
             (session_id,),
         ).fetchone()
         return _row_to_dict(row) if row else None
+
+    def find_session_by_prefix(self, prefix: str) -> Optional[dict]:
+        """Find a session by ID prefix match. Returns None if ambiguous (0 or >1)."""
+        rows = self.conn.execute(
+            f"SELECT {SESSION_COLS} FROM sessions WHERE id LIKE ?",
+            (f"{prefix}%",),
+        ).fetchall()
+        if len(rows) == 1:
+            return _row_to_dict(rows[0])
+        return None
 
     def list_sessions(self, limit: int = 50) -> list[dict]:
         rows = self.conn.execute(

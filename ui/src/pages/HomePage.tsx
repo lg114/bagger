@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Search,
   MessageSquare,
@@ -7,18 +8,38 @@ import {
   Zap,
   ArrowRight,
   Hash,
+  AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 import { useStats } from "@/hooks/useStats";
 import { useSessions } from "@/hooks/useSessions";
+import { triggerScan } from "@/lib/api";
 import { cn, formatDateShort, formatTokens } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function HomePage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
-  const { data: stats, isLoading: statsLoading } = useStats();
-  const { data: recentSessions, isLoading: sessionsLoading } = useSessions(1);
+  const [scanning, setScanning] = useState(false);
+  const { data: stats, isLoading: statsLoading, error: statsError } = useStats();
+  const { data: recentSessions, isLoading: sessionsLoading, error: sessionsError } = useSessions(1);
+
+  const handleScan = async () => {
+    setScanning(true);
+    try {
+      await triggerScan();
+      // Refresh all data after scan
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+      queryClient.invalidateQueries({ queryKey: ["health"] });
+    } catch {
+      // Error shown via React Query state
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,7 +95,12 @@ export default function HomePage() {
                 <card.icon className={cn("w-4 h-4", card.color)} />
               </div>
             </div>
-            {statsLoading ? (
+            {statsError ? (
+              <div className="flex flex-col items-center">
+                <AlertCircle className="w-5 h-5 mb-1 text-red-400/60" />
+                <span className="text-xs text-muted-foreground">Error</span>
+              </div>
+            ) : statsLoading ? (
               <Skeleton className="h-8 w-16" />
             ) : (
               <div className="text-2xl font-bold font-mono tabular-nums">
@@ -110,14 +136,26 @@ export default function HomePage() {
       <section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold">Recent Sessions</h2>
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/sessions" className="gap-1">
-              View all <ArrowRight className="w-3 h-3" />
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={handleScan} disabled={scanning}>
+              <RefreshCw className={cn("w-3 h-3", scanning && "animate-spin")} />
+              {scanning ? "Scanning..." : "Scan"}
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/sessions" className="gap-1">
+                View all <ArrowRight className="w-3 h-3" />
+              </Link>
+            </Button>
+          </div>
         </div>
 
-        {sessionsLoading ? (
+        {sessionsError ? (
+          <div className="flex flex-col items-center py-12 text-muted-foreground">
+            <AlertCircle className="w-8 h-8 mb-3 text-red-400/60" />
+            <p className="text-sm">Failed to load sessions</p>
+            <p className="text-xs mt-1 opacity-60">{(sessionsError as Error).message}</p>
+          </div>
+        ) : sessionsLoading ? (
           <div className="space-y-2">
             {Array.from({ length: 5 }).map((_, i) => (
               <Skeleton key={i} className="h-[72px] w-full rounded-lg" />
@@ -127,9 +165,10 @@ export default function HomePage() {
           <div className="text-center py-12 text-muted-foreground border border-dashed border-border rounded-lg">
             <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-30" />
             <p className="text-sm">No sessions yet</p>
-            <p className="text-xs mt-1 opacity-60">
-              Run <code className="font-mono text-green-400">bagger scan</code> to import sessions
-            </p>
+            <Button variant="outline" size="sm" onClick={handleScan} disabled={scanning} className="mt-3">
+              <RefreshCw className={cn("w-3 h-3 mr-1", scanning && "animate-spin")} />
+              {scanning ? "Scanning..." : "Scan for sessions"}
+            </Button>
           </div>
         ) : (
           <div className="space-y-2">
