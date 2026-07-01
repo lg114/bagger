@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Wrench, Brain, FileOutput } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import { ChevronDown, ChevronRight, Wrench, Brain, FileOutput, Copy, Check } from "lucide-react";
 import type { ContentBlock as ContentBlockType } from "@/lib/api";
 
 interface Props {
@@ -21,40 +24,72 @@ export default function ContentBlockRenderer({ block }: Props) {
   }
 }
 
+// ── Markdown-powered text block ──
+
+const TEXT_TRUNCATE_THRESHOLD = 150_000; // 150KB — render is slow beyond this
+
 function TextBlock({ text }: { text: string }) {
-  // Simple line-break rendering — react-markdown will be added later for code blocks
+  const [expanded, setExpanded] = useState(false);
+  const isLarge = text.length > TEXT_TRUNCATE_THRESHOLD;
+
+  if (isLarge && !expanded) {
+    const preview = text.slice(0, 3000);
+    const hiddenKB = Math.round((text.length - preview.length) / 1024);
+    return (
+      <div>
+        <div className="markdown-content text-sm">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+            {preview}
+          </ReactMarkdown>
+        </div>
+        <button
+          onClick={() => setExpanded(true)}
+          className="mt-2 text-xs font-mono text-primary hover:text-primary/70 transition-colors duration-200"
+        >
+          Show full message ({hiddenKB} KB hidden) &rarr;
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-      {text}
+    <div className="markdown-content text-sm">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
+
+// ── Thinking block (collapsible) ──
 
 function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="my-1">
+    <div className="my-1.5">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors duration-300 ease-apple cursor-pointer"
       >
         {open ? (
           <ChevronDown className="w-3.5 h-3.5" />
         ) : (
           <ChevronRight className="w-3.5 h-3.5" />
         )}
-        <Brain className="w-3.5 h-3.5" />
-        <span>Thinking ({text.length} chars)</span>
+        <Brain className="w-3.5 h-3.5 text-primary/50" />
+        <span className="font-mono">Thinking ({text.length} chars)</span>
       </button>
       {open && (
-        <div className="mt-2 p-3 rounded-md bg-secondary/50 border border-border text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap break-words italic">
+        <div className="mt-2 p-4 rounded-element bg-secondary/40 border border-primary/10 text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap break-words italic">
           {text}
         </div>
       )}
     </div>
   );
 }
+
+// ── Tool use block (collapsible, JSON input) ──
 
 function ToolUseBlock({
   name,
@@ -66,12 +101,12 @@ function ToolUseBlock({
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="my-1">
+    <div className="my-1.5">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-xs font-medium text-green-400 hover:text-green-300 transition-colors cursor-pointer"
+        className="flex items-center gap-2 text-xs font-medium text-success hover:text-primary transition-colors duration-300 ease-apple cursor-pointer"
       >
-        <Wrench className="w-3.5 h-3.5" />
+        <Wrench className="w-3.5 h-3.5 text-success/70" />
         <span className="font-mono">Tool: {name}</span>
         {open ? (
           <ChevronDown className="w-3.5 h-3.5 ml-auto" />
@@ -80,34 +115,62 @@ function ToolUseBlock({
         )}
       </button>
       {open && input && (
-        <pre className="mt-2 p-3 rounded-md bg-secondary/50 border border-border text-xs font-mono text-muted-foreground overflow-x-auto">
-          {JSON.stringify(input, null, 2)}
-        </pre>
+        <div className="mt-2 p-4 rounded-element bg-secondary/40 border border-primary/10 text-xs font-mono text-muted-foreground overflow-x-auto">
+          <JSONBlock value={input} />
+        </div>
       )}
     </div>
   );
 }
+
+// ── Tool result block (collapsible) ──
 
 function ToolResultBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   const preview = text.slice(0, 200);
 
   return (
-    <div className="my-1 pl-4 border-l-2 border-border">
+    <div className="my-1.5 pl-4 border-l-2 border-primary/15">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-full text-left"
+        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors duration-300 ease-apple cursor-pointer w-full text-left"
       >
-        <FileOutput className="w-3.5 h-3.5" />
-        <span className="truncate">
-          Result{!open && text.length > 200 ? `: ${preview}…` : ""}
+        <FileOutput className="w-3.5 h-3.5 text-primary/40" />
+        <span className="truncate font-mono">
+          Result{!open && text.length > 200 ? `: ${preview}...` : ""}
         </span>
       </button>
       {open && (
-        <pre className="mt-2 p-3 rounded-md bg-secondary/30 text-xs font-mono text-muted-foreground leading-relaxed whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
+        <div className="mt-2 p-4 rounded-element bg-secondary/30 text-xs font-mono text-muted-foreground leading-relaxed whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
           {text}
-        </pre>
+        </div>
       )}
+    </div>
+  );
+}
+
+// ── Copyable JSON display ──
+
+function JSONBlock({ value }: { value: Record<string, unknown> }) {
+  const [copied, setCopied] = useState(false);
+  const json = JSON.stringify(value, null, 2);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(json);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="relative group">
+      <button
+        onClick={handleCopy}
+        className="absolute top-1 right-1 p-1.5 rounded-element bg-primary/10 hover:bg-primary/15 text-primary opacity-0 group-hover:opacity-100 transition-all duration-300 ease-apple"
+        title="Copy JSON"
+      >
+        {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+      <pre className="overflow-x-auto">{json}</pre>
     </div>
   );
 }

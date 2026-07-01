@@ -1,0 +1,2 @@
+[console_scripts]
+bagger = app.cli.main:cli

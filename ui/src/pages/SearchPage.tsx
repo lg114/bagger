@@ -24,9 +24,9 @@ export default function SearchPage() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-8 space-y-6">
+    <div className="max-w-5xl mx-auto space-y-8 animate-fade-in-up">
       <div>
-        <h1 className="text-lg font-semibold mb-1">Search</h1>
+        <h1 className="text-2xl font-semibold tracking-tight mb-2">Search</h1>
         <p className="text-sm text-muted-foreground">
           Full-text search across all conversations
         </p>
@@ -41,19 +41,19 @@ export default function SearchPage() {
       {query ? (
         <>
           {error ? (
-            <div className="flex flex-col items-center py-16 text-muted-foreground">
-              <AlertCircle className="w-8 h-8 mb-3 text-red-400/60" />
+            <div className="flex flex-col items-center py-20 text-muted-foreground">
+              <AlertCircle className="w-10 h-10 mb-4 text-warning/60" />
               <p className="text-sm">Failed to search</p>
-              <p className="text-xs mt-1 opacity-60">{(error as Error).message}</p>
+              <p className="text-xs mt-2 opacity-50 font-mono">{(error as Error).message}</p>
             </div>
           ) : (
             <>
               {!isLoading && meta && (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-muted-foreground font-mono">
                   {meta.total} result{meta.total !== 1 ? "s" : ""} for{" "}
-                  <span className="text-foreground font-medium">"{query}"</span>
+                  <span className="text-primary font-medium">"{query}"</span>
                   {meta.pages > 1 && (
-                    <span className="ml-1">(page {meta.page} of {meta.pages})</span>
+                    <span className="ml-1 opacity-60">(page {meta.page} of {meta.pages})</span>
                   )}
                 </p>
               )}
@@ -61,26 +61,27 @@ export default function SearchPage() {
               <SearchResults results={results} isLoading={isLoading} query={query} />
 
               {!isLoading && results.length === 0 && (
-                <div className="text-center py-16 text-muted-foreground">
-                  <SearchIcon className="w-10 h-10 mx-auto mb-3 opacity-20" />
-                  <p className="text-sm">No results found</p>
-                  <p className="text-xs mt-1 opacity-60">
+                <div className="text-center py-20 text-muted-foreground glass-card-static p-16">
+                  <SearchIcon className="w-12 h-12 mx-auto mb-4 text-primary/15" />
+                  <p className="text-sm mb-2">No results found</p>
+                  <p className="text-xs opacity-50">
                     Try different keywords or broader terms
                   </p>
                 </div>
               )}
 
               {meta && meta.pages > 1 && (
-                <div className="flex items-center justify-center gap-2 pt-4">
+                <div className="flex items-center justify-center gap-3 pt-6">
                   <Button
                     variant="outline"
                     size="sm"
                     disabled={page <= 1}
                     onClick={() => handlePage(page - 1)}
+                    className="border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-300 ease-apple"
                   >
                     Previous
                   </Button>
-                  <span className="text-sm text-muted-foreground px-3">
+                  <span className="text-sm text-muted-foreground px-4 font-mono tabular-nums">
                     {page} / {meta.pages}
                   </span>
                   <Button
@@ -88,6 +89,7 @@ export default function SearchPage() {
                     size="sm"
                     disabled={page >= meta.pages}
                     onClick={() => handlePage(page + 1)}
+                    className="border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-300 ease-apple"
                   >
                     Next
                   </Button>
@@ -97,11 +99,11 @@ export default function SearchPage() {
           )}
         </>
       ) : (
-        <div className="text-center py-16 text-muted-foreground">
-          <SearchIcon className="w-10 h-10 mx-auto mb-3 opacity-20" />
-          <p className="text-sm">Search your conversation history</p>
-          <p className="text-xs mt-1 opacity-60">
-            English queries use FTS5 with BM25 ranking. CJK falls back to LIKE.
+        <div className="text-center py-20 text-muted-foreground glass-card-static p-16">
+          <SearchIcon className="w-12 h-12 mx-auto mb-4 text-primary/15" />
+          <p className="text-sm mb-2">Search your conversation history</p>
+          <p className="text-xs opacity-50 font-mono">
+            FTS5 with BM25 ranking. CJK falls back to LIKE.
           </p>
         </div>
       )}

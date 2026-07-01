@@ -33,29 +33,34 @@ export default function SearchBar({
   }, []);
 
   return (
-    <form onSubmit={handleSubmit} className="relative">
-      <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+    <form onSubmit={handleSubmit} className="relative search-glow">
+      <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-primary/40" />
       <input
         type="text"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder={placeholder}
         autoFocus={autoFocus}
-        className="w-full pl-12 pr-24 py-3.5 bg-card border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-lg"
+        className="w-full pl-14 pr-24 py-4 glass-card-static text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/35 text-lg transition-all duration-300 ease-apple"
       />
-      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+      <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
         {value && (
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="h-8 w-8"
+            className="h-8 w-8 text-muted-foreground hover:text-primary"
             onClick={handleClear}
           >
             <X className="w-4 h-4" />
           </Button>
         )}
-        <Button type="submit" size="sm" disabled={!value.trim()}>
+        <Button
+          type="submit"
+          size="sm"
+          disabled={!value.trim()}
+          className="border border-primary/15 bg-transparent text-primary hover:bg-primary hover:text-primary-foreground transition-all duration-300 ease-apple"
+        >
           Search
         </Button>
       </div>

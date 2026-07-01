@@ -1,23 +1,26 @@
 import { useQuery } from "@tanstack/react-query";
-import { Zap, Hash, MessageSquare, Users, Wrench, TrendingUp, AlertCircle } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+} from "recharts";
+import { Zap, Hash, MessageSquare, Users, Wrench, TrendingUp, AlertCircle, Bot } from "lucide-react";
 import { getStats, getDailyStats, getToolUsageStats } from "@/lib/api";
 import { cn, formatTokens } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function ErrorBlock({ message }: { message: string }) {
   return (
-    <div className="flex flex-col items-center py-8 text-muted-foreground">
-      <AlertCircle className="w-6 h-6 mb-2 text-red-400/60" />
-      <p className="text-sm">{message}</p>
+    <div className="flex flex-col items-center py-12 text-muted-foreground">
+      <AlertCircle className="w-8 h-8 mb-3 text-warning/60" />
+      <p className="text-sm font-mono">{message}</p>
     </div>
   );
 }
 
 export default function StatsPage() {
   return (
-    <div className="max-w-4xl mx-auto p-8 space-y-8">
+    <div className="max-w-5xl mx-auto space-y-10 animate-fade-in-up">
       <div>
-        <h1 className="text-lg font-semibold mb-1">Statistics</h1>
+        <h1 className="text-2xl font-semibold tracking-tight mb-2">Statistics</h1>
         <p className="text-sm text-muted-foreground">Usage analytics and trends</p>
       </div>
 
@@ -28,6 +31,8 @@ export default function StatsPage() {
   );
 }
 
+// ── Stats card grid ──
+
 function StatsGrid() {
   const { data: stats, isLoading, error } = useQuery({
     queryKey: ["stats"],
@@ -35,33 +40,33 @@ function StatsGrid() {
   });
 
   const cards = [
-    { label: "Sessions", value: stats?.total_sessions, icon: MessageSquare, color: "text-green-400", bg: "bg-green-500/10" },
-    { label: "Events", value: stats?.total_events, icon: Zap, color: "text-sky-400", bg: "bg-sky-500/10" },
-    { label: "User Messages", value: stats?.user_events, icon: Users, color: "text-violet-400", bg: "bg-violet-500/10" },
-    { label: "Assistant", value: stats?.assistant_events, icon: MessageSquare, color: "text-amber-400", bg: "bg-amber-500/10" },
-    { label: "Tool Uses", value: stats?.tool_uses, icon: Wrench, color: "text-rose-400", bg: "bg-rose-500/10" },
-    { label: "Tokens", value: stats ? formatTokens(stats.total_tokens) : undefined, icon: Hash, color: "text-teal-400", bg: "bg-teal-500/10" },
+    { label: "Sessions", value: stats?.total_sessions, icon: MessageSquare, color: "text-success", bg: "bg-success/8" },
+    { label: "Events", value: stats?.total_events, icon: Zap, color: "text-primary", bg: "bg-primary/10" },
+    { label: "User Messages", value: stats?.user_events, icon: Users, color: "text-info", bg: "bg-info/10" },
+    { label: "Assistant", value: stats?.assistant_events, icon: Bot, color: "text-accent", bg: "bg-accent/10" },
+    { label: "Tool Uses", value: stats?.tool_uses, icon: Wrench, color: "text-warning", bg: "bg-warning/8" },
+    { label: "Tokens", value: stats ? formatTokens(stats.total_tokens) : undefined, icon: Hash, color: "text-primary/70", bg: "bg-primary/15" },
   ];
 
   return (
-    <div className="grid grid-cols-3 gap-3">
+    <div className="grid grid-cols-3 gap-5">
       {error ? (
         <div className="col-span-3">
           <ErrorBlock message="Failed to load statistics" />
         </div>
       ) : cards.map((card) => (
-        <div key={card.label} className="bg-card border border-border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <div className={cn("w-7 h-7 rounded-md flex items-center justify-center", card.bg)}>
-              <card.icon className={cn("w-3.5 h-3.5", card.color)} />
+        <div key={card.label} className="glass-card p-5">
+          <div className="flex items-center gap-2.5 mb-3">
+            <div className={cn("w-8 h-8 rounded-element flex items-center justify-center border", card.bg, "border-primary/15")}>
+              <card.icon className={cn("w-[16px] h-[16px]", card.color)} />
             </div>
-            <span className="text-xs text-muted-foreground">{card.label}</span>
+            <span className="text-xs text-muted-foreground uppercase tracking-wider font-mono">{card.label}</span>
           </div>
           {isLoading ? (
-            <Skeleton className="h-8 w-20" />
+            <Skeleton className="h-10 w-24 bg-secondary/50" />
           ) : (
-            <div className="text-2xl font-bold font-mono tabular-nums">
-              {card.value ?? "—"}
+            <div className="text-[28px] font-bold font-mono tabular-nums tracking-tight animate-count-up">
+              {card.value ?? "\u2014"}
             </div>
           )}
         </div>
@@ -70,66 +75,89 @@ function StatsGrid() {
   );
 }
 
+// ── Daily activity chart ──
+
+interface DayRow {
+  date: string;
+  shortDate: string;
+  events: number;
+  tokens: number;
+}
+
 function DailyChartSection() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["dailyStats"],
     queryFn: () => getDailyStats(30),
   });
 
-  const days = data?.data ?? [];
-  const maxCount = Math.max(...days.map((d) => d.count), 1);
+  const rawDays = data?.data ?? [];
+
+  const days: DayRow[] = rawDays.map((d) => ({
+    date: d.date,
+    shortDate: d.date.slice(5),
+    events: d.count,
+    tokens: d.tokens,
+  }));
 
   return (
-    <section className="space-y-4">
-      <h2 className="text-base font-semibold flex items-center gap-2">
-        <TrendingUp className="w-4 h-4 text-green-400" />
+    <section className="space-y-5">
+      <h2 className="text-xl font-semibold tracking-tight flex items-center gap-2.5">
+        <TrendingUp className="w-5 h-5 text-primary" />
         Daily Activity
       </h2>
       {error ? (
         <ErrorBlock message="Failed to load daily stats" />
       ) : isLoading ? (
-        <Skeleton className="h-48 w-full rounded-lg" />
+        <Skeleton className="h-56 w-full rounded-card bg-secondary/50" />
       ) : days.length === 0 ? (
-        <div className="text-center py-8 text-sm text-muted-foreground border border-dashed border-border rounded-lg">
+        <div className="text-center py-12 text-sm text-muted-foreground glass-card-static p-8">
           No data yet
         </div>
       ) : (
-        <div className="bg-card border border-border rounded-lg p-6">
-          {/* Bar chart: events per day */}
-          <div className="flex items-end gap-px h-32 mb-6">
-            {days.map((d) => (
-              <div
-                key={d.date}
-                className="flex-1 group relative"
-                title={`${d.date}: ${d.count} events, ${formatTokens(d.tokens)}`}
-              >
-                <div
-                  className="w-full bg-green-500/40 hover:bg-green-500/60 transition-colors rounded-t-sm"
-                  style={{ height: `${Math.max((d.count / maxCount) * 100, 2)}%` }}
-                />
-                <div className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[8px] text-muted-foreground opacity-0 group-hover:opacity-100 whitespace-nowrap">
-                  {d.count}
-                </div>
-              </div>
-            ))}
-          </div>
-          {/* X-axis labels (every 5th day) */}
-          <div className="flex items-end gap-px">
-            {days.map((d, i) => (
-              <div key={d.date} className="flex-1">
-                {i % 5 === 0 && (
-                  <div className="text-[9px] text-muted-foreground font-mono text-center">
-                    {d.date.slice(5)}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+        <div className="glass-card-static p-6">
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={days} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(79, 140, 255, 0.08)" />
+              <XAxis
+                dataKey="shortDate"
+                tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                interval={Math.floor(days.length / 6)}
+                axisLine={{ stroke: "rgba(79, 140, 255, 0.12)" }}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                axisLine={{ stroke: "rgba(79, 140, 255, 0.12)" }}
+                tickLine={false}
+                width={40}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "hsl(var(--card))",
+                  border: "1px solid rgba(79, 140, 255, 0.15)",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  color: "hsl(var(--foreground))",
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+                  backdropFilter: "blur(16px)",
+                }}
+                labelStyle={{ color: "var(--brand-400)", fontFamily: "JetBrains Mono, monospace" }}
+                formatter={(value, name) => {
+                  const num = Number(value ?? 0);
+                  if (name === "tokens") return [formatTokens(num), "Tokens"];
+                  return [num, "Events"];
+                }}
+              />
+              <Bar dataKey="events" fill="rgba(79, 140, 255, 0.35)" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       )}
     </section>
   );
 }
+
+// ── Tool usage ranked list ──
 
 function ToolUsageSection() {
   const { data, isLoading, error } = useQuery({
@@ -138,34 +166,42 @@ function ToolUsageSection() {
   });
 
   const tools = data?.data ?? [];
+  const maxCount = Math.max(...tools.map((t) => t.count), 1);
 
   return (
-    <section className="space-y-4">
-      <h2 className="text-base font-semibold flex items-center gap-2">
-        <Wrench className="w-4 h-4 text-amber-400" />
+    <section className="space-y-5">
+      <h2 className="text-xl font-semibold tracking-tight flex items-center gap-2.5">
+        <Wrench className="w-5 h-5 text-accent" />
         Top Tools
       </h2>
       {error ? (
         <ErrorBlock message="Failed to load tool usage" />
       ) : isLoading ? (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-8 w-full rounded" />
+            <Skeleton key={i} className="h-10 w-full rounded-element bg-secondary/50" />
           ))}
         </div>
       ) : tools.length === 0 ? (
-        <div className="text-center py-8 text-sm text-muted-foreground border border-dashed border-border rounded-lg">
+        <div className="text-center py-12 text-sm text-muted-foreground glass-card-static p-8">
           No tool usage recorded yet
         </div>
       ) : (
-        <div className="bg-card border border-border rounded-lg divide-y divide-border">
+        <div className="glass-card-static divide-y divide-primary/10">
           {tools.map((tool, i) => (
-            <div key={tool.tool_name} className="flex items-center gap-3 px-4 py-2.5">
-              <span className="text-xs text-muted-foreground font-mono w-5">{i + 1}</span>
+            <div key={tool.tool_name} className="flex items-center gap-4 px-5 py-3 hover:bg-primary/5 transition-colors duration-300 ease-apple">
+              <span className="text-xs text-muted-foreground font-mono w-5 tabular-nums">{i + 1}</span>
               <span className="flex-1 text-sm font-mono text-foreground/80 truncate">
                 {tool.tool_name}
               </span>
-              <span className="text-xs text-muted-foreground tabular-nums">{tool.count}</span>
+              {/* Progress bar */}
+              <div className="w-28 h-1.5 bg-secondary rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary/40 rounded-full transition-all duration-500 ease-apple"
+                  style={{ width: `${(tool.count / maxCount) * 100}%` }}
+                />
+              </div>
+              <span className="text-xs text-muted-foreground tabular-nums font-mono w-12 text-right">{tool.count}</span>
             </div>
           ))}
         </div>
