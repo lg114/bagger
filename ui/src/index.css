@@ -143,12 +143,25 @@ body {
   background: var(--bg-surface);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-card);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition:
+    border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .glass-card:hover {
   border-color: var(--brand-500);
   box-shadow: var(--card-hover-shadow);
-  transform: translateY(-1px);
+  transform: translateY(-3px);
+}
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .glass-card { transition: none; }
+  .glass-card:hover { transform: none; }
+}
+/* Touch devices: use active instead of hover */
+@media (hover: none) {
+  .glass-card:hover { transform: none; border-color: var(--border-medium); box-shadow: none; }
+  .glass-card:active { border-color: var(--brand-500); box-shadow: var(--card-hover-shadow); }
 }
 
 .glass-card-static {
@@ -160,11 +173,11 @@ body {
 /* ── Animations ── */
 @keyframes pulse-glow {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
-  50% { box-shadow: 0 0 16px 2px rgba(79, 140, 255, 0.15); }
+  50% { box-shadow: 0 0 20px 3px rgba(59, 130, 246, 0.18); }
 }
 @keyframes search-glow {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
-  50% { box-shadow: 0 0 24px -4px rgba(79, 140, 255, 0.12); }
+  50% { box-shadow: 0 0 32px -4px rgba(59, 130, 246, 0.14); }
 }
 .search-glow:focus-within { animation: search-glow 2s ease-in-out infinite; }
 

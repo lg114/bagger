@@ -12,7 +12,7 @@ export default function SettingsPage() {
       </div>
 
       {/* About / Version */}
-      <section className="glass-card-static p-6 space-y-4">
+      <section className="glass-card-static p-8 space-y-4">
         <h2 className="text-sm font-semibold tracking-tight flex items-center gap-2">
           <Settings className="w-4 h-4 text-primary/60" />
           About
@@ -58,7 +58,7 @@ export default function SettingsPage() {
       </section>
 
       {/* Coming soon sections */}
-      <section className="glass-card-static p-6 space-y-3">
+      <section className="glass-card-static p-8 space-y-3">
         <h2 className="text-sm font-semibold tracking-tight flex items-center gap-2">
           <Settings className="w-4 h-4 text-primary/60" />
           General
@@ -68,7 +68,7 @@ export default function SettingsPage() {
         </p>
       </section>
 
-      <section className="glass-card-static p-6 space-y-3">
+      <section className="glass-card-static p-8 space-y-3">
         <h2 className="text-sm font-semibold tracking-tight flex items-center gap-2">
           <Settings className="w-4 h-4 text-primary/60" />
           Database

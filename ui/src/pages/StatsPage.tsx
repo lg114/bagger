@@ -49,13 +49,13 @@ function StatsGrid() {
   ];
 
   return (
-    <div className="grid grid-cols-3 gap-5">
+    <div className="grid grid-cols-3 gap-6">
       {error ? (
         <div className="col-span-3">
           <ErrorBlock message="Failed to load statistics" />
         </div>
       ) : cards.map((card) => (
-        <div key={card.label} className="glass-card p-5">
+        <div key={card.label} className="glass-card p-6">
           <div className="flex items-center gap-2.5 mb-3">
             <div className={cn("w-8 h-8 rounded-element flex items-center justify-center border", card.bg, card.border)}>
               <card.icon className={cn("w-[16px] h-[16px]", card.color)} />
@@ -114,36 +114,36 @@ function DailyChartSection() {
           No data yet
         </div>
       ) : (
-        <div className="glass-card-static p-6">
+        <div className="glass-card-static p-8">
           <ResponsiveContainer width="100%" height={240}>
             <BarChart
               data={days}
               margin={{ top: 5, right: 10, left: -20, bottom: 5 }}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f1f22" />
               <XAxis
                 dataKey="shortDate"
-                tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                tick={{ fontSize: 11, fill: "#9ca3af" }}
                 interval={Math.floor(days.length / 6)}
-                axisLine={{ stroke: "var(--border-medium)" }}
+                axisLine={{ stroke: "#2a2a2f" }}
                 tickLine={false}
               />
               <YAxis
-                tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-                axisLine={{ stroke: "var(--border-medium)" }}
+                tick={{ fontSize: 11, fill: "#9ca3af" }}
+                axisLine={{ stroke: "#2a2a2f" }}
                 tickLine={false}
                 width={40}
               />
               <Tooltip
                 contentStyle={{
-                  background: "hsl(var(--card))",
-                  border: "1px solid var(--border-medium)",
+                  background: "#0a0a0a",
+                  border: "1px solid #2a2a2f",
                   borderRadius: 8,
                   fontSize: 12,
-                  color: "hsl(var(--foreground))",
+                  color: "#f8f9fa",
                   boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
                 }}
-                labelStyle={{ color: "var(--brand-400)", fontFamily: "JetBrains Mono, monospace" }}
+                labelStyle={{ color: "#60a5fa", fontFamily: "JetBrains Mono, monospace" }}
                 formatter={(value, name) => {
                   const num = Number(value ?? 0);
                   if (name === "tokens") return [formatTokens(num), "Tokens"];
@@ -152,13 +152,13 @@ function DailyChartSection() {
               />
               <Bar
                 dataKey="events"
-                fill="var(--brand-500)"
+                fill="#3b82f6"
                 fillOpacity={0.35}
                 radius={[4, 4, 0, 0]}
                 activeBar={{
-                  fill: "var(--brand-400)",
+                  fill: "#60a5fa",
                   fillOpacity: 0.9,
-                  stroke: "var(--brand-400)",
+                  stroke: "#60a5fa",
                   strokeWidth: 1,
                 }}
               />
@@ -202,7 +202,7 @@ function ToolUsageSection() {
       ) : (
         <div className="glass-card-static divide-y divide-primary/10">
           {tools.map((tool, i) => (
-            <div key={tool.tool_name} className="flex items-center gap-4 px-5 py-3 hover:bg-primary/5 transition-colors duration-300 ease-apple">
+            <div key={tool.tool_name} className="flex items-center gap-4 px-6 py-4 hover:bg-primary/5 transition-colors duration-200 ease-out">
               <span className="text-xs text-muted-foreground font-mono w-5 tabular-nums">{i + 1}</span>
               <span className="flex-1 text-sm font-mono text-foreground/80 truncate">
                 {tool.tool_name}

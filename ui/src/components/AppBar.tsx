@@ -23,7 +23,7 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
   );
 
   return (
-    <header className="h-12 shrink-0 flex items-center gap-3 px-4 border-b border-border bg-surface">
+    <header className="h-12 shrink-0 flex items-center gap-4 px-6 border-b border-border bg-surface">
       {/* Sidebar toggle + Logo */}
       <button
         onClick={onToggleSidebar}

@@ -11,7 +11,7 @@ export default function SessionCard({ session }: SessionCardProps) {
   return (
     <Link
       to={`/sessions/${session.id}`}
-      className="glass-card block p-5 cursor-pointer group"
+      className="glass-card block p-6 cursor-pointer group"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">

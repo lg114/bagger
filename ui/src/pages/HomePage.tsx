@@ -1,48 +1,19 @@
-import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
-import {
-  FolderOpen,
-  MessageCircle,
-  Activity,
-  Coins,
-  AlertCircle,
-  RefreshCw,
-  Clock,
-  ArrowRight,
-  Folder,
-} from "lucide-react";
+import { FolderOpen, MessageCircle, Activity, Coins, AlertCircle, Clock, ArrowRight, Folder } from "lucide-react";
 import { useStats } from "@/hooks/useStats";
 import { useSessions } from "@/hooks/useSessions";
-import { triggerScan } from "@/lib/api";
 import { cn, formatDateShort, formatTokens } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function HomePage() {
-  const queryClient = useQueryClient();
-  const [scanning, setScanning] = useState(false);
   const { data: stats, isLoading: statsLoading, error: statsError } = useStats();
   const { data: recentSessions, isLoading: sessionsLoading, error: sessionsError } = useSessions(1);
-
-  const handleScan = async () => {
-    setScanning(true);
-    try {
-      await triggerScan();
-      queryClient.invalidateQueries({ queryKey: ["sessions"] });
-      queryClient.invalidateQueries({ queryKey: ["stats"] });
-      queryClient.invalidateQueries({ queryKey: ["health"] });
-    } catch {
-      // Error shown via React Query state
-    } finally {
-      setScanning(false);
-    }
-  };
 
   const recent = recentSessions?.data?.slice(0, 8) ?? [];
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8 animate-fade-in-up">
+    <div className="max-w-6xl mx-auto space-y-10 animate-fade-in-up">
       {/* Hero Stats */}
       <HeroStats stats={stats} isLoading={statsLoading} error={statsError} />
 
@@ -71,14 +42,14 @@ export default function HomePage() {
               ))}
             </div>
           ) : recent.length === 0 ? (
-            <EmptyState onScan={handleScan} scanning={scanning} />
+            <EmptyState />
           ) : (
             <div className="space-y-2">
               {recent.map((session, i) => (
                 <Link
                   key={session.id}
                   to={`/sessions/${session.id}`}
-                  className="glass-card block p-4 cursor-pointer animate-fade-in-up"
+                  className="glass-card block px-5 py-6 cursor-pointer animate-fade-in-up"
                   style={{ animationDelay: `${i * 40}ms` }}
                 >
                   <div className="flex items-center justify-between gap-4">
@@ -104,27 +75,8 @@ export default function HomePage() {
           )}
         </section>
 
-        {/* Right column: Sync + project distribution */}
+        {/* Right column: activity */}
         <div className="space-y-4">
-          {/* Sync status card */}
-          <div className="glass-card-static p-4 space-y-3">
-            <h3 className="text-sm font-semibold tracking-tight">Sync</h3>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleScan}
-              disabled={scanning}
-              className="w-full justify-center border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-200"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", scanning && "animate-spin")} />
-              {scanning ? "Scanning..." : "Scan Now"}
-            </Button>
-            <p className="text-[11px] text-muted-foreground font-mono">
-              Scans ~/.claude/projects for JSONL files
-            </p>
-          </div>
-
-          {/* Project distribution (simple pie) */}
           {stats && stats.total_sessions > 0 && (
             <div className="glass-card-static p-4 space-y-3">
               <h3 className="text-sm font-semibold tracking-tight">Activity</h3>
@@ -152,13 +104,13 @@ function HeroStats({ stats, isLoading, error }: { stats: any; isLoading: boolean
   ];
 
   return (
-    <div className="grid grid-cols-4 gap-5">
+    <div className="grid grid-cols-4 gap-6">
       {error ? (
         <div className="col-span-4">
           <ErrorBlock message="Failed to load statistics" />
         </div>
       ) : cards.map((card) => (
-        <div key={card.label} className="glass-card p-5">
+        <div key={card.label} className="glass-card p-6">
           <div className="flex items-center gap-2.5 mb-4">
             <div className={cn("w-9 h-9 rounded-element flex items-center justify-center border", card.bg, card.border)}>
               <card.icon className={cn("w-[18px] h-[18px]", card.color)} />
@@ -207,20 +159,15 @@ function ErrorBlock({ message, detail }: { message: string; detail?: string }) {
   );
 }
 
-function EmptyState({ onScan, scanning }: { onScan: () => void; scanning: boolean }) {
+function EmptyState() {
   return (
     <div className="text-center py-12 text-muted-foreground glass-card-static p-10">
       <FolderOpen className="w-10 h-10 mx-auto mb-4 text-primary/15" />
       <p className="text-sm mb-1">No sessions yet</p>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={onScan}
-        disabled={scanning}
-        className="mt-4 border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-200"
-      >
-        <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", scanning && "animate-spin")} />
-        {scanning ? "Scanning..." : "Scan for sessions"}
+      <Button variant="outline" size="sm" asChild className="mt-4 border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-200">
+        <Link to="/import">
+          Go to Import
+        </Link>
       </Button>
     </div>
   );

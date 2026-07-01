@@ -5,7 +5,7 @@ import {
   MessageSquare,
   Search,
   BarChart3,
-  Download,
+  RefreshCw,
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -20,7 +20,7 @@ const navItems = [
 ];
 
 const bottomItems = [
-  { to: "/import", icon: Download, label: "Import" },
+  { to: "/import", icon: RefreshCw, label: "Scan" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
@@ -53,10 +53,10 @@ export default function Layout() {
                   end={item.to === "/"}
                   className={({ isActive }) =>
                     cn(
-                      "flex items-center gap-2.5 px-3 py-2 rounded-element text-sm transition-all duration-200",
+                      "flex items-center gap-2.5 px-3 py-2 rounded-element text-sm transition-all duration-200 ease-out",
                       isActive
                         ? "bg-primary/10 text-primary font-medium"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted hover:translate-x-0.5",
                     )
                   }
                 >
@@ -77,10 +77,10 @@ export default function Layout() {
                   to={item.to}
                   className={({ isActive }) =>
                     cn(
-                      "flex items-center gap-2.5 px-3 py-2 rounded-element text-sm transition-all duration-200",
+                      "flex items-center gap-2.5 px-3 py-2 rounded-element text-sm transition-all duration-200 ease-out",
                       isActive
                         ? "bg-primary/10 text-primary font-medium"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted hover:translate-x-0.5",
                     )
                   }
                 >
@@ -95,7 +95,7 @@ export default function Layout() {
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           <main className="flex-1 overflow-y-auto">
-            <div className="px-10 py-8 min-h-full">
+            <div className="px-12 py-10 min-h-full">
               <Outlet />
             </div>
           </main>

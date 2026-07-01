@@ -90,7 +90,7 @@ export default function SessionDetailPage() {
 
         {/* Right panel: metadata */}
         <aside className="w-[240px] shrink-0 space-y-4">
-          <div className="glass-card-static p-4 space-y-3">
+          <div className="glass-card-static p-5 space-y-3">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Metadata</h3>
 
             {session.project_path && (
