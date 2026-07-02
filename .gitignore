@@ -19,3 +19,4 @@ ui/node_modules/
 ui/src-tauri/target/
 
 workbuddy/
+.workbuddy/

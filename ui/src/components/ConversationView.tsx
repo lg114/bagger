@@ -26,17 +26,6 @@ export default function ConversationView({ events }: ConversationViewProps) {
     }
   }, [visibleCount]);
 
-  // Scroll to bottom on initial mount (events loaded, first batch rendered)
-  useEffect(() => {
-    if (events.length > 0) {
-      // Small delay to let the DOM render the first batch
-      const timer = setTimeout(() => {
-        bottomRef.current?.scrollIntoView({ behavior: "auto" });
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [firstEventId]);
-
   const visibleEvents = useMemo(
     () => events.slice(0, visibleCount),
     [events, visibleCount],

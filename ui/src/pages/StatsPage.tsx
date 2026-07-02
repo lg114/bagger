@@ -254,7 +254,7 @@ function DailyChartSection() {
         </h2>
         {days.length > 0 && (
           <span className="text-xs text-muted-foreground font-mono">
-            Past 90 days
+            Past 365 days
           </span>
         )}
       </div>
