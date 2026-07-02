@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Database } from "lucide-react";
+import { Search } from "lucide-react";
+import Logo from "./Logo";
 
 interface AppBarProps {
   onToggleSidebar: () => void;
@@ -38,9 +39,7 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
       </button>
 
       <div className="flex items-center gap-2 mr-4 shrink-0">
-        <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center border border-primary/15">
-          <Database className="w-3.5 h-3.5 text-primary" />
-        </div>
+        <Logo className="w-6 h-6 text-foreground" aria-label="bagger" />
         <span className="text-sm font-semibold tracking-tight">Bagger</span>
       </div>
 
