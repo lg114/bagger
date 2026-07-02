@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Activity, Coins, FolderOpen, MessageCircle, Wrench, TrendingUp, AlertCircle, Bot } from "lucide-react";
 import { getStats, getDailyStats, getToolUsageStats } from "@/lib/api";
@@ -107,6 +107,13 @@ function getLevel(count: number, max: number): number {
 
 function ContributionGraph({ days, dayCount = 30 }: { days: DayRow[]; dayCount?: number }) {
   const [tooltip, setTooltip] = useState<{ x: number; y: number; date: string; count: number } | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Default to the rightmost column (today) so users see recent activity first.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollLeft = el.scrollWidth - el.clientWidth;
+  }, [days.length, dayCount]);
 
   const lookup = new Map<string, number>();
   for (const d of days) lookup.set(d.date, d.events || 0);
@@ -161,7 +168,7 @@ function ContributionGraph({ days, dayCount = 30 }: { days: DayRow[]; dayCount?:
       </div>
 
       <div className="flex flex-col min-w-0 flex-1">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" ref={scrollRef}>
         <div className="flex min-w-fit" style={{ gap: GAP_PX, height: 20 }}>
           {months.map((m, i) => {
             if (m.span < 3 && i < months.length - 1) return null;

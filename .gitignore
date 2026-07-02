@@ -18,3 +18,4 @@ ui/node_modules/
 # Tauri
 ui/src-tauri/target/
 
+workbuddy/
