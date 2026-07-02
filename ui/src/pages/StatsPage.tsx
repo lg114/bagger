@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-} from "recharts";
+import { useState } from "react";
+import { createPortal } from "react-dom";
 import { Activity, Coins, FolderOpen, MessageCircle, Wrench, TrendingUp, AlertCircle, Bot } from "lucide-react";
 import { getStats, getDailyStats, getToolUsageStats } from "@/lib/api";
 import { cn, formatTokens } from "@/lib/utils";
@@ -75,7 +74,7 @@ function StatsGrid() {
   );
 }
 
-// ── Daily activity chart ──
+// ── Daily activity: GitHub-style contribution graph ──
 
 interface DayRow {
   date: string;
@@ -84,10 +83,150 @@ interface DayRow {
   tokens: number;
 }
 
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const CELL_PX = 12;
+const GAP_PX = 3;
+
+const LEVELS = [
+  "#1a1a22",
+  "rgba(59, 130, 246, 0.12)",
+  "rgba(59, 130, 246, 0.28)",
+  "rgba(59, 130, 246, 0.55)",
+  "rgba(59, 130, 246, 0.85)",
+];
+
+function getLevel(count: number, max: number): number {
+  if (count === 0) return 0;
+  if (max <= 0) return 1;
+  const ratio = count / max;
+  if (ratio <= 0.25) return 1;
+  if (ratio <= 0.50) return 2;
+  if (ratio <= 0.75) return 3;
+  return 4;
+}
+
+function ContributionGraph({ days, dayCount = 30 }: { days: DayRow[]; dayCount?: number }) {
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; date: string; count: number } | null>(null);
+
+  const lookup = new Map<string, number>();
+  for (const d of days) lookup.set(d.date, d.events || 0);
+  const maxCount = Math.max(1, ...lookup.values());
+
+  // Fixed window: today back dayCount days, aligned to Monday
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - dayCount + 1);
+  const dow = start.getDay();
+  start.setDate(start.getDate() - (dow === 0 ? 6 : dow - 1));
+
+  const totalWeeks = Math.ceil((end.getTime() - start.getTime()) / (7 * 86400000)) + 1;
+
+  // Build week columns
+  const grid: { date: string; count: number }[][] = [];
+  for (let w = 0; w < totalWeeks; w++) {
+    const week: { date: string; count: number }[] = [];
+    for (let d = 0; d < 7; d++) {
+      const cd = new Date(start);
+      cd.setDate(cd.getDate() + w * 7 + d);
+      const key = cd.toISOString().slice(0, 10);
+      week.push({ date: key, count: lookup.get(key) ?? 0 });
+    }
+    grid.push(week);
+  }
+
+  const months: { label: string; col: number; span: number }[] = [];
+  let prevM = -1, monthStart = 0;
+  for (let w = 0; w < grid.length; w++) {
+    const m = new Date(grid[w][0].date + "T00:00:00").getMonth();
+    if (m !== prevM) {
+      if (prevM !== -1) {
+        months[months.length - 1].span = w - monthStart;
+      }
+      months.push({ label: new Date(grid[w][0].date + "T00:00:00").toLocaleDateString("en-US", { month: "short" }), col: w, span: 1 });
+      monthStart = w;
+      prevM = m;
+    }
+  }
+  if (months.length > 0) months[months.length - 1].span = grid.length - monthStart;
+
+  const fmtDate = (s: string) =>
+    new Date(s + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+
+  return (
+    <div className="flex gap-3 w-full justify-center">
+      <div className="flex flex-col shrink-0" style={{ paddingTop: 20, gap: GAP_PX }}>
+        {DAY_LABELS.map((l, i) => (
+          <span key={i} className="text-[10px] text-muted-foreground font-mono leading-none h-[12px] flex items-center justify-end w-8">{l}</span>
+        ))}
+      </div>
+
+      <div className="flex flex-col min-w-0 flex-1">
+        <div className="overflow-x-auto">
+        <div className="flex min-w-fit" style={{ gap: GAP_PX, height: 20 }}>
+          {months.map((m, i) => {
+            if (m.span < 3 && i < months.length - 1) return null;
+            return (
+              <span
+                key={m.col}
+                className="text-[10px] text-muted-foreground font-mono leading-none flex items-end overflow-hidden"
+                style={{ width: Math.max(m.span * (CELL_PX + GAP_PX) - GAP_PX, i === months.length - 1 ? 30 : 0) }}
+              >
+                {m.label}
+              </span>
+            );
+          })}
+        </div>
+
+        <div className="flex min-w-fit" style={{ gap: GAP_PX }}>
+          {grid.map((week, w) => (
+            <div key={w} className="flex flex-col shrink-0" style={{ gap: GAP_PX, width: CELL_PX }}>
+              {week.map((cell, d) => {
+                const lv = getLevel(cell.count, maxCount);
+                return (
+                  <div key={d} className="relative" style={{ aspectRatio: "1", width: "100%" }}
+                    onMouseEnter={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setTooltip({ x: r.left + r.width / 2, y: r.top, date: cell.date, count: cell.count });
+                    }}
+                    onMouseLeave={() => setTooltip(null)}>
+                    <div className="w-full h-full rounded-[2px]" style={{ backgroundColor: LEVELS[lv], cursor: cell.count > 0 ? "pointer" : "default" }} />
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+
+        {tooltip && createPortal(
+          <div
+            className="fixed z-50 pointer-events-none"
+            style={{ left: tooltip.x, top: tooltip.y, transform: "translate(-50%, -100%)", marginTop: -6 }}
+          >
+            <div className="bg-[#0a0a0a] border border-[#2a2a2f] rounded px-2.5 py-1.5 text-[10px] font-mono whitespace-nowrap shadow-lg">
+              <span className="text-foreground/90">{tooltip.count} events</span>
+              <span className="text-muted-foreground ml-1.5">{fmtDate(tooltip.date)}</span>
+            </div>
+          </div>,
+          document.body
+        )}
+        </div>
+
+        <div className="flex items-center gap-1.5 mt-3">
+          <span className="text-[10px] text-muted-foreground font-mono">Less</span>
+          {LEVELS.map((c, i) => (
+            <div key={i} className="rounded-[2px] shrink-0" style={{ width: CELL_PX, height: CELL_PX, backgroundColor: c }} />
+          ))}
+          <span className="text-[10px] text-muted-foreground font-mono">More</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DailyChartSection() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["dailyStats"],
-    queryFn: () => getDailyStats(30),
+    queryFn: () => getDailyStats(365),
   });
 
   const rawDays = data?.data ?? [];
@@ -101,69 +240,28 @@ function DailyChartSection() {
 
   return (
     <section className="space-y-5">
-      <h2 className="text-xl font-semibold tracking-tight flex items-center gap-2.5">
-        <TrendingUp className="w-5 h-5 text-primary" />
-        Daily Activity
-      </h2>
+      <div className="flex items-baseline gap-3">
+        <h2 className="text-xl font-semibold tracking-tight flex items-center gap-2.5">
+          <TrendingUp className="w-5 h-5 text-primary" />
+          Daily Activity
+        </h2>
+        {days.length > 0 && (
+          <span className="text-xs text-muted-foreground font-mono">
+            Past 90 days
+          </span>
+        )}
+      </div>
       {error ? (
         <ErrorBlock message="Failed to load daily stats" />
       ) : isLoading ? (
-        <Skeleton className="h-56 w-full rounded-card bg-secondary/50" />
+        <Skeleton className="h-40 w-full rounded-card bg-secondary/50" />
       ) : days.length === 0 ? (
-        <div className="text-center py-12 text-sm text-muted-foreground glass-card-static p-8">
+        <div className="text-center py-12 text-sm text-muted-foreground glass-card-static p-6">
           No data yet
         </div>
       ) : (
-        <div className="glass-card-static p-8">
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart
-              data={days}
-              margin={{ top: 5, right: 10, left: -20, bottom: 5 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f1f22" />
-              <XAxis
-                dataKey="shortDate"
-                tick={{ fontSize: 11, fill: "#9ca3af" }}
-                interval={Math.floor(days.length / 6)}
-                axisLine={{ stroke: "#2a2a2f" }}
-                tickLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: "#9ca3af" }}
-                axisLine={{ stroke: "#2a2a2f" }}
-                tickLine={false}
-                width={40}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: "#0a0a0a",
-                  border: "1px solid #2a2a2f",
-                  borderRadius: 8,
-                  fontSize: 12,
-                  color: "#f8f9fa",
-                  boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-                }}
-                labelStyle={{ color: "#60a5fa", fontFamily: "JetBrains Mono, monospace" }}
-                formatter={(value, name) => {
-                  const num = Number(value ?? 0);
-                  if (name === "tokens") return [formatTokens(num), "Tokens"];
-                  return [num, "Events"];
-                }}
-              />
-              <Bar
-                dataKey="events"
-                fill="#3b82f6"
-                fillOpacity={0.35}
-                radius={[4, 4, 0, 0]}
-                activeBar={{
-                  fill: "#60a5fa",
-                  fillOpacity: 0.9,
-                  stroke: "#60a5fa",
-                  strokeWidth: 1,
-                }}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+        <div className="glass-card-static p-6 w-full overflow-hidden">
+          <ContributionGraph days={days} dayCount={365} />
         </div>
       )}
     </section>
@@ -196,7 +294,7 @@ function ToolUsageSection() {
           ))}
         </div>
       ) : tools.length === 0 ? (
-        <div className="text-center py-12 text-sm text-muted-foreground glass-card-static p-8">
+        <div className="text-center py-12 text-sm text-muted-foreground glass-card-static p-6">
           No tool usage recorded yet
         </div>
       ) : (
