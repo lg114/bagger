@@ -282,3 +282,41 @@ body {
 .hljs-built_in { color: hsl(45 75% 60%) !important; }
 .hljs-variable, .hljs-attr { color: var(--info) !important; }
 .hljs-meta { color: var(--text-secondary) !important; }
+
+/* ── Title Bar Drag Region ── */
+.titlebar-drag {
+  -webkit-app-region: drag;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+.titlebar-drag button,
+.titlebar-drag a,
+.titlebar-drag input,
+.titlebar-drag [role="button"] {
+  -webkit-app-region: no-drag;
+}
+
+/* ── Scrollbar ── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a2e transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2a2a2e;
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #3a3b42;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}

@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import { type Window, getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Home,
   MessageSquare,
@@ -11,6 +12,17 @@ import {
 import { cn } from "@/lib/utils";
 import StatusBar from "./StatusBar";
 
+let cachedWin: Window | null | undefined;
+function getWin(): Window | null {
+  if (cachedWin !== undefined) return cachedWin;
+  try {
+    cachedWin = getCurrentWindow();
+  } catch {
+    cachedWin = null;
+  }
+  return cachedWin;
+}
+
 const navItems = [
   { to: "/", icon: Home, label: "Dashboard" },
   { to: "/sessions", icon: MessageSquare, label: "Conversations" },
@@ -19,6 +31,53 @@ const navItems = [
   { to: "/import", icon: RefreshCw, label: "Scan" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
+
+function WindowControls() {
+  const win = getWin();
+
+  const minimize = useCallback(() => win?.minimize(), []);
+  const toggleMax = useCallback(() => win?.toggleMaximize(), []);
+  const close = useCallback(() => win?.close(), []);
+
+  if (!win) return null;
+
+  return (
+    <div className="flex items-center gap-1">
+      {/* Minimize */}
+      <button
+        onClick={minimize}
+        className="p-1.5 rounded-element text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-200 focus:outline-none"
+        title="最小化"
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M2 6.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+        </svg>
+      </button>
+
+      {/* Maximize */}
+      <button
+        onClick={toggleMax}
+        className="p-1.5 rounded-element text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-200 focus:outline-none"
+        title="最大化"
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <rect x="2" y="2" width="8" height="8" rx="1" stroke="currentColor" strokeWidth="1.2" />
+        </svg>
+      </button>
+
+      {/* Close */}
+      <button
+        onClick={close}
+        className="p-1.5 rounded-element text-muted-foreground hover:text-white hover:bg-[var(--error)] transition-colors duration-200 focus:outline-none"
+        title="关闭"
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  );
+}
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -32,11 +91,11 @@ export default function Layout() {
           sidebarOpen ? "w-[220px]" : "w-10",
         )}
       >
-        {/* Sidebar header — bagger logo toggle */}
+        {/* Sidebar header — drag region + bagger logo toggle */}
         <div
           className={cn(
-            "h-12 shrink-0 flex items-center transition-all duration-200",
-            sidebarOpen ? "px-4" : "justify-center",
+            "titlebar-drag h-12 shrink-0 flex items-center transition-all duration-200",
+            sidebarOpen ? "px-4 justify-between" : "justify-center",
           )}
         >
           <button
@@ -44,7 +103,7 @@ export default function Layout() {
             className="p-1.5 rounded-element text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-200 focus:outline-none shrink-0"
             title={sidebarOpen ? "折叠侧栏" : "展开侧栏"}
           >
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
               <defs>
                 <clipPath id="bagLeft">
                   <rect x="0" y="0" width="9" height="18" />
@@ -71,9 +130,7 @@ export default function Layout() {
               className={({ isActive }) =>
                 cn(
                   "flex items-center rounded-element text-sm transition-all duration-200 ease-out whitespace-nowrap",
-                  sidebarOpen
-                    ? "gap-2.5 px-3 py-2"
-                    : "justify-center py-2",
+                  sidebarOpen ? "gap-2.5 px-3 py-2" : "justify-center py-2",
                   idx === 4 && sidebarOpen ? "mt-3" : "",
                   isActive
                     ? "bg-primary/10 text-[var(--nav-active-text)] font-medium border border-[var(--nav-active-border)]"
@@ -88,8 +145,13 @@ export default function Layout() {
         </nav>
       </aside>
 
-      {/* ── Right column: Content + StatusBar ── */}
+      {/* ── Right column: Title strip + Content + StatusBar ── */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        {/* Title bar strip — drag region + window controls */}
+        <div className="titlebar-drag h-12 shrink-0 flex items-center justify-end px-4">
+          <WindowControls />
+        </div>
+
         <main className="flex-1 overflow-y-auto">
           <div className="px-12 py-10 min-h-full">
             <Outlet />
