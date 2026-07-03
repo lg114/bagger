@@ -17,9 +17,6 @@ const navItems = [
   { to: "/sessions", icon: MessageSquare, label: "Conversations" },
   { to: "/search", icon: Search, label: "Search" },
   { to: "/stats", icon: BarChart3, label: "Analytics" },
-];
-
-const bottomItems = [
   { to: "/import", icon: RefreshCw, label: "Scan" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
@@ -39,57 +36,31 @@ export default function Layout() {
         {/* Sidebar */}
         <aside
           className={cn(
-            "shrink-0 flex flex-col border-r border-border bg-surface transition-all duration-200 ease-apple",
-            sidebarOpen ? "w-[220px]" : "w-0 overflow-hidden border-r-0",
+            "shrink-0 flex flex-col bg-surface transition-all duration-200 ease-apple",
+            sidebarOpen ? "w-[220px]" : "w-0 overflow-hidden",
           )}
         >
-          <div className="flex flex-col h-full">
-            {/* Main nav */}
-            <nav className="flex-1 p-3 space-y-1">
-              {navItems.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.to === "/"}
-                  className={({ isActive }) =>
-                    cn(
-                      "flex items-center gap-2.5 px-3 py-2 rounded-element text-sm transition-all duration-200 ease-out",
-                      isActive
-                        ? "bg-primary/10 text-primary font-medium"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted hover:translate-x-0.5",
-                    )
-                  }
-                >
-                  <item.icon className="w-[18px] h-[18px]" />
-                  {item.label}
-                </NavLink>
-              ))}
-            </nav>
-
-            {/* Separator */}
-            <div className="h-px bg-border mx-3" />
-
-            {/* Bottom nav */}
-            <nav className="p-3 space-y-1">
-              {bottomItems.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className={({ isActive }) =>
-                    cn(
-                      "flex items-center gap-2.5 px-3 py-2 rounded-element text-sm transition-all duration-200 ease-out",
-                      isActive
-                        ? "bg-primary/10 text-primary font-medium"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted hover:translate-x-0.5",
-                    )
-                  }
-                >
-                  <item.icon className="w-[18px] h-[18px]" />
-                  {item.label}
-                </NavLink>
-              ))}
-            </nav>
-          </div>
+          <nav className="flex-1 p-3 space-y-1 overflow-hidden">
+            {navItems.map((item, idx) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === "/"}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-2.5 px-3 py-2 rounded-element text-sm transition-all duration-200 ease-out whitespace-nowrap",
+                    idx === 4 ? "mt-3" : "",
+                    isActive
+                      ? "bg-primary/10 text-[var(--nav-active-text)] font-medium border border-[var(--nav-active-border)]"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent",
+                  )
+                }
+              >
+                <item.icon className="w-[18px] h-[18px] shrink-0" />
+                <span className="flex-1 truncate">{item.label}</span>
+              </NavLink>
+            ))}
+          </nav>
         </aside>
 
         {/* Main Content */}

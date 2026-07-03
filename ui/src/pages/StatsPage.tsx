@@ -89,10 +89,10 @@ const GAP_PX = 3;
 
 const LEVELS = [
   "#1a1a22",
-  "rgba(59, 130, 246, 0.12)",
-  "rgba(59, 130, 246, 0.28)",
-  "rgba(59, 130, 246, 0.55)",
-  "rgba(59, 130, 246, 0.85)",
+  "rgba(45, 212, 191, 0.12)",
+  "rgba(45, 212, 191, 0.28)",
+  "rgba(45, 212, 191, 0.55)",
+  "rgba(45, 212, 191, 0.85)",
 ];
 
 function getLevel(count: number, max: number): number {

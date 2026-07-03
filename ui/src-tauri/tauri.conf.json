@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Bagger - Visual Memory Browser",
+        "title": "bagger",
         "width": 1200,
         "height": 800,
         "minWidth": 800,

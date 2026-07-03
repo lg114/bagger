@@ -10,7 +10,7 @@ export default function StatusBar() {
   });
 
   return (
-    <footer className="h-7 shrink-0 flex items-center gap-4 px-6 border-t border-border bg-surface text-[11px] font-mono text-muted-foreground">
+    <footer className="h-7 shrink-0 flex items-center gap-4 px-6 bg-surface text-[11px] font-mono text-muted-foreground">
       {/* Sync status */}
       <span className="flex items-center gap-1.5">
         <Circle
@@ -21,8 +21,6 @@ export default function StatusBar() {
         />
         {health?.status === "ok" ? "Connected" : "Disconnected"}
       </span>
-
-      <span className="opacity-30">|</span>
 
       {/* Stats */}
       {health && (
@@ -35,8 +33,6 @@ export default function StatusBar() {
           </span>
         </>
       )}
-
-      <span className="opacity-30">|</span>
 
       {/* FTS status */}
       {health && (
