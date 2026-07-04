@@ -4,9 +4,9 @@ Uses ParserRegistry so adding a new AI tool source only requires
 registering a new Parser --- no scanner changes needed.
 """
 
+import contextlib
 import json
 from pathlib import Path
-from typing import Optional
 
 from bagger.exporters.jsonl import JsonlExporter
 from bagger.models.event import Session, WatchState
@@ -42,8 +42,8 @@ def scan_all(
     *,
     source: str = "claude",
     full: bool = False,
-    state_path: Optional[Path] = None,
-    jsonl_path: Optional[Path] = None,
+    state_path: Path | None = None,
+    jsonl_path: Path | None = None,
 ) -> dict:
     """Scan all sessions from a registered parser source and import events.
 
@@ -119,7 +119,5 @@ def _save_state(state: WatchState, path: Path) -> None:
 def _export_events(exporter, events: list) -> None:
     """Export events to JSONL backup, ignoring errors."""
     for ev in events:
-        try:
+        with contextlib.suppress(Exception):
             exporter.export_event(ev)
-        except Exception:
-            pass

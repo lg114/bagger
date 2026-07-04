@@ -3,16 +3,16 @@
 Auto-registers ClaudeParser on import so scanner/watcher can discover it.
 """
 
+import contextlib
+
 from bagger.parser.base import Parser, ParserRegistry
 
 from bagger.parser.claude import ClaudeParser
 
 # ── Auto-register known parsers ──
 
-try:
+with contextlib.suppress(Exception):
     ParserRegistry.register(ClaudeParser())
-except Exception:
-    pass  # non-fatal: Parser can be registered manually later
 
 __all__ = [
     "Parser",
