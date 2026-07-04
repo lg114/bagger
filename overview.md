@@ -1,62 +1,75 @@
-# Overview — 工程化地基 + README 更新
+# Overview — CI 落地 + 不安全修复清零
 
-## 背景
+## 这一轮做了什么
 
-团队需要资深开发者的代码质量把控。介入后发现 README 缺口本质是工程化基础设施缺失——
-`pyproject.toml` 没有任何代码质量工具配置，没有贡献规范。按"先补地基，再让 README 如实
-反映"的顺序推进。
+在上一轮工程化地基（ruff 配置 + CONTRIBUTING + README）之上，补上质量门禁的最后一环：
+**GitHub Actions CI**，并把上一轮遗留的 8 个不安全修复全部手动处理清零，确保第一次
+push 就全绿。
 
 ## 完成项
 
-### 1. ruff 配置（`pyproject.toml`）
-- 规则集：`E` / `F` / `I` / `UP` / `B` / `SIM`
-- `line-length = 100`，`target-version = "py312"`
-- 排除 `ui` / `design` / `build` / `dist` / `.workbuddy`
-- 加入 `dev` 依赖，同时补 `httpx`（FastAPI TestClient 依赖，原未声明）
+### 1. CI pipeline（`.github/workflows/ci.yml`）
+- 触发：push 到 main、PR 到 main
+- 矩阵：Python 3.12 + 3.13（跨版本验证）
+- 6 步：checkout → setup-python (带 pip cache) → install deps → ruff check → ruff format --check → pytest
+- `"on":` 加引号（YAML 1.1 会把裸 `on` 解析成布尔 True，GitHub 自己能处理但其他工具会误判——工程严谨）
 
-### 2. 代码自动修复
-- `ruff check --fix`：60 个安全违规自动修复
-  - 25× `Optional[X]` → `X | None`
-  - 5× 未用 import 清理
-  - 5× import 排序
-  - 5× `datetime.timezone.utc` → `datetime.UTC`
-  - 4× 冗余 open modes
-  - 其他 pyupgrade 项
-- `ruff format`：11 个文件重新格式化
-- 剩余 8 个不安全修复（SIM105/UP042/E741 等）留给团队 review
+### 2. 8 个不安全修复全部手动处理
 
-### 3. CONTRIBUTING.md（新建）
-覆盖：开发环境、ruff 门禁、项目结构、分层规则、Conventional Commits、
-PR 流程、Code Review 清单、新增 CLI/API 操作指引。
+| 规则 | 文件 | 处理方式 |
+|------|------|----------|
+| E501 (1) | `api/app.py` | 描述字符串换行 |
+| SIM115 (1) | `exporters/jsonl.py` | `# noqa: SIM115` 带理由（exporter 有意保持文件打开，with 会破坏 flush 语义） |
+| UP042 (2) | `models/event.py` | `(str, Enum)` → `StrEnum`，跑测试验证 pydantic v2 序列化无碍 |
+| E741 (1) | `services/replay.py` | 变量 `l` → `line` |
+| SIM105 (3) | `scanner.py` / `watcher.py` / `sqlite.py` | try-except-pass → `contextlib.suppress` |
 
-### 4. README.md 更新
-- 顶部加 shields.io badges
-- 新增 Tech stack 表
-- 新增 Project structure 章节
-- 扩充 Development（ruff 命令 + 提交前门禁）
-- 新增 Contributing 章节（链接 CONTRIBUTING.md）
-- 新增 Roadmap 占位
+### 3. 文档同步
+- README：加 CI badge，Roadmap 里 CI 项标 `[x]`
+- CONTRIBUTING：新增 "CI — this runs on every push and PR" 章节，说明三道门禁和本地一致性
 
-## 验证结果
+## 验证（完整 CI 模拟，本地跑了一遍 workflow 的全部步骤）
 
-- ✅ 33 个测试全过（`pytest tests/ -q`）
-- ✅ 32 文件 format 合规
-- ✅ ruff 修复未破坏任何功能
+```
+ruff check .            → All checks passed! (0 errors, 之前 8)
+ruff format --check .   → 32 files already formatted
+pytest tests/ -q        → 33 passed in 1.15s
+YAML safe_load          → 语法验证通过
+```
 
-## 改动范围
+**CI verdict: ALL GREEN** —— push 上去第一次就会绿。
 
-17 文件修改 + 1 新建（CONTRIBUTING.md），+314/-190 行。
+## 累计改动（两轮合计）
 
-## 后续建议（按优先级）
+- 新建：`CONTRIBUTING.md` + `.github/workflows/ci.yml`
+- 修改：`pyproject.toml` + `README.md` + 12 个 Python 源文件
+- 代码质量：68 个 ruff 违规清零（60 自动 + 8 手动）
 
-1. **CI pipeline** — GitHub Actions 跑 `ruff check` + `pytest`，PR 必须绿才能合并
-2. **Pre-commit hook** — 本地提交前自动跑 ruff，避免 CI 来回
-3. **处理剩余 8 个不安全修复** — 特别是 UP042（StrEnum）需测试 pydantic 序列化
-4. **ADR-001~006 落地** — 早上架构评估给出的四道接缝（Parser Protocol、Repository 等）
-5. **可选：mypy** — bagger 已用 pydantic，配 mypy 能最大化类型安全收益（用户这次没选，后续可考虑）
+## 工程化闭环现在长这样
+
+```
+开发者写代码
+    ↓
+本地: ruff check + format + pytest  ← CONTRIBUTING.md 规定的提交前门禁
+    ↓
+push / 开 PR
+    ↓
+CI 自动跑同样的三道门禁 (Python 3.12 + 3.13)
+    ↓
+全绿 → 可合并    任意失败 → PR 红叉, 阻止合并
+```
+
+**规范从"贴在墙上"变成了"焊在流水线上"。**
+
+## 下一步建议
+
+1. **开启分支保护** — GitHub 仓库设置 → Branches → main → 勾选 "Require status checks to pass"，把 CI job 设为必须。这是 CI 门禁真正生效的最后一步（否则红叉也能合并）
+2. **Pre-commit hook** — 本地 git hook，提交前自动跑 ruff，避免推上去才发现
+3. **ADR-001~006 落地** — 架构评估给出的四道接缝（Parser Protocol、Repository 等）
 
 ## 关键文件
 
+- `.github/workflows/ci.yml` — CI 配置
 - `pyproject.toml` — ruff 配置 + dev 依赖
-- `CONTRIBUTING.md` — 团队规范明文
-- `README.md` — 对外门面
+- `CONTRIBUTING.md` — 团队规范（含 CI 章节）
+- `README.md` — 对外门面（含 CI badge）

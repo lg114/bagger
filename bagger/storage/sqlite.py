@@ -1,5 +1,6 @@
 """SQLite storage with FTS5 full-text search for bagger."""
 
+import contextlib
 import json
 import re
 import sqlite3
@@ -159,10 +160,8 @@ class SqliteStorage:
 
     def close(self) -> None:
         if self._conn:
-            try:
+            with contextlib.suppress(sqlite3.Error):
                 self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            except sqlite3.Error:
-                pass
             self._conn.close()
             self._conn = None
 

@@ -1,5 +1,6 @@
 """Session discovery and incremental scanning."""
 
+import contextlib
 import json
 from pathlib import Path
 
@@ -171,7 +172,5 @@ def _save_state(state: WatchState, path: Path) -> None:
 def _export_events(exporter, events: list) -> None:
     """Export events to JSONL backup, ignoring errors."""
     for ev in events:
-        try:
+        with contextlib.suppress(Exception):
             exporter.export_event(ev)
-        except Exception:
-            pass

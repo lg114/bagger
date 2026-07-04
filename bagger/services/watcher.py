@@ -1,5 +1,6 @@
 """Real-time watcher: poll for new JSONL lines and sync incrementally."""
 
+import contextlib
 import signal
 import time
 from pathlib import Path
@@ -83,7 +84,5 @@ class Watcher:
 
     def _export(self, events: list) -> None:
         for ev in events:
-            try:
+            with contextlib.suppress(Exception):
                 self._exporter.export_event(ev)
-            except Exception:
-                pass

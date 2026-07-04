@@ -6,6 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
 [![Tests](https://img.shields.io/badge/tests-33%20passing-brightgreen.svg)](#development)
+[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
 
 bagger reads the JSONL transcripts that Claude Code writes to `~/.claude/projects/` and turns them into a queryable SQLite database with FTS5 full-text search and session replay. Think of it as your AI coding memory layer — with a visual memory browser on top.
 
@@ -232,7 +233,7 @@ Contributions are welcome. Before opening a PR, please read
 
 ## Roadmap
 
-- [ ] CI pipeline (GitHub Actions: ruff + pytest on every PR)
+- [x] CI pipeline (GitHub Actions: ruff + pytest on every PR)
 - [ ] Pre-commit hook for ruff
 - [ ] More exporters (Zvec, Markdown)
 - [ ] CJK-aware FTS tokenizer for ranked Chinese search

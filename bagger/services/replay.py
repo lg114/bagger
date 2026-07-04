@@ -54,7 +54,7 @@ def replay_session(
             if bt == "thinking":
                 lines.append(_style(f"  [thinking] {text}", dim=True))
             elif bt == "text":
-                lines.extend(f"  {l}" for l in text.split("\n"))
+                lines.extend(f"  {line}" for line in text.split("\n"))
             elif bt == "tool_use":
                 lines.append(_style(f"  tool_use: {tool_name}", fg="yellow"))
             elif bt == "tool_result":

@@ -1,17 +1,17 @@
 """Core data models for bagger."""
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
 
 
-class BlockType(str, Enum):
+class BlockType(StrEnum):
     TEXT = "text"
     THINKING = "thinking"
     TOOL_USE = "tool_use"

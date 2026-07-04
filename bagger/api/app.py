@@ -8,7 +8,9 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
         title="Bagger API",
-        description="REST API for browsing, searching, and replaying Claude Code conversation history.",
+        description=(
+            "REST API for browsing, searching, and replaying Claude Code conversation history."
+        ),
         version="0.2.0",
     )
 

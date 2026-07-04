@@ -32,6 +32,19 @@ ruff check . && ruff format --check . && pytest tests/ -q
 
 If any of these fail, the PR is not ready. No exceptions.
 
+### CI — this runs on every push and PR
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the same three gates on
+**Python 3.12 and 3.13** every time you push to `main` or open a PR:
+
+1. `ruff check .` — lint must pass
+2. `ruff format --check .` — formatting must be clean
+3. `pytest tests/ -q` — all tests must pass
+
+If any step fails, the PR shows a red ✗ and **cannot be merged** (once branch
+protection is enabled). The CI gates are identical to the local pre-commit
+gate — if it passes locally, it passes in CI.
+
 ### What the rules enforce
 
 - `E` / `F` — basic style and undefined-name / unused-import checks

@@ -20,7 +20,9 @@ class JsonlExporter(Exporter):
 
     def _ensure_open(self):
         if self._file is None:
-            self._file = open(self._path, "a", encoding="utf-8")
+            # Intentionally kept open for efficient sequential writes;
+            # flush() persists and the handle is closed on GC.
+            self._file = open(self._path, "a", encoding="utf-8")  # noqa: SIM115
 
     def export_event(self, event: MemoryEvent) -> None:
         self._ensure_open()
