@@ -6,17 +6,25 @@ import time
 from pathlib import Path
 
 from bagger.exporters.jsonl import JsonlExporter
-from bagger.parser.claude import extract_summary
-from bagger.services.scanner import discover_sessions, upsert_session_from_events
+from bagger.parser import Parser, ParserRegistry
+from bagger.services.scanner import upsert_session_from_events
 from bagger.storage.sqlite import SqliteStorage
 
 
 class Watcher:
-    """Polling-based file watcher for Claude Code JSONL transcripts."""
+    """Polling-based file watcher for AI coding tool JSONL transcripts.
 
-    def __init__(self, storage: SqliteStorage, projects_dir: Path | None = None):
+    Obtains the parser from ParserRegistry by source name so adding
+    a new tool only requires registering a new Parser --- no watcher changes.
+    """
+
+    def __init__(
+        self,
+        storage: SqliteStorage,
+        source: str = "claude",
+    ):
         self.storage = storage
-        self.projects_dir = projects_dir
+        self.parser = ParserRegistry.get(source)
         self._offsets: dict[str, int] = {}
         self._running = False
         self._exporter = JsonlExporter(Path.home() / ".bagger" / "events.jsonl")
@@ -28,7 +36,7 @@ class Watcher:
         signal.signal(signal.SIGINT, self._on_stop)
         signal.signal(signal.SIGTERM, self._on_stop)
 
-        print(f"Watching {self.projects_dir or '~/.claude/projects/'} ...")
+        print(f"Watching {self.parser.source_name} transcripts ...")
         print("Press Ctrl+C to stop\n")
 
         while self._running:
@@ -43,7 +51,9 @@ class Watcher:
         print("\nWatcher stopped.")
 
     def _poll(self) -> None:
-        files = discover_sessions(self.projects_dir)
+        parser = self.parser
+        files = parser.discover_sessions()
+
         for filepath in files:
             session_id = filepath.stem
             file_size = filepath.stat().st_size
@@ -52,10 +62,8 @@ class Watcher:
             if file_size <= last_offset:
                 continue
 
-            from bagger.services.scanner import _parse_new_lines
-
             try:
-                new_events = _parse_new_lines(filepath, last_offset)
+                new_events = parser.parse_incremental(filepath, last_offset)
             except Exception:
                 continue
 
@@ -67,13 +75,10 @@ class Watcher:
 
             if count > 0:
                 upsert_session_from_events(
-                    self.storage,
-                    session_id,
-                    filepath,
-                    new_events,
+                    self.storage, parser, session_id, filepath, new_events,
                 )
                 if last_offset == 0:
-                    summary = extract_summary(filepath)
+                    summary = parser.extract_summary(filepath)
                     print(f'  [new] session {session_id[:8]} "{summary}"')
                 print(f"    +{count} events synced")
 

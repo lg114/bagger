@@ -10,14 +10,63 @@ from bagger.models.event import (
     MemoryEvent,
     Role,
 )
+from bagger.parser.base import Parser as _Parser
+
+# ── Parser implementation ──────────────────────────────────
 
 
-def parse_jsonl(path: Path) -> list[MemoryEvent]:
-    """Parse a Claude Code JSONL file into normalized MemoryEvent objects.
+class ClaudeParser(_Parser):
+    """Parser for Claude Code JSONL transcripts (~/.claude/projects/)."""
 
-    Handles entry types: summary, user, assistant, file-history-snapshot.
-    Returns only user and assistant events.
-    """
+    SOURCE_NAME = "claude"
+    PROJECTS_DIR: Path
+
+    def __init__(self, projects_dir: Path | None = None):
+        self.PROJECTS_DIR = projects_dir or Path.home() / ".claude" / "projects"
+
+    @property
+    def source_name(self) -> str:
+        return self.SOURCE_NAME
+
+    def discover_sessions(self) -> list[Path]:
+        """Yield all valid JSONL files, excluding agent-* and warmup."""
+        if not self.PROJECTS_DIR.exists():
+            return []
+
+        files: list[Path] = []
+        for root, _, filenames in _walk(self.PROJECTS_DIR):
+            for name in filenames:
+                if (
+                    name.endswith(".jsonl")
+                    and not name.startswith("agent-")
+                    and "warmup" not in name.lower()
+                ):
+                    files.append(Path(root) / name)
+
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return files
+
+    def parse(self, path: Path) -> list[MemoryEvent]:
+        return _parse_file(path)
+
+    def parse_incremental(self, path: Path, offset: int) -> list[MemoryEvent]:
+        return _parse_new_lines(path, offset)
+
+    def extract_summary(self, path: Path) -> str:
+        return _extract_summary(path)
+
+
+# ── Module-level functions (backward compat, delegated by ClaudeParser) ──
+
+
+def _walk(projects_dir: Path):
+    """os.walk wrapper (avoids direct os import in public API)."""
+    import os
+    yield from os.walk(projects_dir)
+
+
+def _parse_file(path: Path) -> list[MemoryEvent]:
+    """Parse a full JSONL file into MemoryEvent objects."""
     events: list[MemoryEvent] = []
 
     with open(path, encoding="utf-8") as f:
@@ -41,7 +90,31 @@ def parse_jsonl(path: Path) -> list[MemoryEvent]:
     return events
 
 
-def extract_summary(path: Path) -> str:
+def _parse_new_lines(path: Path, offset: int) -> list[MemoryEvent]:
+    """Parse only new lines appended after a byte offset."""
+    import json as _json
+
+    with open(path, encoding="utf-8") as f:
+        f.seek(offset)
+        new_lines = f.readlines()
+
+    raw_entries = []
+    for line in new_lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            raw = _json.loads(line)
+        except _json.JSONDecodeError:
+            continue
+        if raw.get("type") in ("user", "assistant"):
+            raw_entries.append(raw)
+
+    events = [e for raw in raw_entries if (e := _parse_entry(raw)) is not None]
+    return events
+
+
+def _extract_summary(path: Path) -> str:
     """Extract session summary from the first line of a JSONL file."""
     with open(path, encoding="utf-8") as f:
         first_line = f.readline().strip()
@@ -76,6 +149,10 @@ def extract_summary(path: Path) -> str:
         pass
 
     return "(no summary)"
+
+# ── Backward-compat aliases ──
+parse_jsonl = _parse_file
+extract_summary = _extract_summary
 
 
 def _truncate(text: str, max_len: int) -> str:

@@ -99,7 +99,7 @@ def watch(storage, interval):
 
     # Quick scan to catch up, then watch
     scan_all(storage, full=False)
-    Watcher(storage).watch(interval=interval)
+    Watcher(storage, source="claude").watch(interval=interval)
 
 
 # ── search ──────────────────────────────────────────────────
@@ -207,9 +207,9 @@ def doctor():
     click.echo("  " + "─" * 30)
 
     # Check Claude projects dir
-    from bagger.services.scanner import discover_sessions
+    from bagger.parser import ParserRegistry
 
-    claude_files = discover_sessions()
+    claude_files = ParserRegistry.get("claude").discover_sessions()
     if claude_files:
         click.echo(click.style(f"  {len(claude_files)} Claude sessions found", fg="green"))
     else:

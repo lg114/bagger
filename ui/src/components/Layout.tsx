@@ -41,8 +41,10 @@ function WindowControls() {
 
   if (!win) return null;
 
+  const noDrag = { WebkitAppRegion: "no-drag" } as React.CSSProperties;
+
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1" style={noDrag}>
       {/* Minimize */}
       <button
         onClick={minimize}
