@@ -208,9 +208,9 @@
 
 ### ADR-005：tool_uses 结构化表
 
-- **Status**：Proposed
+- **Status**：Done
 - **Context**：tool 统计用 SUBSTR/INSTR 从 `[tool_use:xxx]` 反解析，脆弱且慢。
-- **Decision**：新增 `tool_uses` 表（id, event_id, tool_name, tool_id, tool_input_json）。parser 写 event 时同步插 tool_uses。统计改为 `GROUP BY tool_name`。写一次性迁移脚本回填历史数据。
+- **Decision**：新增 `tool_uses` 表（id, event_id, tool_name, tool_id, tool_input_json）。`insert_events()` 从 `content_blocks` 提取 `TOOL_USE` 块同步写入，用 delete-before-insert 保证幂等。统计改为 `GROUP BY tool_name`。`scripts/backfill_tool_uses.py` 一次性回填历史数据。
 - **Consequences**：
   - 更容易：结构化查询、可统计 tool_input、性能好
   - 更难：多一张表 + 迁移脚本
@@ -250,8 +250,8 @@
 
 ### 阶段 3 · 数据建模修正（按需）
 
-- [ ] ADR-005 tool_uses 表 + 迁移脚本
-- [ ] 统计查询改写
+- [x] ADR-005 tool_uses 表 + 迁移脚本
+- [x] 统计查询改写
 
 **验证标准**：stats 命令结果与迁移前一致。
 

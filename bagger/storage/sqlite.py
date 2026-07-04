@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_session
     ON events(session_id, timestamp);
+
+CREATE TABLE IF NOT EXISTS tool_uses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    tool_id TEXT NOT NULL DEFAULT '',
+    tool_input_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (event_id) REFERENCES events(event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_uses_event ON tool_uses(event_id);
+CREATE INDEX IF NOT EXISTS idx_tool_uses_name ON tool_uses(tool_name);
 """
 
 FTS_SCHEMA = """
@@ -252,6 +264,7 @@ class SqliteStorage:
 
     def insert_event(self, event: MemoryEvent) -> None:
         self.conn.execute(_INSERT_EVENT_SQL, self._event_params(event))
+        self._insert_tool_uses(event)
         self.conn.commit()
 
     def insert_events(self, events: list[MemoryEvent]) -> int:
@@ -262,8 +275,36 @@ class SqliteStorage:
         # But sqlite3 doesn't give rowcount for executemany; use change count
         before = self.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         self.conn.commit()
+        # Insert tool_uses rows (delete-before-insert for idempotency;
+        # events table uses OR IGNORE, so the same event may be re-submitted
+        # with the same tool_use blocks from re-parsing).
+        for e in events:
+            self._insert_tool_uses(e)
         after = self.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         return after - before
+
+    def _insert_tool_uses(self, event: MemoryEvent) -> None:
+        """Extract TOOL_USE blocks from an event and insert into tool_uses table.
+
+        Uses delete-before-insert per event_id for idempotency.
+        """
+        rows = [
+            (
+                event.event_id,
+                b.tool_name or "unknown",
+                b.tool_id or "",
+                json.dumps(b.tool_input or {}, ensure_ascii=False),
+            )
+            for b in event.content_blocks
+            if b.block_type == BlockType.TOOL_USE
+        ]
+        if rows:
+            self.conn.execute("DELETE FROM tool_uses WHERE event_id = ?", (event.event_id,))
+            self.conn.executemany(
+                "INSERT INTO tool_uses(event_id, tool_name, tool_id, tool_input_json) "
+                "VALUES (?, ?, ?, ?)",
+                rows,
+            )
 
     def get_event_count(self, session_id: str) -> int:
         row = self.conn.execute(
@@ -464,15 +505,10 @@ class SqliteStorage:
         return [_row_to_dict(r) for r in reversed(rows)]
 
     def get_tool_usage_stats(self, limit: int = 20) -> list[dict]:
-        """Get most frequently used tools."""
+        """Get most frequently used tools from the tool_uses table."""
         rows = self.conn.execute(
-            "SELECT "
-            "SUBSTR(content_text, "
-            "INSTR(content_text, '[tool_use:') + 10, "
-            "INSTR(SUBSTR(content_text, INSTR(content_text, '[tool_use:') + 10), ']') - 1"
-            ") as tool_name, "
-            "COUNT(*) as count "
-            "FROM events WHERE content_text LIKE '%[tool_use:%' "
+            "SELECT tool_name, COUNT(*) as count "
+            "FROM tool_uses "
             "GROUP BY tool_name ORDER BY count DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -501,9 +537,7 @@ class SqliteStorage:
             "FROM events"
         ).fetchone()
         total_sessions = self.conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-        tool_uses = self.conn.execute(
-            "SELECT COUNT(*) FROM events WHERE content_text LIKE '%tool_use%'"
-        ).fetchone()[0]
+        tool_uses = self.conn.execute("SELECT COUNT(*) FROM tool_uses").fetchone()[0]
 
         return {
             "total_sessions": total_sessions,

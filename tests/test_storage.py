@@ -1,5 +1,6 @@
 """Tests for SQLite storage."""
 
+import json
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -298,5 +299,134 @@ def test_fts_ascii_search():
         # FTS5 results have snippet field
         assert "snippet" in results[0]
         assert "authentication" in results[0]["snippet"]
+
+        storage.close()
+
+
+# ── tool_uses table ─────────────────────────────────────────
+
+
+def _make_tool_event(
+    event_id: str,
+    tool_name: str,
+    tool_id: str = "",
+    tool_input: dict | None = None,
+) -> MemoryEvent:
+    return MemoryEvent(
+        event_id=event_id,
+        session_id="sess-tools",
+        timestamp=datetime(2026, 7, 1, 12, 0, 0, tzinfo=UTC),
+        role=Role.ASSISTANT,
+        content_blocks=[
+            ContentBlock(
+                block_type=BlockType.TOOL_USE,
+                tool_name=tool_name,
+                tool_id=tool_id,
+                tool_input=tool_input,
+            ),
+        ],
+        model="claude-sonnet",
+    )
+
+
+def test_tool_uses_inserted_on_event_write():
+    """Inserting an event with TOOL_USE blocks writes to tool_uses table."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        event = _make_tool_event("evt-tool-1", "Read", tool_id="toolu_01")
+        storage.insert_event(event)
+
+        rows = storage.conn.execute(
+            "SELECT event_id, tool_name, tool_id, tool_input_json FROM tool_uses"
+        ).fetchall()
+        assert len(rows) == 1
+        row = dict(rows[0])
+        assert row["event_id"] == "evt-tool-1"
+        assert row["tool_name"] == "Read"
+        assert row["tool_id"] == "toolu_01"
+        assert json.loads(row["tool_input_json"]) == {}
+
+        storage.close()
+
+
+def test_get_tool_usage_stats_aggregates():
+    """get_tool_usage_stats() correctly aggregates from tool_uses table."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        # Insert 3 Read, 2 Write, 1 Bash
+        for i, name in enumerate(["Read", "Read", "Write", "Read", "Write", "Bash"]):
+            storage.insert_event(_make_tool_event(f"evt-agg-{i}", name))
+        storage.conn.commit()
+
+        stats = storage.get_tool_usage_stats()
+        assert len(stats) == 3
+        assert stats[0] == {"tool_name": "Read", "count": 3}
+        assert stats[1] == {"tool_name": "Write", "count": 2}
+        assert stats[2] == {"tool_name": "Bash", "count": 1}
+
+        # Limit works
+        stats_limited = storage.get_tool_usage_stats(limit=2)
+        assert len(stats_limited) == 2
+
+        storage.close()
+
+
+def test_tool_uses_no_tool_events():
+    """Events with no TOOL_USE blocks leave tool_uses table empty."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        # Insert plain text event (no tool_use)
+        storage.insert_event(_make_event(event_id="evt-plain"))
+        storage.conn.commit()
+
+        count = storage.conn.execute("SELECT COUNT(*) FROM tool_uses").fetchone()[0]
+        assert count == 0
+
+        storage.close()
+
+
+def test_tool_uses_idempotent():
+    """Re-inserting the same event does not duplicate tool_uses rows (OR IGNORE)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        event = _make_tool_event("evt-dup", "Write")
+        storage.insert_event(event)
+        storage.insert_event(event)  # same event_id
+        storage.conn.commit()
+
+        count = storage.conn.execute(
+            "SELECT COUNT(*) FROM tool_uses WHERE event_id = ?",
+            ("evt-dup",),
+        ).fetchone()[0]
+        assert count == 1
+
+        storage.close()
+
+
+def test_get_stats_tool_uses_count():
+    """get_stats() tool_uses field counts from tool_uses table."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        for i, name in enumerate(["Read", "Write", "Read", "Bash"]):
+            storage.insert_event(_make_tool_event(f"evt-stat-{i}", name))
+        storage.conn.commit()
+
+        stats = storage.get_stats()
+        assert stats["tool_uses"] == 4
 
         storage.close()
