@@ -62,6 +62,7 @@ class ClaudeParser(_Parser):
 def _walk(projects_dir: Path):
     """os.walk wrapper (avoids direct os import in public API)."""
     import os
+
     yield from os.walk(projects_dir)
 
 
@@ -149,6 +150,7 @@ def _extract_summary(path: Path) -> str:
         pass
 
     return "(no summary)"
+
 
 # ── Backward-compat aliases ──
 parse_jsonl = _parse_file

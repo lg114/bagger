@@ -75,7 +75,11 @@ class Watcher:
 
             if count > 0:
                 upsert_session_from_events(
-                    self.storage, parser, session_id, filepath, new_events,
+                    self.storage,
+                    parser,
+                    session_id,
+                    filepath,
+                    new_events,
                 )
                 if last_offset == 0:
                     summary = parser.extract_summary(filepath)

@@ -27,14 +27,16 @@ def upsert_session_from_events(
     last_ts = events[-1].timestamp
     project_path = events[0].cwd or ""
 
-    storage.upsert_session(Session(
-        session_id=session_id,
-        summary=summary,
-        project_path=project_path,
-        message_count=storage.get_event_count(session_id),
-        first_message_at=first_ts,
-        last_message_at=last_ts,
-    ))
+    storage.upsert_session(
+        Session(
+            session_id=session_id,
+            summary=summary,
+            project_path=project_path,
+            message_count=storage.get_event_count(session_id),
+            first_message_at=first_ts,
+            last_message_at=last_ts,
+        )
+    )
 
 
 def scan_all(
