@@ -11,11 +11,11 @@ from pathlib import Path
 from bagger.exporters.jsonl import JsonlExporter
 from bagger.models.event import Session, WatchState
 from bagger.parser import Parser, ParserRegistry
-from bagger.storage.sqlite import SqliteStorage
+from bagger.storage.base import SessionRepository, Storage
 
 
 def upsert_session_from_events(
-    storage: SqliteStorage,
+    storage: SessionRepository,
     parser: Parser,
     session_id: str,
     filepath: Path,
@@ -40,7 +40,7 @@ def upsert_session_from_events(
 
 
 def scan_all(
-    storage: SqliteStorage,
+    storage: Storage,
     *,
     source: str = "claude",
     full: bool = False,
@@ -50,7 +50,7 @@ def scan_all(
     """Scan all sessions from a registered parser source and import events.
 
     Args:
-        storage: Connected SqliteStorage instance.
+        storage: Connected storage instance (satisfies SessionRepository + EventRepository).
         source: Parser source name (default "claude").
         full: If True, reprocess all files from scratch.
         state_path: Path to watch state JSON file for incremental mode.

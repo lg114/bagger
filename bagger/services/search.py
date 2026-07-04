@@ -1,10 +1,10 @@
 """Full-text search service (FTS5 with BM25 ranking)."""
 
-from bagger.storage.sqlite import SqliteStorage
+from bagger.storage.base import SearchIndex
 
 
 def search_events(
-    storage: SqliteStorage,
+    storage: SearchIndex,
     query: str,
     session_id: str | None = None,
     limit: int = 20,

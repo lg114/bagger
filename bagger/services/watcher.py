@@ -8,7 +8,7 @@ from pathlib import Path
 from bagger.exporters.jsonl import JsonlExporter
 from bagger.parser import ParserRegistry
 from bagger.services.scanner import upsert_session_from_events
-from bagger.storage.sqlite import SqliteStorage
+from bagger.storage.base import Storage
 
 
 class Watcher:
@@ -20,7 +20,7 @@ class Watcher:
 
     def __init__(
         self,
-        storage: SqliteStorage,
+        storage: Storage,
         source: str = "claude",
     ):
         self.storage = storage

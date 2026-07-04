@@ -2,7 +2,7 @@
 
 import json
 
-from bagger.storage.sqlite import SqliteStorage
+from bagger.storage.base import Storage
 
 try:
     import click
@@ -18,7 +18,7 @@ def _style(text: str, **kwargs) -> str:
 
 
 def replay_session(
-    storage: SqliteStorage,
+    storage: Storage,
     session_id: str,
 ) -> str:
     """Replay a full session as formatted terminal output."""
