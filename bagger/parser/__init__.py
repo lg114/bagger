@@ -6,7 +6,6 @@ Auto-registers ClaudeParser on import so scanner/watcher can discover it.
 import contextlib
 
 from bagger.parser.base import Parser, ParserRegistry
-
 from bagger.parser.claude import ClaudeParser
 
 # ── Auto-register known parsers ──

@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from bagger.exporters.jsonl import JsonlExporter
-from bagger.parser import Parser, ParserRegistry
+from bagger.parser import ParserRegistry
 from bagger.services.scanner import upsert_session_from_events
 from bagger.storage.sqlite import SqliteStorage
 
