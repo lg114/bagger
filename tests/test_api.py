@@ -1,11 +1,11 @@
 """Tests for the REST API endpoints."""
 
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bagger.api.app import create_app
-from bagger.api.dependencies import get_storage, DB_PATH
+from bagger.api.dependencies import DB_PATH
 from bagger.models.event import BlockType, ContentBlock, MemoryEvent, Role, Session
 from bagger.storage.sqlite import SqliteStorage
 
@@ -25,7 +25,7 @@ def _make_event(
         event_id=event_id,
         session_id=session_id,
         parent_event_id=parent_event_id,
-        timestamp=datetime(2026, 6, 30, 12, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 6, 30, 12, 0, 0, tzinfo=UTC),
         role=role,
         content_blocks=[ContentBlock(block_type=BlockType.TEXT, text=text)],
         token_input=10,
@@ -47,6 +47,7 @@ def _override_db(tmpdir: Path) -> SqliteStorage:
 
 # ---- Tests ----
 
+
 def test_health_check():
     with tempfile.TemporaryDirectory() as tmpdir:
         td = Path(tmpdir)
@@ -58,6 +59,7 @@ def test_health_check():
         storage.close()
 
         from fastapi.testclient import TestClient
+
         app = create_app()
         client = TestClient(app)
 
@@ -77,6 +79,7 @@ def test_list_sessions_empty():
         storage.close()
 
         from fastapi.testclient import TestClient
+
         app = create_app()
         client = TestClient(app)
 
@@ -94,12 +97,12 @@ def test_list_sessions_paginated():
 
         for i in range(5):
             storage.upsert_session(
-                Session(session_id=f"sess-p-{i}", summary=f"Session {i}",
-                        message_count=i + 1)
+                Session(session_id=f"sess-p-{i}", summary=f"Session {i}", message_count=i + 1)
             )
         storage.close()
 
         from fastapi.testclient import TestClient
+
         app = create_app()
         client = TestClient(app)
 
@@ -118,6 +121,7 @@ def test_get_session_not_found():
         storage.close()
 
         from fastapi.testclient import TestClient
+
         app = create_app()
         client = TestClient(app)
 
@@ -129,15 +133,18 @@ def test_get_session_found():
     with tempfile.TemporaryDirectory() as tmpdir:
         td = Path(tmpdir)
         storage = _override_db(td)
-        storage.upsert_session(Session(
-            session_id="abc-def-123",
-            summary="Found session",
-            project_path="/tmp/test",
-            message_count=3,
-        ))
+        storage.upsert_session(
+            Session(
+                session_id="abc-def-123",
+                summary="Found session",
+                project_path="/tmp/test",
+                message_count=3,
+            )
+        )
         storage.close()
 
         from fastapi.testclient import TestClient
+
         app = create_app()
         client = TestClient(app)
 
@@ -154,15 +161,20 @@ def test_get_session_events():
         storage = _override_db(td)
 
         storage.upsert_session(Session(session_id="sess-e", summary="Event test"))
-        storage.insert_events([
-            _make_event(event_id="e1", session_id="sess-e", role=Role.USER,
-                       text="First message"),
-            _make_event(event_id="e2", session_id="sess-e", role=Role.ASSISTANT,
-                       text="Assistant reply"),
-        ])
+        storage.insert_events(
+            [
+                _make_event(
+                    event_id="e1", session_id="sess-e", role=Role.USER, text="First message"
+                ),
+                _make_event(
+                    event_id="e2", session_id="sess-e", role=Role.ASSISTANT, text="Assistant reply"
+                ),
+            ]
+        )
         storage.close()
 
         from fastapi.testclient import TestClient
+
         app = create_app()
         client = TestClient(app)
 
@@ -184,6 +196,7 @@ def test_get_session_events_not_found():
         storage.close()
 
         from fastapi.testclient import TestClient
+
         app = create_app()
         client = TestClient(app)
 
@@ -197,14 +210,23 @@ def test_search_english():
         td = Path(tmpdir)
         storage = _override_db(td)
 
-        e1 = _make_event(event_id="e-s1", session_id="s-s", role=Role.USER,
-                         text="Fix the authentication token expiration bug")
-        e2 = _make_event(event_id="e-s2", session_id="s-s", role=Role.ASSISTANT,
-                         text="The token refresh flow needs to handle edge cases")
+        e1 = _make_event(
+            event_id="e-s1",
+            session_id="s-s",
+            role=Role.USER,
+            text="Fix the authentication token expiration bug",
+        )
+        e2 = _make_event(
+            event_id="e-s2",
+            session_id="s-s",
+            role=Role.ASSISTANT,
+            text="The token refresh flow needs to handle edge cases",
+        )
         storage.insert_events([e1, e2])
         storage.close()
 
         from fastapi.testclient import TestClient
+
         app = create_app()
         client = TestClient(app)
 
@@ -222,12 +244,17 @@ def test_search_chinese():
         td = Path(tmpdir)
         storage = _override_db(td)
 
-        e1 = _make_event(event_id="e-cn-s1", session_id="s-cn", role=Role.USER,
-                         text="实现用户登录功能和密码重置流程")
+        e1 = _make_event(
+            event_id="e-cn-s1",
+            session_id="s-cn",
+            role=Role.USER,
+            text="实现用户登录功能和密码重置流程",
+        )
         storage.insert_event(e1)
         storage.close()
 
         from fastapi.testclient import TestClient
+
         app = create_app()
         client = TestClient(app)
 
@@ -245,13 +272,17 @@ def test_search_pagination():
         storage = _override_db(td)
 
         for i in range(5):
-            storage.insert_event(_make_event(
-                event_id=f"e-sp-{i}", session_id="s-sp",
-                text=f"Pagination test event number {i}"
-            ))
+            storage.insert_event(
+                _make_event(
+                    event_id=f"e-sp-{i}",
+                    session_id="s-sp",
+                    text=f"Pagination test event number {i}",
+                )
+            )
         storage.close()
 
         from fastapi.testclient import TestClient
+
         app = create_app()
         client = TestClient(app)
 
@@ -274,14 +305,17 @@ def test_stats():
         storage = _override_db(td)
 
         storage.upsert_session(Session(session_id="s-st", summary="Stats test"))
-        storage.insert_events([
-            _make_event(event_id="e-st-1", session_id="s-st", role=Role.USER),
-            _make_event(event_id="e-st-2", session_id="s-st", role=Role.ASSISTANT),
-            _make_event(event_id="e-st-3", session_id="s-st", role=Role.ASSISTANT),
-        ])
+        storage.insert_events(
+            [
+                _make_event(event_id="e-st-1", session_id="s-st", role=Role.USER),
+                _make_event(event_id="e-st-2", session_id="s-st", role=Role.ASSISTANT),
+                _make_event(event_id="e-st-3", session_id="s-st", role=Role.ASSISTANT),
+            ]
+        )
         storage.close()
 
         from fastapi.testclient import TestClient
+
         app = create_app()
         client = TestClient(app)
 
@@ -300,13 +334,13 @@ def test_stats_daily():
         td = Path(tmpdir)
         storage = _override_db(td)
 
-        storage.insert_event(_make_event(
-            event_id="e-daily-1", session_id="s-d",
-            text="Daily stats test message"
-        ))
+        storage.insert_event(
+            _make_event(event_id="e-daily-1", session_id="s-d", text="Daily stats test message")
+        )
         storage.close()
 
         from fastapi.testclient import TestClient
+
         app = create_app()
         client = TestClient(app)
 

@@ -2,7 +2,6 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -23,10 +22,10 @@ class ContentBlock(BaseModel):
     """A single content block within a message (text, thinking, tool_use, or tool_result)."""
 
     block_type: BlockType
-    text: Optional[str] = None
-    tool_name: Optional[str] = None
-    tool_id: Optional[str] = None
-    tool_input: Optional[dict] = None
+    text: str | None = None
+    tool_name: str | None = None
+    tool_id: str | None = None
+    tool_input: dict | None = None
 
 
 class MemoryEvent(BaseModel):
@@ -34,15 +33,15 @@ class MemoryEvent(BaseModel):
 
     event_id: str
     session_id: str
-    parent_event_id: Optional[str] = None
+    parent_event_id: str | None = None
     timestamp: datetime
     role: Role
     content_blocks: list[ContentBlock] = Field(default_factory=list)
     token_input: int = 0
     token_output: int = 0
-    cwd: Optional[str] = None
-    git_branch: Optional[str] = None
-    model: Optional[str] = None
+    cwd: str | None = None
+    git_branch: str | None = None
+    model: str | None = None
 
 
 class Session(BaseModel):
@@ -52,8 +51,8 @@ class Session(BaseModel):
     summary: str
     project_path: str = ""
     message_count: int = 0
-    first_message_at: Optional[datetime] = None
-    last_message_at: Optional[datetime] = None
+    first_message_at: datetime | None = None
+    last_message_at: datetime | None = None
 
 
 class WatchState(BaseModel):

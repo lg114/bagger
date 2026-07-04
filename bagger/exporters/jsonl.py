@@ -1,6 +1,5 @@
 """JSONL exporter: append raw events to a JSONL file for backup."""
 
-import json
 from pathlib import Path
 
 from bagger.exporters.base import Exporter

@@ -3,12 +3,10 @@
 import json
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from bagger.models.event import BlockType, MemoryEvent, Session
-
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -75,12 +73,12 @@ EVENT_DETAIL_COLS = (
 
 _CJK_RE = re.compile(
     r"["
-    r"\u4e00-\u9fff"   # CJK Unified Ideographs
-    r"\u3400-\u4dbf"   # CJK Unified Extension A
-    r"\uf900-\ufaff"   # CJK Compatibility
-    r"\u3040-\u309f"   # Hiragana
-    r"\u30a0-\u30ff"   # Katakana
-    r"\uac00-\ud7af"   # Hangul
+    r"\u4e00-\u9fff"  # CJK Unified Ideographs
+    r"\u3400-\u4dbf"  # CJK Unified Extension A
+    r"\uf900-\ufaff"  # CJK Compatibility
+    r"\u3040-\u309f"  # Hiragana
+    r"\u30a0-\u30ff"  # Katakana
+    r"\uac00-\ud7af"  # Hangul
     r"]"
 )
 
@@ -120,6 +118,7 @@ def _extract_text(event: MemoryEvent) -> str:
 
 # ── Row helpers ────────────────────────────────────────────
 
+
 def _row_to_dict(row: sqlite3.Row) -> dict:
     """Convert a sqlite3.Row to a plain dict using column names."""
     return dict(row)
@@ -139,7 +138,7 @@ class SqliteStorage:
 
     def __init__(self, db_path: Path):
         self.db_path = db_path
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
 
     def connect(self) -> None:
         # Ensure parent directory exists (needed for WAL file creation)
@@ -194,24 +193,25 @@ class SqliteStorage:
                 session.message_count,
                 session.first_message_at.isoformat() if session.first_message_at else None,
                 session.last_message_at.isoformat() if session.last_message_at else None,
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
             ),
         )
         self.conn.commit()
 
     def session_exists(self, session_id: str) -> bool:
-        return self.conn.execute(
-            "SELECT 1 FROM sessions WHERE id = ?", (session_id,)
-        ).fetchone() is not None
+        return (
+            self.conn.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            is not None
+        )
 
-    def get_session(self, session_id: str) -> Optional[dict]:
+    def get_session(self, session_id: str) -> dict | None:
         row = self.conn.execute(
             f"SELECT {SESSION_COLS} FROM sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
         return _row_to_dict(row) if row else None
 
-    def find_session_by_prefix(self, prefix: str) -> Optional[dict]:
+    def find_session_by_prefix(self, prefix: str) -> dict | None:
         """Find a session by ID prefix match. Returns None if ambiguous (0 or >1)."""
         rows = self.conn.execute(
             f"SELECT {SESSION_COLS} FROM sessions WHERE id LIKE ?",
@@ -223,8 +223,7 @@ class SqliteStorage:
 
     def list_sessions(self, limit: int = 50) -> list[dict]:
         rows = self.conn.execute(
-            f"SELECT {SESSION_COLS} FROM sessions "
-            f"ORDER BY last_message_at DESC LIMIT ?",
+            f"SELECT {SESSION_COLS} FROM sessions ORDER BY last_message_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
@@ -238,11 +237,18 @@ class SqliteStorage:
         )
         content_text = _extract_text(event)
         return (
-            event.event_id, event.session_id, event.parent_event_id,
-            event.timestamp.isoformat(), event.role.value,
-            content_json, content_text,
-            event.token_input, event.token_output,
-            event.cwd, event.git_branch, event.model,
+            event.event_id,
+            event.session_id,
+            event.parent_event_id,
+            event.timestamp.isoformat(),
+            event.role.value,
+            content_json,
+            content_text,
+            event.token_input,
+            event.token_output,
+            event.cwd,
+            event.git_branch,
+            event.model,
         )
 
     def insert_event(self, event: MemoryEvent) -> None:
@@ -269,7 +275,10 @@ class SqliteStorage:
     # ── Full-text search ────────────────────────────────────
 
     def search(
-        self, query: str, session_id: Optional[str] = None, limit: int = 20,
+        self,
+        query: str,
+        session_id: str | None = None,
+        limit: int = 20,
     ) -> list[dict]:
         """FTS5 (English) or LIKE fallback (CJK). Returns flat list for CLI."""
         if self._fts_enabled() and not _contains_cjk(query):
@@ -277,27 +286,36 @@ class SqliteStorage:
         return self._search_like(query, session_id=session_id, limit=limit)
 
     def search_paginated(
-        self, query: str, session_id: Optional[str] = None,
-        page: int = 1, per_page: int = 20,
+        self,
+        query: str,
+        session_id: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
     ) -> dict:
         """FTS5/LIKE routing with pagination metadata for API."""
         if self._fts_enabled() and not _contains_cjk(query):
-            return self.search_fts(query, session_id=session_id,
-                                   page=page, limit=per_page)
-        return self._search_like_paginated(query, session_id=session_id,
-                                            page=page, per_page=per_page)
+            return self.search_fts(query, session_id=session_id, page=page, limit=per_page)
+        return self._search_like_paginated(
+            query, session_id=session_id, page=page, per_page=per_page
+        )
 
     def _fts_enabled(self) -> bool:
         """Check if the FTS5 virtual table exists."""
         try:
-            return self.conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='events_fts'"
-            ).fetchone() is not None
+            return (
+                self.conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='events_fts'"
+                ).fetchone()
+                is not None
+            )
         except sqlite3.Error:
             return False
 
     def _search_like(
-        self, query: str, session_id: Optional[str] = None, limit: int = 20,
+        self,
+        query: str,
+        session_id: str | None = None,
+        limit: int = 20,
     ) -> list[dict]:
         """LIKE-based search fallback."""
         pattern = f"%{query}%"
@@ -315,8 +333,11 @@ class SqliteStorage:
         return [_row_to_dict(r) for r in self.conn.execute(sql, params).fetchall()]
 
     def _search_like_paginated(
-        self, query: str, session_id: Optional[str] = None,
-        page: int = 1, per_page: int = 20,
+        self,
+        query: str,
+        session_id: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
     ) -> dict:
         """LIKE search with pagination."""
         pattern = f"%{query}%"
@@ -350,8 +371,11 @@ class SqliteStorage:
         }
 
     def search_fts(
-        self, query: str, session_id: Optional[str] = None,
-        limit: int = 20, page: int = 1,
+        self,
+        query: str,
+        session_id: str | None = None,
+        limit: int = 20,
+        page: int = 1,
     ) -> dict:
         """FTS5 full-text search with BM25 ranking and snippet generation."""
         safe_query = _escape_fts5_query(query)
@@ -394,9 +418,7 @@ class SqliteStorage:
         self.conn.execute("DROP TRIGGER IF EXISTS events_ai")
         self.conn.executescript(FTS_SCHEMA)
 
-        rows = self.conn.execute(
-            "SELECT content_text, session_id, event_id FROM events"
-        ).fetchall()
+        rows = self.conn.execute("SELECT content_text, session_id, event_id FROM events").fetchall()
         self.conn.executemany(
             "INSERT INTO events_fts(content_text, session_id, event_id) VALUES (?, ?, ?)",
             [tuple(r) for r in rows],
@@ -407,8 +429,11 @@ class SqliteStorage:
     # ── Paginated queries ──────────────────────────────────
 
     def list_sessions_paginated(
-        self, page: int = 1, per_page: int = 50,
-        sort: str = "last_message_at", order: str = "desc",
+        self,
+        page: int = 1,
+        per_page: int = 50,
+        sort: str = "last_message_at",
+        order: str = "desc",
     ) -> dict:
         """List sessions with pagination."""
         offset = (page - 1) * per_page
@@ -459,8 +484,7 @@ class SqliteStorage:
     def get_session_events(self, session_id: str, context: int = 0) -> list[dict]:
         """Get all events for a session, ordered by timestamp."""
         rows = self.conn.execute(
-            f"SELECT {EVENT_DETAIL_COLS} FROM events "
-            f"WHERE session_id = ? ORDER BY timestamp",
+            f"SELECT {EVENT_DETAIL_COLS} FROM events WHERE session_id = ? ORDER BY timestamp",
             (session_id,),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
@@ -477,9 +501,7 @@ class SqliteStorage:
             "SUM(CASE WHEN role='assistant' THEN 1 ELSE 0 END) as assistant_events "
             "FROM events"
         ).fetchone()
-        total_sessions = self.conn.execute(
-            "SELECT COUNT(*) FROM sessions"
-        ).fetchone()[0]
+        total_sessions = self.conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
         tool_uses = self.conn.execute(
             "SELECT COUNT(*) FROM events WHERE content_text LIKE '%tool_use%'"
         ).fetchone()[0]
@@ -511,8 +533,9 @@ class SqliteStorage:
             "SELECT COUNT(*) FROM sessions WHERE message_count = 0"
         ).fetchone()[0]
         if empty_sessions:
-            issues.append({"level": "warn",
-                           "message": f"{empty_sessions} sessions have 0 messages"})
+            issues.append(
+                {"level": "warn", "message": f"{empty_sessions} sessions have 0 messages"}
+            )
 
         return issues
 

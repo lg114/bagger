@@ -2,18 +2,16 @@
 
 import json
 from pathlib import Path
-from typing import Optional
 
 from bagger.exporters.jsonl import JsonlExporter
 from bagger.models.event import Session, WatchState
-from bagger.parser.claude import parse_jsonl, extract_summary
+from bagger.parser.claude import extract_summary, parse_jsonl
 from bagger.storage.sqlite import SqliteStorage
-
 
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 
-def discover_sessions(projects_dir: Optional[Path] = None) -> list[Path]:
+def discover_sessions(projects_dir: Path | None = None) -> list[Path]:
     """Find all valid Claude Code JSONL session files.
 
     Excludes agent-* files and files containing 'warmup'.
@@ -25,7 +23,11 @@ def discover_sessions(projects_dir: Optional[Path] = None) -> list[Path]:
     files: list[Path] = []
     for root, _, filenames in _walk(projects_dir):
         for name in filenames:
-            if name.endswith(".jsonl") and not name.startswith("agent-") and "warmup" not in name.lower():
+            if (
+                name.endswith(".jsonl")
+                and not name.startswith("agent-")
+                and "warmup" not in name.lower()
+            ):
                 files.append(Path(root) / name)
 
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -35,11 +37,15 @@ def discover_sessions(projects_dir: Optional[Path] = None) -> list[Path]:
 def _walk(projects_dir: Path):
     """os.walk wrapper (avoiding direct os import in public API)."""
     import os
+
     yield from os.walk(projects_dir)
 
 
 def upsert_session_from_events(
-    storage: SqliteStorage, session_id: str, filepath: Path, events: list,
+    storage: SqliteStorage,
+    session_id: str,
+    filepath: Path,
+    events: list,
 ) -> None:
     """Upsert session metadata derived from a list of parsed events."""
     summary = extract_summary(filepath)
@@ -47,22 +53,24 @@ def upsert_session_from_events(
     last_ts = events[-1].timestamp
     project_path = events[0].cwd or ""
 
-    storage.upsert_session(Session(
-        session_id=session_id,
-        summary=summary,
-        project_path=project_path,
-        message_count=storage.get_event_count(session_id),
-        first_message_at=first_ts,
-        last_message_at=last_ts,
-    ))
+    storage.upsert_session(
+        Session(
+            session_id=session_id,
+            summary=summary,
+            project_path=project_path,
+            message_count=storage.get_event_count(session_id),
+            first_message_at=first_ts,
+            last_message_at=last_ts,
+        )
+    )
 
 
 def scan_all(
     storage: SqliteStorage,
-    projects_dir: Optional[Path] = None,
+    projects_dir: Path | None = None,
     full: bool = False,
-    state_path: Optional[Path] = None,
-    jsonl_path: Optional[Path] = None,
+    state_path: Path | None = None,
+    jsonl_path: Path | None = None,
 ) -> dict:
     """Scan all sessions and import events.
 
@@ -124,7 +132,7 @@ def _parse_new_lines(filepath: Path, offset: int) -> list:
     """Parse only new lines appended after a byte offset — no temp file needed."""
     import json as _json
 
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         f.seek(offset)
         new_lines = f.readlines()
 
@@ -141,6 +149,7 @@ def _parse_new_lines(filepath: Path, offset: int) -> list:
             raw_entries.append(raw)
 
     from bagger.parser.claude import _parse_entry
+
     events = [e for raw in raw_entries if (e := _parse_entry(raw)) is not None]
     return events
 

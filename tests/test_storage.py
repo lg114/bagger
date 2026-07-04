@@ -1,7 +1,7 @@
 """Tests for SQLite storage."""
 
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bagger.models.event import (
@@ -25,7 +25,7 @@ def _make_event(
         event_id=event_id,
         session_id=session_id,
         parent_event_id=parent_event_id,
-        timestamp=datetime(2026, 6, 30, 12, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 6, 30, 12, 0, 0, tzinfo=UTC),
         role=role,
         content_blocks=[ContentBlock(block_type=BlockType.TEXT, text=text)],
         token_input=10,
@@ -78,8 +78,8 @@ def test_session_upsert():
             summary="Test session",
             project_path="/tmp/project",
             message_count=3,
-            first_message_at=datetime(2026, 6, 30, 12, 0, tzinfo=timezone.utc),
-            last_message_at=datetime(2026, 6, 30, 12, 1, tzinfo=timezone.utc),
+            first_message_at=datetime(2026, 6, 30, 12, 0, tzinfo=UTC),
+            last_message_at=datetime(2026, 6, 30, 12, 1, tzinfo=UTC),
         )
         storage.upsert_session(session)
 
@@ -132,6 +132,7 @@ def test_search_chinese():
 
 
 # ---- FTS5 specific tests ----
+
 
 def test_fts_search_returns_snippets():
     with tempfile.TemporaryDirectory() as tmpdir:

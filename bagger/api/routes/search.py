@@ -20,7 +20,5 @@ def search_events(
     CJK queries fall back to LIKE-based search.
     """
     with get_storage() as storage:
-        result = storage.search_paginated(
-            q, session_id=session_id, page=page, per_page=per_page
-        )
+        result = storage.search_paginated(q, session_id=session_id, page=page, per_page=per_page)
     return result

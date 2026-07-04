@@ -3,7 +3,6 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from bagger.models.event import (
     BlockType,
@@ -21,7 +20,7 @@ def parse_jsonl(path: Path) -> list[MemoryEvent]:
     """
     events: list[MemoryEvent] = []
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -44,7 +43,7 @@ def parse_jsonl(path: Path) -> list[MemoryEvent]:
 
 def extract_summary(path: Path) -> str:
     """Extract session summary from the first line of a JSONL file."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         first_line = f.readline().strip()
     if not first_line:
         return "(no summary)"
@@ -60,7 +59,7 @@ def extract_summary(path: Path) -> str:
 
     # Fallback: try first user message
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             for line in f:
                 data = json.loads(line.strip())
                 if data.get("type") == "user":
@@ -73,7 +72,7 @@ def extract_summary(path: Path) -> str:
                         if text:
                             return _truncate(text, 120)
                     break
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         pass
 
     return "(no summary)"
@@ -85,7 +84,7 @@ def _truncate(text: str, max_len: int) -> str:
     return text[: max_len - 3] + "..."
 
 
-def _parse_entry(raw: dict) -> Optional[MemoryEvent]:
+def _parse_entry(raw: dict) -> MemoryEvent | None:
     """Parse a single JSONL entry into a MemoryEvent."""
     entry_type = raw["type"]
     msg = raw.get("message", {})
@@ -133,14 +132,10 @@ def _parse_content(role: Role, content: str | list) -> list[ContentBlock]:
         item_type = item.get("type", "")
 
         if item_type == "text":
-            blocks.append(
-                ContentBlock(block_type=BlockType.TEXT, text=item.get("text", ""))
-            )
+            blocks.append(ContentBlock(block_type=BlockType.TEXT, text=item.get("text", "")))
         elif item_type == "thinking":
             blocks.append(
-                ContentBlock(
-                    block_type=BlockType.THINKING, text=item.get("thinking", "")
-                )
+                ContentBlock(block_type=BlockType.THINKING, text=item.get("thinking", ""))
             )
         elif item_type == "tool_use":
             tool_counter += 1
@@ -156,9 +151,7 @@ def _parse_content(role: Role, content: str | list) -> list[ContentBlock]:
             tool_counter += 1
             output = item.get("content", "")
             if isinstance(output, list):
-                text = " ".join(
-                    b.get("text", "") for b in output if isinstance(b, dict)
-                )
+                text = " ".join(b.get("text", "") for b in output if isinstance(b, dict))
             else:
                 text = str(output)
             blocks.append(

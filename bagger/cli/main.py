@@ -1,6 +1,5 @@
 """bagger CLI — AI Coding Agent Data Collector."""
 
-import os
 from functools import wraps
 from pathlib import Path
 
@@ -8,15 +7,16 @@ import click
 
 from bagger.storage.sqlite import SqliteStorage
 
-
 BAGGER_DIR = Path.home() / ".bagger"
 DB_PATH = BAGGER_DIR / "bagger.db"
 
 
 # ── Decorators ──────────────────────────────────────────────
 
+
 def require_db():
     """Decorator: guard that ~/.bagger/bagger.db exists."""
+
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
@@ -24,12 +24,15 @@ def require_db():
                 click.echo("  Run 'bagger init' first.", err=True)
                 return
             return f(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
 def with_storage(f):
     """Decorator: open + close SqliteStorage around the command."""
+
     @wraps(f)
     def wrapper(*args, **kwargs):
         storage = SqliteStorage(DB_PATH)
@@ -38,6 +41,7 @@ def with_storage(f):
             return f(storage, *args, **kwargs)
         finally:
             storage.close()
+
     return wrapper
 
 
@@ -49,6 +53,7 @@ def cli():
 
 
 # ── init ────────────────────────────────────────────────────
+
 
 @cli.command()
 def init():
@@ -64,6 +69,7 @@ def init():
 
 # ── scan ────────────────────────────────────────────────────
 
+
 @cli.command()
 @click.option("--full", is_flag=True, help="Full re-scan (ignore incremental state)")
 @require_db()
@@ -74,15 +80,13 @@ def scan(storage, full):
 
     click.echo("Scanning ~/.claude/projects/ ...")
     stats = scan_all(storage, full=full)
-    click.echo(
-        f"  {stats['sessions']} sessions, "
-        f"{stats['events']} events imported"
-    )
+    click.echo(f"  {stats['sessions']} sessions, {stats['events']} events imported")
     if stats["skipped"]:
         click.echo(f"  {stats['skipped']} sessions skipped (already synced)")
 
 
 # ── watch ───────────────────────────────────────────────────
+
 
 @cli.command()
 @click.option("--interval", default=1.0, help="Polling interval in seconds")
@@ -99,6 +103,7 @@ def watch(storage, interval):
 
 
 # ── search ──────────────────────────────────────────────────
+
 
 @cli.command()
 @click.argument("query")
@@ -133,6 +138,7 @@ def search(storage, query, session, limit):
 
 # ── replay ──────────────────────────────────────────────────
 
+
 @cli.command()
 @click.argument("session_id")
 @require_db()
@@ -152,13 +158,14 @@ def replay(storage, session_id):
     if len(matched) > 1:
         click.echo(f"  Multiple sessions match '{session_id}':")
         for s in matched:
-            click.echo(f"    {s['id'][:16]}... \"{s['summary']}\"")
+            click.echo(f'    {s["id"][:16]}... "{s["summary"]}"')
         return
 
     click.echo(replay_session(storage, matched[0]["id"]))
 
 
 # ── stats ───────────────────────────────────────────────────
+
 
 @cli.command()
 @require_db()
@@ -182,14 +189,13 @@ def stats(storage):
         for sess in storage.list_sessions(limit=5):
             ts = (sess.get("last_message_at") or "")[:10]
             click.echo(
-                f"    {ts}  {sess['id'][:12]}  "
-                f"({sess['message_count']} msgs)  "
-                f'"{sess["summary"]}"'
+                f'    {ts}  {sess["id"][:12]}  ({sess["message_count"]} msgs)  "{sess["summary"]}"'
             )
         click.echo()
 
 
 # ── doctor ──────────────────────────────────────────────────
+
 
 @cli.command()
 def doctor():
@@ -227,22 +233,29 @@ def doctor():
 
             fts_ok = storage._fts_enabled()
             click.echo(
-                click.style(f"  FTS5 {'enabled' if fts_ok else 'not enabled'}",
-                            fg="green" if fts_ok else "yellow")
+                click.style(
+                    f"  FTS5 {'enabled' if fts_ok else 'not enabled'}",
+                    fg="green" if fts_ok else "yellow",
+                )
             )
             if not fts_ok:
-                click.echo(click.style(
-                    "    Run 'bagger rebuild-index' to create FTS5 index", fg="yellow"))
+                click.echo(
+                    click.style("    Run 'bagger rebuild-index' to create FTS5 index", fg="yellow")
+                )
                 issues_found = True
 
             has_error = any(i["level"] == "error" for i in issues)
             click.echo(
-                click.style(f"  SQLite {'OK' if not has_error else 'ISSUES'}",
-                            fg="green" if not has_error else "red")
+                click.style(
+                    f"  SQLite {'OK' if not has_error else 'ISSUES'}",
+                    fg="green" if not has_error else "red",
+                )
             )
 
             for issue in issues:
-                color = {"error": "red", "warn": "yellow", "info": "blue"}.get(issue["level"], "white")
+                color = {"error": "red", "warn": "yellow", "info": "blue"}.get(
+                    issue["level"], "white"
+                )
                 click.echo(click.style(f"    [{issue['level']}] {issue['message']}", fg=color))
                 if issue["level"] in ("error", "warn"):
                     issues_found = True
@@ -254,8 +267,10 @@ def doctor():
 
     # Check bagger dir
     click.echo(
-        click.style(f"  ~/.bagger {'exists' if BAGGER_DIR.exists() else 'not found'}",
-                     fg="green" if BAGGER_DIR.exists() else "yellow")
+        click.style(
+            f"  ~/.bagger {'exists' if BAGGER_DIR.exists() else 'not found'}",
+            fg="green" if BAGGER_DIR.exists() else "yellow",
+        )
     )
     if not BAGGER_DIR.exists():
         issues_found = True
@@ -268,6 +283,7 @@ def doctor():
 
 # ── rebuild-index ───────────────────────────────────────────
 
+
 @cli.command()
 @require_db()
 @with_storage
@@ -279,6 +295,7 @@ def rebuild_index(storage):
 
 
 # ── serve ───────────────────────────────────────────────────
+
 
 @cli.command()
 @click.option("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
@@ -296,6 +313,7 @@ def serve(host, port, do_reload, no_open):
 
     if not no_open:
         import webbrowser
+
         webbrowser.open(f"http://{host}:{port}/docs")
 
     click.echo(click.style(f"\n  Bagger API starting at http://{host}:{port}", bold=True))
@@ -307,7 +325,9 @@ def serve(host, port, do_reload, no_open):
 
     uvicorn.run(
         "bagger.api.app:create_app",
-        host=host, port=port, factory=True,
+        host=host,
+        port=port,
+        factory=True,
         log_level="info",
         reload=do_reload,
     )

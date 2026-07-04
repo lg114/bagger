@@ -6,6 +6,7 @@ from bagger.storage.sqlite import SqliteStorage
 
 try:
     import click
+
     _HAS_COLOR = True
 except ImportError:
     _HAS_COLOR = False

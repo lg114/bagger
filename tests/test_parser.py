@@ -2,11 +2,8 @@
 
 from pathlib import Path
 
-import pytest
-
-from bagger.parser.claude import parse_jsonl, extract_summary
 from bagger.models.event import BlockType, Role
-
+from bagger.parser.claude import extract_summary, parse_jsonl
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_session.jsonl"
 

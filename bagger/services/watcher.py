@@ -3,10 +3,8 @@
 import signal
 import time
 from pathlib import Path
-from typing import Optional
 
 from bagger.exporters.jsonl import JsonlExporter
-from bagger.models.event import Session
 from bagger.parser.claude import extract_summary
 from bagger.services.scanner import discover_sessions, upsert_session_from_events
 from bagger.storage.sqlite import SqliteStorage
@@ -15,7 +13,7 @@ from bagger.storage.sqlite import SqliteStorage
 class Watcher:
     """Polling-based file watcher for Claude Code JSONL transcripts."""
 
-    def __init__(self, storage: SqliteStorage, projects_dir: Optional[Path] = None):
+    def __init__(self, storage: SqliteStorage, projects_dir: Path | None = None):
         self.storage = storage
         self.projects_dir = projects_dir
         self._offsets: dict[str, int] = {}
@@ -68,11 +66,14 @@ class Watcher:
 
             if count > 0:
                 upsert_session_from_events(
-                    self.storage, session_id, filepath, new_events,
+                    self.storage,
+                    session_id,
+                    filepath,
+                    new_events,
                 )
                 if last_offset == 0:
                     summary = extract_summary(filepath)
-                    print(f"  [new] session {session_id[:8]} \"{summary}\"")
+                    print(f'  [new] session {session_id[:8]} "{summary}"')
                 print(f"    +{count} events synced")
 
             self._offsets[session_id] = file_size

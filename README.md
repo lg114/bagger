@@ -2,6 +2,11 @@
 
 > AI Coding Agent Data Collector — sync Claude Code transcripts into a searchable local database with a web UI.
 
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
+[![Tests](https://img.shields.io/badge/tests-33%20passing-brightgreen.svg)](#development)
+
 bagger reads the JSONL transcripts that Claude Code writes to `~/.claude/projects/` and turns them into a queryable SQLite database with FTS5 full-text search and session replay. Think of it as your AI coding memory layer — with a visual memory browser on top.
 
 ## Why
@@ -143,6 +148,40 @@ The resulting `.msi` installer is fully self-contained — no Python installatio
 - **Chinese/CJK queries** → LIKE fallback (FTS5 unicode61 can't segment CJK)
 - English search is fast and ranked; Chinese search is exhaustive but guarantees no misses
 
+## Project structure
+
+```
+bagger/
+├── bagger/                # Python package
+│   ├── cli/               # Click commands (init, scan, watch, search, ...)
+│   ├── api/               # FastAPI app + routes (health, sessions, search, stats, sync)
+│   ├── models/            # Pydantic data models (MemoryEvent, Session, WatchState)
+│   ├── parser/            # Claude Code JSONL → MemoryEvent
+│   ├── storage/           # SQLite + FTS5 storage layer
+│   ├── services/          # Business logic (scanner, watcher, search, replay)
+│   └── exporters/         # Export abstractions (base, jsonl)
+├── tests/                 # pytest suite (33 tests)
+├── scripts/               # Build helpers (PyInstaller sidecar bundling)
+├── ui/                    # Tauri + React desktop frontend
+└── design/                # Design specs and assets
+```
+
+Dependency flow is strictly downward: `cli`/`api` → `services` → `parser`/`storage` → `models`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full layering rules.
+
+## Tech stack
+
+| Layer        | Technology                                             |
+|--------------|--------------------------------------------------------|
+| CLI          | Click                                                  |
+| Data models  | Pydantic v2                                            |
+| Parser       | stdlib `json` (streaming JSONL)                        |
+| Storage      | SQLite + FTS5 (stdlib `sqlite3`)                       |
+| REST API     | FastAPI + Uvicorn                                      |
+| Desktop      | Tauri (Rust) + React + Tailwind                        |
+| Lint/format  | ruff (replaces flake8 + isort + black)                 |
+| Tests        | pytest + httpx (FastAPI TestClient)                    |
+| Bundling     | PyInstaller (backend sidecar) + Tauri (desktop .msi)   |
+
 ## Data captured
 
 From each Claude Code transcript, bagger extracts:
@@ -159,8 +198,45 @@ From each Claude Code transcript, bagger extracts:
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -v            # 33 tests
+pytest tests/ -q            # 33 tests
 ```
+
+### Code quality
+
+We use **ruff** for linting and formatting (configured in `pyproject.toml`).
+Run these before every commit:
+
+```bash
+ruff check .               # lint
+ruff check . --fix         # auto-fix safe issues
+ruff format .              # format
+ruff format --check .      # CI-style check (no writes)
+```
+
+The pre-commit gate is: `ruff check . && ruff format --check . && pytest tests/ -q`.
+If any of these fail, the PR is not ready.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for branching strategy, commit
+conventions, the code review checklist, and the project's module layering rules.
+
+## Contributing
+
+Contributions are welcome. Before opening a PR, please read
+[CONTRIBUTING.md](CONTRIBUTING.md) — it covers:
+
+- Development setup and the ruff gate
+- Project structure and dependency layering
+- Git workflow (branch naming, Conventional Commits, PR process)
+- Code review checklist
+- How to add a new CLI command or API endpoint
+
+## Roadmap
+
+- [ ] CI pipeline (GitHub Actions: ruff + pytest on every PR)
+- [ ] Pre-commit hook for ruff
+- [ ] More exporters (Zvec, Markdown)
+- [ ] CJK-aware FTS tokenizer for ranked Chinese search
+- [ ] Config file (`~/.bagger/config.toml`) for non-default paths
 
 ## License
 
