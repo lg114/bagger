@@ -188,9 +188,9 @@
 
 ### ADR-003：抽取 SyncService 统一增量同步
 
-- **Status**：Proposed
+- **Status**：Done
 - **Context**：scanner 和 watcher 各有一份 discover→parse→insert→export 流水线，watcher 还 import scanner 的私有函数。
-- **Decision**：新建 `services/sync.py` 的 `SyncService.sync_once(storage, parser, state)`。scanner 调一次，watcher 轮询调。`_parse_new_lines` 提升为 `Parser.parse_incremental` 公开方法。
+- **Decision**：新建 `services/sync.py` 的 `SyncService`，封装 per-file sync 流水线（parse → insert → export → upsert → advance offset）。`scanner.scan_all()` 和 `watcher.Watcher._poll()` 都委托 `SyncService.sync_file()`。差异（offset 持久化、upsert 门控、解析策略）通过参数表达。
 - **Consequences**：
   - 更容易：修一处惠及两个入口；可加事件钩子
   - 更难：watcher 失去对轮询细节的直接控制（需 SyncService 暴露足够钩子）
@@ -243,8 +243,8 @@
 
 ### 阶段 2 · 统一同步逻辑
 
-- [ ] ADR-003 SyncService 抽取，scanner/watcher 改为调用方
-- [ ] `_parse_new_lines` 提升为 `Parser.parse_incremental`
+- [x] ADR-003 SyncService 抽取，scanner/watcher 改为调用方
+- [x] `_parse_new_lines` 提升为 `Parser.parse_incremental`
 
 **验证标准**：scan/watch 行为等价；删除 watcher 对 scanner 私有函数的 import。
 

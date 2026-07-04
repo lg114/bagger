@@ -31,3 +31,10 @@ class JsonlExporter(Exporter):
     def flush(self) -> None:
         if self._file:
             self._file.flush()
+
+    def close(self) -> None:
+        """Flush and close the file handle. Safe to call multiple times."""
+        self.flush()
+        if self._file is not None:
+            self._file.close()
+            self._file = None

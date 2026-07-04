@@ -1,21 +1,25 @@
-"""Real-time watcher: poll for new JSONL lines and sync incrementally."""
+"""Real-time watcher: poll for new JSONL lines and sync incrementally.
 
-import contextlib
+The per-file sync pipeline (discover → parse → insert → export → upsert
+→ advance offset) lives in ``bagger.services.sync.SyncService``. This
+module is the polling driver: it discovers session files and delegates
+each file to ``SyncService``.
+"""
+
 import signal
 import time
-from pathlib import Path
 
-from bagger.exporters.jsonl import JsonlExporter
 from bagger.parser import ParserRegistry
-from bagger.services.scanner import upsert_session_from_events
+from bagger.services.sync import SyncService
 from bagger.storage.base import Storage
 
 
 class Watcher:
     """Polling-based file watcher for AI coding tool JSONL transcripts.
 
-    Obtains the parser from ParserRegistry by source name so adding
-    a new tool only requires registering a new Parser --- no watcher changes.
+    Each poll cycle discovers session files via ``ParserRegistry`` and
+    delegates per-file syncing to ``SyncService``.  Adding a new AI tool
+    source only requires registering a new Parser — no watcher changes.
     """
 
     def __init__(
@@ -25,9 +29,9 @@ class Watcher:
     ):
         self.storage = storage
         self.parser = ParserRegistry.get(source)
+        self._sync = SyncService(storage, self.parser)
         self._offsets: dict[str, int] = {}
         self._running = False
-        self._exporter = JsonlExporter(Path.home() / ".bagger" / "events.jsonl")
 
     def watch(self, interval: float = 1.0) -> None:
         """Start watching. Runs until Ctrl+C."""
@@ -51,47 +55,23 @@ class Watcher:
         print("\nWatcher stopped.")
 
     def _poll(self) -> None:
-        parser = self.parser
-        files = parser.discover_sessions()
+        files = self.parser.discover_sessions()
 
         for filepath in files:
-            session_id = filepath.stem
-            file_size = filepath.stat().st_size
-            last_offset = self._offsets.get(session_id, 0)
-
-            if file_size <= last_offset:
+            result = self._sync.sync_file(filepath, self._offsets, upsert_always=False)
+            if result is None:
+                continue  # parse error swallowed
+            if result.skipped:
                 continue
 
-            try:
-                new_events = parser.parse_incremental(filepath, last_offset)
-            except Exception:
-                continue
-
-            if not new_events:
-                continue
-
-            count = self.storage.insert_events(new_events)
-            self._export(new_events)
-
-            if count > 0:
-                upsert_session_from_events(
-                    self.storage,
-                    parser,
-                    session_id,
-                    filepath,
-                    new_events,
-                )
-                if last_offset == 0:
-                    summary = parser.extract_summary(filepath)
+            # Only report when new events were inserted (watcher prints).
+            if result.new_count > 0:
+                if result.is_first_sight:
+                    summary = self.parser.extract_summary(filepath)
+                    session_id = filepath.stem
                     print(f'  [new] session {session_id[:8]} "{summary}"')
-                print(f"    +{count} events synced")
-
-            self._offsets[session_id] = file_size
+                print(f"    +{result.new_count} events synced")
 
     def _on_stop(self, signum, frame):
         self._running = False
-
-    def _export(self, events: list) -> None:
-        for ev in events:
-            with contextlib.suppress(Exception):
-                self._exporter.export_event(ev)
+        del signum, frame
