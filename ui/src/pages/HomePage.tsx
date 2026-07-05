@@ -17,10 +17,9 @@ export default function HomePage() {
       {/* Hero Stats */}
       <HeroStats stats={stats} isLoading={statsLoading} error={statsError} />
 
-      {/* Middle: Recent sessions + Project distribution */}
-      <div className="grid grid-cols-3 gap-6">
-        {/* Recent sessions (2/3 width) */}
-        <section className="col-span-2 space-y-4">
+      {/* Recent sessions */}
+      <div className="grid grid-cols-1 gap-6">
+        <section className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold tracking-tight flex items-center gap-2">
               <Clock className="w-4 h-4 text-primary/60" />
@@ -74,20 +73,6 @@ export default function HomePage() {
             </div>
           )}
         </section>
-
-        {/* Right column: activity */}
-        <div className="space-y-4">
-          {stats && stats.total_sessions > 0 && (
-            <div className="glass-card-static p-4 space-y-3">
-              <h3 className="text-sm font-semibold tracking-tight">Activity</h3>
-              <div className="space-y-2">
-                <ProgressRow label="Sessions" value={stats.total_sessions} max={Math.max(stats.total_sessions, 1)} color="bg-primary/40" />
-                <ProgressRow label="Events" value={stats.total_events} max={Math.max(stats.total_events, 1)} color="bg-info/40" />
-                <ProgressRow label="Tokens" value={formatTokens(stats.total_tokens)} raw={stats.total_tokens} max={stats.total_tokens || 1} color="bg-accent/40" />
-              </div>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -126,23 +111,6 @@ function HeroStats({ stats, isLoading, error }: { stats: any; isLoading: boolean
           )}
         </div>
       ))}
-    </div>
-  );
-}
-
-// ── Progress row ──
-
-function ProgressRow({ label, value, raw, max, color }: { label: string; value: string | number; raw?: number; max: number; color: string }) {
-  const pct = raw != null ? Math.min((raw / max) * 100, 100) : 100;
-  return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-xs">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-mono text-foreground/70">{value}</span>
-      </div>
-      <div className="h-1 bg-secondary rounded-full overflow-hidden">
-        <div className={cn("h-full rounded-full transition-all duration-700", color)} style={{ width: `${pct}%` }} />
-      </div>
     </div>
   );
 }
