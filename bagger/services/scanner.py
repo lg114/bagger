@@ -12,6 +12,7 @@ files, and delegates each file to ``SyncService``.
 import json
 from pathlib import Path
 
+from bagger.config import settings
 from bagger.models.event import WatchState
 from bagger.parser import ParserRegistry
 from bagger.services.sync import SyncService
@@ -45,8 +46,8 @@ def scan_all(
         Stats dict with counts.
     """
     parser = ParserRegistry.get(source)
-    state_path = state_path or Path.home() / ".bagger" / "state.json"
-    jsonl_path = jsonl_path or Path.home() / ".bagger" / "events.jsonl"
+    state_path = state_path or settings.state_path
+    jsonl_path = jsonl_path or settings.jsonl_path
 
     sync = SyncService(storage, parser, jsonl_path=jsonl_path)
     state = _load_state(state_path) if not full else WatchState()

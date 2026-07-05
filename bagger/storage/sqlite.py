@@ -97,8 +97,24 @@ _CJK_RE = re.compile(
 
 
 def _contains_cjk(text: str) -> bool:
-    """Check if text contains CJK characters (routing FTS5 vs LIKE)."""
+    """Check if text contains CJK characters (routing FTS5 vs CJK-scored)."""
     return bool(_CJK_RE.search(text))
+
+
+_jieba_cached: bool | None = None  # tri-state: None=not checked, True/False=result
+
+
+def _jieba_available() -> bool:
+    """True if jieba is importable (cached after first check)."""
+    global _jieba_cached
+    if _jieba_cached is None:
+        try:
+            import jieba  # noqa: F401
+
+            _jieba_cached = True
+        except ImportError:
+            _jieba_cached = False
+    return _jieba_cached
 
 
 def _escape_fts5_query(query: str) -> str:
@@ -270,10 +286,8 @@ class SqliteStorage:
     def insert_events(self, events: list[MemoryEvent]) -> int:
         """Batch insert events. Returns count of new events inserted."""
         params = [self._event_params(e) for e in events]
-        self.conn.executemany(_INSERT_EVENT_SQL, params)
-        # executemany with OR IGNORE — count by comparing rows affected
-        # But sqlite3 doesn't give rowcount for executemany; use change count
         before = self.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        self.conn.executemany(_INSERT_EVENT_SQL, params)
         self.conn.commit()
         # Insert tool_uses rows (delete-before-insert for idempotency;
         # events table uses OR IGNORE, so the same event may be re-submitted
@@ -320,9 +334,11 @@ class SqliteStorage:
         session_id: str | None = None,
         limit: int = 20,
     ) -> list[dict]:
-        """FTS5 (English) or LIKE fallback (CJK). Returns flat list for CLI."""
+        """FTS5 (English) or jieba-scored (CJK) or LIKE fallback. CLI flat list."""
         if self._fts_enabled() and not _contains_cjk(query):
             return self.search_fts(query, session_id=session_id, limit=limit)["data"]
+        if _contains_cjk(query) and _jieba_available():
+            return self._search_cjk_scored(query, session_id=session_id, limit=limit)
         return self._search_like(query, session_id=session_id, limit=limit)
 
     def search_paginated(
@@ -332,9 +348,13 @@ class SqliteStorage:
         page: int = 1,
         per_page: int = 20,
     ) -> dict:
-        """FTS5/LIKE routing with pagination metadata for API."""
+        """FTS5 / jieba-scored / LIKE routing with pagination for API."""
         if self._fts_enabled() and not _contains_cjk(query):
             return self.search_fts(query, session_id=session_id, page=page, limit=per_page)
+        if _contains_cjk(query) and _jieba_available():
+            return self._search_cjk_scored_paginated(
+                query, session_id=session_id, page=page, per_page=per_page
+            )
         return self._search_like_paginated(
             query, session_id=session_id, page=page, per_page=per_page
         )
@@ -409,6 +429,81 @@ class SqliteStorage:
             "data": [_row_to_dict(r) for r in rows],
             "meta": _pagination_meta(page, per_page, total),
         }
+
+    # ── CJK scored search (jieba tokenization) ───────────────
+
+    def _search_cjk_scored(
+        self,
+        query: str,
+        session_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """CJK search with jieba tokenization + token-overlap scoring."""
+        return self._do_cjk_scored(query, session_id, limit=limit)["data"]
+
+    def _search_cjk_scored_paginated(
+        self,
+        query: str,
+        session_id: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict:
+        """CJK scored search with pagination."""
+        return self._do_cjk_scored(query, session_id, page=page, per_page=per_page)
+
+    def _do_cjk_scored(
+        self,
+        query: str,
+        session_id: str | None = None,
+        limit: int = 20,
+        page: int | None = None,
+        per_page: int | None = None,
+    ) -> dict:
+        """Core CJK scoring: jieba tokenize → score candidates by token count."""
+        import jieba
+
+        tokens = [t.strip() for t in jieba.cut(query) if len(t.strip()) > 0]
+        if not tokens:
+            return {"data": [], "meta": _pagination_meta(1, per_page or limit, 0)}
+
+        # Candidate fetch via LIKE (cheap pre-filter)
+        pattern = f"%{query}%"
+        sql = (
+            f"SELECT {EVENT_COLS} FROM events e "
+            "LEFT JOIN sessions s ON s.id = e.session_id "
+            "WHERE e.content_text LIKE ?"
+        )
+        params: list = [pattern]
+        if session_id:
+            sql += " AND e.session_id = ?"
+            params.append(session_id)
+        rows = self.conn.execute(sql, params).fetchall()
+
+        # Score by number of unique query tokens found in text
+        unique_tokens = set(tokens)
+        scored = []
+        for r in rows:
+            d = _row_to_dict(r)
+            text = d.get("content_text", "")
+            score = sum(1 for t in unique_tokens if t in text)
+            if score > 0:
+                scored.append((score, d))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        total = len(scored)
+
+        if page is not None and per_page is not None:
+            offset = (page - 1) * per_page
+            page_data = [d for _, d in scored[offset : offset + per_page]]
+        else:
+            page_data = [d for _, d in scored[:limit]]
+
+        return {
+            "data": page_data,
+            "meta": _pagination_meta(page or 1, per_page or limit, total),
+        }
+
+    # ── FTS5 search ──────────────────────────────────────────
 
     def search_fts(
         self,

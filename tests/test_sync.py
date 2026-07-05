@@ -106,10 +106,7 @@ def test_sync_file_first_sight_uses_full_parse():
         assert result is not None
         assert result.is_first_sight is True
         assert result.skipped is False
-        # new_count reflects insert_events() return value (known quirk:
-        # OR IGNORE + executemany makes before/after COUNT equal within
-        # the same txn, so it always returns 0). Verify insertion via
-        # get_event_count instead.
+        assert result.new_count == 4
         assert storage.get_event_count("sess-1") == 4
         _cleanup(storage, sync)
 
@@ -287,8 +284,7 @@ def test_sync_file_full_mode_ignores_offset_and_reparses():
         assert result is not None
         assert result.skipped is False
         assert result.advanced_offset is True
-        # Dupes are ignored by insert_events, so new_count==0 when re-parsing
-        # identical content. The important assertion: we didn't skip.
+        assert result.new_count == 2
         assert storage.get_event_count("sess-1") == 2
         _cleanup(storage, sync)
 

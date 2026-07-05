@@ -5,13 +5,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from bagger.api.app import create_app
-from bagger.api.dependencies import DB_PATH
+from bagger.config import Settings
 from bagger.models.event import BlockType, ContentBlock, MemoryEvent, Role, Session
 from bagger.storage.sqlite import SqliteStorage
 
 # ---- Helpers ----
-
-_original_db_path = DB_PATH
 
 
 def _make_event(
@@ -34,11 +32,11 @@ def _make_event(
 
 
 def _override_db(tmpdir: Path) -> SqliteStorage:
-    """Set up a test database and override the default DB_PATH."""
+    """Set up a test database and override the default settings."""
     import bagger.api.dependencies as deps
 
-    db_path = tmpdir / "test_api.db"
-    deps.DB_PATH = db_path
+    deps.settings = Settings(bagger_dir=tmpdir)
+    db_path = deps.settings.db_path  # same file that get_storage() will open
 
     storage = SqliteStorage(db_path)
     storage.connect()

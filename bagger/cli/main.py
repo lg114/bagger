@@ -5,11 +5,8 @@ from pathlib import Path
 
 import click
 
+from bagger.config import settings
 from bagger.storage.sqlite import SqliteStorage
-
-BAGGER_DIR = Path.home() / ".bagger"
-DB_PATH = BAGGER_DIR / "bagger.db"
-
 
 # ── Decorators ──────────────────────────────────────────────
 
@@ -20,7 +17,7 @@ def require_db():
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
-            if not DB_PATH.exists():
+            if not settings.db_path.exists():
                 click.echo("  Run 'bagger init' first.", err=True)
                 return
             return f(*args, **kwargs)
@@ -35,7 +32,7 @@ def with_storage(f):
 
     @wraps(f)
     def wrapper(*args, **kwargs):
-        storage = SqliteStorage(DB_PATH)
+        storage = SqliteStorage(settings.db_path)
         storage.connect()
         try:
             return f(storage, *args, **kwargs)
@@ -58,13 +55,13 @@ def cli():
 @cli.command()
 def init():
     """Initialize ~/.bagger directory and create SQLite database."""
-    BAGGER_DIR.mkdir(parents=True, exist_ok=True)
+    settings.bagger_dir.mkdir(parents=True, exist_ok=True)
 
-    storage = SqliteStorage(DB_PATH)
+    storage = SqliteStorage(settings.db_path)
     storage.connect()
     storage.close()
 
-    click.echo(click.style(f"  {BAGGER_DIR} initialized", fg="green"))
+    click.echo(click.style(f"  {settings.bagger_dir} initialized", fg="green"))
 
 
 # ── scan ────────────────────────────────────────────────────
@@ -221,8 +218,8 @@ def doctor():
             issues_found = True
 
     # Check database
-    if DB_PATH.exists():
-        storage = SqliteStorage(DB_PATH)
+    if settings.db_path.exists():
+        storage = SqliteStorage(settings.db_path)
         storage.connect()
         try:
             issues = storage.check_integrity()
@@ -268,11 +265,11 @@ def doctor():
     # Check bagger dir
     click.echo(
         click.style(
-            f"  ~/.bagger {'exists' if BAGGER_DIR.exists() else 'not found'}",
-            fg="green" if BAGGER_DIR.exists() else "yellow",
+            f"  ~/.bagger {'exists' if settings.bagger_dir.exists() else 'not found'}",
+            fg="green" if settings.bagger_dir.exists() else "yellow",
         )
     )
-    if not BAGGER_DIR.exists():
+    if not settings.bagger_dir.exists():
         issues_found = True
 
     click.echo()

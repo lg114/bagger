@@ -14,6 +14,7 @@ import contextlib
 from dataclasses import dataclass
 from pathlib import Path
 
+from bagger.config import settings
 from bagger.exporters.jsonl import JsonlExporter
 from bagger.models.event import MemoryEvent, Session
 from bagger.parser.base import Parser
@@ -73,7 +74,7 @@ class SyncService:
     ):
         self.storage = storage
         self.parser = parser
-        self._exporter = JsonlExporter(jsonl_path or Path.home() / ".bagger" / "events.jsonl")
+        self._exporter = JsonlExporter(jsonl_path or settings.jsonl_path)
 
     def close(self) -> None:
         """Flush and close the exporter file handle. Safe to call multiple times."""
