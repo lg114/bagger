@@ -13,10 +13,14 @@ router = APIRouter()
 def list_sessions(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(50, ge=1, le=200, description="Items per page"),
+    sort: str = Query("last_message_at", description="Sort field"),
+    order: str = Query("desc", description="Sort order (asc/desc)"),
 ) -> dict:
-    """Paginated list of all sessions, sorted by last activity."""
+    """Paginated list of all sessions with configurable sorting."""
     with get_storage() as storage:
-        result = storage.list_sessions_paginated(page=page, per_page=per_page)
+        result = storage.list_sessions_paginated(
+            page=page, per_page=per_page, sort=sort, order=order
+        )
     return result
 
 

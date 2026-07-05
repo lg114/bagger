@@ -11,7 +11,7 @@ export default function SessionsPage() {
   const page = parseInt(searchParams.get("page") || "1", 10);
   const sort = (searchParams.get("sort") || "last_message_at") as SortKey;
 
-  const { data, isLoading, error } = useSessions(page);
+  const { data, isLoading, error } = useSessions(page, sort);
 
   const sessions = data?.data ?? [];
   const meta = data?.meta;

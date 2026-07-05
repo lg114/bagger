@@ -106,10 +106,14 @@ export function getHealth(): Promise<Health> {
 export function getSessions(
   page = 1,
   perPage = 50,
+  sort = "last_message_at",
+  order = "desc",
 ): Promise<PaginatedResponse<Session>> {
   return fetchApi<PaginatedResponse<Session>>("/sessions", {
     page,
     per_page: perPage,
+    sort,
+    order,
   });
 }
 
