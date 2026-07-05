@@ -5,7 +5,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
-[![Tests](https://img.shields.io/badge/tests-33%20passing-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-47%20passing-brightgreen.svg)](#development)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
 
 bagger reads the JSONL transcripts that Claude Code writes to `~/.claude/projects/` and turns them into a queryable SQLite database with FTS5 full-text search and session replay. Think of it as your AI coding memory layer — with a visual memory browser on top.
@@ -130,10 +130,15 @@ The resulting `.msi` installer is fully self-contained — no Python installatio
           │                   │
           └─────────┬─────────┘
                     ▼
-            ClaudeCodeParser
+              SyncService
+          (services/sync.py)
                     │
-              MemoryEvent
-                    │
+          ┌─────────┼─────────┐
+          ▼                   ▼
+    Parser Protocol     Storage Protocol
+    (parser/base.py)   (storage/base.py)
+          │                   │
+          └─────────┬─────────┘
                     ▼
          ~/.bagger/bagger.db (SQLite + FTS5)
                     │
@@ -156,15 +161,15 @@ bagger/
 ├── bagger/                # Python package
 │   ├── cli/               # Click commands (init, scan, watch, search, ...)
 │   ├── api/               # FastAPI app + routes (health, sessions, search, stats, sync)
+│   │   └── routes/        # Route modules (health, sessions, search, stats, sync)
 │   ├── models/            # Pydantic data models (MemoryEvent, Session, WatchState)
-│   ├── parser/            # Claude Code JSONL → MemoryEvent
-│   ├── storage/           # SQLite + FTS5 storage layer
-│   ├── services/          # Business logic (scanner, watcher, search, replay)
+│   ├── parser/            # Parser protocol (base.py) + Claude Code implementation (claude.py)
+│   ├── storage/           # Storage protocol (base.py) + SQLite/FTS5 implementation (sqlite.py)
+│   ├── services/          # Business logic (sync, scanner, watcher, search, replay)
 │   └── exporters/         # Export abstractions (base, jsonl)
-├── tests/                 # pytest suite (33 tests)
+├── tests/                 # pytest suite (47 tests)
 ├── scripts/               # Build helpers (PyInstaller sidecar bundling)
-├── ui/                    # Tauri + React desktop frontend
-└── design/                # Design specs and assets
+└── ui/                    # Tauri + React desktop frontend
 ```
 
 Dependency flow is strictly downward: `cli`/`api` → `services` → `parser`/`storage` → `models`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full layering rules.
@@ -175,8 +180,8 @@ Dependency flow is strictly downward: `cli`/`api` → `services` → `parser`/`s
 |--------------|--------------------------------------------------------|
 | CLI          | Click                                                  |
 | Data models  | Pydantic v2                                            |
-| Parser       | stdlib `json` (streaming JSONL)                        |
-| Storage      | SQLite + FTS5 (stdlib `sqlite3`)                       |
+| Parser       | Parser Protocol + stdlib `json` (streaming JSONL)        |
+| Storage      | Storage Protocol + SQLite + FTS5 (stdlib `sqlite3`)      |
 | REST API     | FastAPI + Uvicorn                                      |
 | Desktop      | Tauri (Rust) + React + Tailwind                        |
 | Lint/format  | ruff (replaces flake8 + isort + black)                 |
@@ -199,7 +204,7 @@ From each Claude Code transcript, bagger extracts:
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -q            # 33 tests
+pytest tests/ -q            # 47 tests
 ```
 
 ### Code quality
