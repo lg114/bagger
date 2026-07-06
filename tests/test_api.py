@@ -239,7 +239,7 @@ def test_search_english():
 
 
 def test_search_chinese():
-    """CJK query uses LIKE fallback (no snippet)."""
+    """CJK query uses FTS5 with jieba pre-tokenization (snippets present)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         td = Path(tmpdir)
         storage = _override_db(td)
@@ -263,6 +263,7 @@ def test_search_chinese():
         data = response.json()
         assert data["meta"]["total"] >= 1
         assert "登录" in data["data"][0]["content_text"]
+        assert "snippet" in data["data"][0]  # FTS5 snippet for CJK
 
 
 def test_search_pagination():

@@ -79,11 +79,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
     event_id UNINDEXED,
     tokenize='unicode61'
 );
-
-CREATE TRIGGER IF NOT EXISTS events_ai AFTER INSERT ON events BEGIN
-    INSERT INTO events_fts(content_text, session_id, event_id)
-    VALUES (new.content_text, new.session_id, new.event_id);
-END;
 """
 
 # ── Column lists for row→dict mapping ──────────────────────
@@ -117,7 +112,7 @@ _CJK_RE = re.compile(
 
 
 def _contains_cjk(text: str) -> bool:
-    """Check if text contains CJK characters (routing FTS5 vs CJK-scored)."""
+    """Check if text contains CJK characters."""
     return bool(_CJK_RE.search(text))
 
 
@@ -140,8 +135,8 @@ def _jieba_available() -> bool:
 def _escape_fts5_query(query: str) -> str:
     """Escape and format a query string for FTS5 MATCH.
 
-    Pure ASCII queries: quoted with * for prefix matching (e.g. "auth"*).
-    Only called for non-CJK queries.
+    Wraps each word in double quotes with ``*`` for prefix matching
+    (e.g. ``"auth"*``).  Called for both ASCII and pre-tokenized CJK queries.
     """
     query = query.strip()
     if not query:
@@ -163,6 +158,24 @@ def _extract_text(event: MemoryEvent) -> str:
         elif b.block_type == BlockType.TOOL_RESULT and b.text:
             parts.append(f"[tool_result:{b.text[:200]}]")
     return " ".join(parts)
+
+
+def _tokenize_for_fts(text: str) -> str:
+    """Pre-tokenize CJK text with jieba so that unicode61 can index it correctly.
+
+    Without this, ``unicode61`` treats Chinese text as one unbroken token,
+    making FTS5 useless for CJK queries (falling back to LIKE full-table scans).
+
+    Uses ``HMM=False`` to avoid over-segmentation (HMM sometimes splits common
+    words like "会话" into single characters "会"+"话", which breaks FTS matching).
+
+    Returns the input unchanged when jieba is unavailable or the text is pure ASCII.
+    """
+    if not text or not _contains_cjk(text) or not _jieba_available():
+        return text
+    import jieba
+
+    return " ".join(jieba.cut(text, HMM=False))
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -340,11 +353,26 @@ class SqliteEventRepository:
                 rows,
             )
 
+    def _insert_fts(self, event: MemoryEvent) -> None:
+        """Insert tokenized text into the FTS5 index for this event.
+
+        Uses delete-before-insert per event_id for idempotency (same pattern
+        as ``_insert_tool_uses``).
+        """
+        raw_text = _extract_text(event)
+        fts_text = _tokenize_for_fts(raw_text)
+        self._conn.execute("DELETE FROM events_fts WHERE event_id = ?", (event.event_id,))
+        self._conn.execute(
+            "INSERT INTO events_fts(content_text, session_id, event_id) VALUES (?, ?, ?)",
+            (fts_text, event.session_id, event.event_id),
+        )
+
     # -- public API -----------------------------------------------
 
     def insert_event(self, event: MemoryEvent) -> None:
         self._conn.execute(_INSERT_EVENT_SQL, self._event_params(event))
         self._insert_tool_uses(event)
+        self._insert_fts(event)
         self._conn.commit()
 
     def insert_events(self, events: list[MemoryEvent]) -> int:
@@ -355,6 +383,8 @@ class SqliteEventRepository:
         self._conn.commit()
         for e in events:
             self._insert_tool_uses(e)
+            self._insert_fts(e)
+        self._conn.commit()
         after = self._conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         return after - before
 
@@ -438,17 +468,32 @@ class SqliteSearchIndex:
 
     # -- routing --------------------------------------------------
 
+    def _tokenized_fts_query(self, query: str) -> str:
+        """Tokenize a CJK query with jieba so it matches FTS5 tokenized content.
+
+        Returns the original query unchanged for ASCII-only input or when
+        jieba is unavailable.
+        """
+        if not _contains_cjk(query) or not _jieba_available():
+            return query
+        import jieba
+
+        return " ".join(jieba.cut(query, HMM=False))
+
     def search(
         self,
         query: str,
         session_id: str | None = None,
         limit: int = 20,
     ) -> list[dict]:
-        """FTS5 (English) or jieba-scored (CJK) or LIKE fallback. CLI flat list."""
-        if self._fts_enabled() and not _contains_cjk(query):
-            return self.search_fts(query, session_id=session_id, limit=limit)["data"]
-        if _contains_cjk(query) and _jieba_available():
-            return self._search_cjk_scored(query, session_id=session_id, limit=limit)
+        """FTS5 with BM25 ranking; CJK queries are pre-tokenized before MATCH.
+
+        Falls back to LIKE only when FTS5 is unavailable or jieba isn't
+        installed for CJK text.
+        """
+        if self._fts_enabled():
+            tokenized = self._tokenized_fts_query(query)
+            return self.search_fts(tokenized, session_id=session_id, limit=limit)["data"]
         return self._search_like(query, session_id=session_id, limit=limit)
 
     def search_paginated(
@@ -458,13 +503,10 @@ class SqliteSearchIndex:
         page: int = 1,
         per_page: int = 20,
     ) -> dict:
-        """FTS5 / jieba-scored / LIKE routing with pagination for API."""
-        if self._fts_enabled() and not _contains_cjk(query):
-            return self.search_fts(query, session_id=session_id, page=page, limit=per_page)
-        if _contains_cjk(query) and _jieba_available():
-            return self._search_cjk_scored_paginated(
-                query, session_id=session_id, page=page, per_page=per_page
-            )
+        """FTS5 with pre-tokenization; LIKE fallback. Paginated for API."""
+        if self._fts_enabled():
+            tokenized = self._tokenized_fts_query(query)
+            return self.search_fts(tokenized, session_id=session_id, page=page, limit=per_page)
         return self._search_like_paginated(
             query, session_id=session_id, page=page, per_page=per_page
         )
@@ -532,7 +574,7 @@ class SqliteSearchIndex:
         ).fetchall()
         self._conn.executemany(
             "INSERT INTO events_fts(content_text, session_id, event_id) VALUES (?, ?, ?)",
-            [tuple(r) for r in rows],
+            [(_tokenize_for_fts(r[0]), r[1], r[2]) for r in rows],
         )
         self._conn.commit()
         return len(rows)
@@ -594,74 +636,6 @@ class SqliteSearchIndex:
             "meta": _pagination_meta(page, per_page, total),
         }
 
-    # -- CJK scored (jieba) ---------------------------------------
-
-    def _search_cjk_scored(
-        self,
-        query: str,
-        session_id: str | None = None,
-        limit: int = 20,
-    ) -> list[dict]:
-        return self._do_cjk_scored(query, session_id, limit=limit)["data"]
-
-    def _search_cjk_scored_paginated(
-        self,
-        query: str,
-        session_id: str | None = None,
-        page: int = 1,
-        per_page: int = 20,
-    ) -> dict:
-        return self._do_cjk_scored(query, session_id, page=page, per_page=per_page)
-
-    def _do_cjk_scored(
-        self,
-        query: str,
-        session_id: str | None = None,
-        limit: int = 20,
-        page: int | None = None,
-        per_page: int | None = None,
-    ) -> dict:
-        import jieba
-
-        tokens = [t.strip() for t in jieba.cut(query) if len(t.strip()) > 0]
-        if not tokens:
-            return {"data": [], "meta": _pagination_meta(1, per_page or limit, 0)}
-
-        pattern = f"%{query}%"
-        sql = (
-            f"SELECT {EVENT_COLS} FROM events e "
-            "LEFT JOIN sessions s ON s.id = e.session_id "
-            "WHERE e.content_text LIKE ?"
-        )
-        params: list = [pattern]
-        if session_id:
-            sql += " AND e.session_id = ?"
-            params.append(session_id)
-        rows = self._conn.execute(sql, params).fetchall()
-
-        unique_tokens = set(tokens)
-        scored = []
-        for r in rows:
-            d = _row_to_dict(r)
-            text = d.get("content_text", "")
-            score = sum(1 for t in unique_tokens if t in text)
-            if score > 0:
-                scored.append((score, d))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        total = len(scored)
-
-        if page is not None and per_page is not None:
-            offset_cjk = (page - 1) * per_page
-            page_data = [d for _, d in scored[offset_cjk : offset_cjk + per_page]]
-        else:
-            page_data = [d for _, d in scored[:limit]]
-
-        return {
-            "data": page_data,
-            "meta": _pagination_meta(page or 1, per_page or limit, total),
-        }
-
 
 # ===================================================================
 # Facade
@@ -697,12 +671,20 @@ class SqliteStorage:
             self._conn.execute("PRAGMA journal_mode=DELETE")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
+        # Drop legacy FTS auto-insert trigger — we now insert tokenized text
+        # manually so that CJK queries benefit from FTS5 indexing.
+        self._conn.execute("DROP TRIGGER IF EXISTS events_ai")
         self._conn.executescript(FTS_SCHEMA)
         self._conn.commit()
 
         self._sessions = SqliteSessionRepository(self._conn)
         self._events = SqliteEventRepository(self._conn)
         self._search = SqliteSearchIndex(self._conn)
+
+        # Rebuild FTS on every connect.  Fast for personal-scale data
+        # (< 10k events takes ~50 ms) and guarantees tokenized content
+        # without migration tracking.
+        self._search.rebuild_fts_index()
 
     def close(self) -> None:
         """Close the SQLite database and null out repositories."""

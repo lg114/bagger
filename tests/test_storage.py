@@ -111,7 +111,7 @@ def test_stats():
 
 
 def test_search_chinese():
-    """CJK queries use LIKE fallback (FTS5 unicode61 doesn't segment CJK)."""
+    """CJK queries use FTS5 via jieba pre-tokenization (no LIKE fallback needed)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
@@ -120,9 +120,10 @@ def test_search_chinese():
         event = _make_event(text="修复登录 token 过期问题")
         storage.insert_event(event)
 
-        # CJK → LIKE fallback
+        # CJK → FTS5 with jieba pre-tokenization (snippets present)
         results = storage.search("登录")
         assert len(results) >= 1
+        assert "snippet" in results[0]  # FTS5 snippet for CJK
 
         # ASCII → FTS5 (snippet present)
         results2 = storage.search("token")
@@ -253,7 +254,7 @@ def test_fts_search_with_session_filter():
 
 
 def test_fts_chinese_search():
-    """CJK queries use LIKE fallback (independent of FTS5 table)."""
+    """CJK queries use FTS5 with jieba pre-tokenization (BM25 + snippets)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
@@ -265,15 +266,16 @@ def test_fts_chinese_search():
         )
         storage.insert_event(event)
 
-        # CJK queries → LIKE fallback (no snippet)
+        # CJK → FTS5 (snippets and rank present)
         r1 = storage.search("登录")
         assert len(r1) >= 1
+        assert "snippet" in r1[0]
         assert "登录" in r1[0]["content_text"]
 
         r2 = storage.search("会话管理")
         assert len(r2) >= 1
 
-        # Mixed CJK+ASCII: LIKE since CJK is present
+        # Mixed CJK+ASCII → FTS5
         r3 = storage.search("token 刷新")
         assert len(r3) >= 1
 
