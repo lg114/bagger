@@ -48,7 +48,7 @@ function StatsGrid() {
   ];
 
   return (
-    <div className="grid grid-cols-3 gap-6">
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
       {error ? (
         <div className="col-span-3">
           <ErrorBlock message="Failed to load statistics" />
