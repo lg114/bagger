@@ -3,11 +3,20 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { ChevronDown, ChevronRight, Wrench, Brain, FileOutput, Copy, Check } from "lucide-react";
+import type { Components } from "react-markdown";
 import type { ContentBlock as ContentBlockType } from "@/lib/api";
 
 interface Props {
   block: ContentBlockType;
 }
+
+const markdownComponents: Components = {
+  table: ({ children }) => (
+    <div className="overflow-x-auto my-3">
+      <table>{children}</table>
+    </div>
+  ),
+};
 
 export default function ContentBlockRenderer({ block }: Props) {
   switch (block.block_type) {
@@ -38,7 +47,7 @@ function TextBlock({ text }: { text: string }) {
     return (
       <div>
         <div className="markdown-content text-sm">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>
             {preview}
           </ReactMarkdown>
         </div>
@@ -54,7 +63,7 @@ function TextBlock({ text }: { text: string }) {
 
   return (
     <div className="markdown-content text-sm">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents}>
         {text}
       </ReactMarkdown>
     </div>
