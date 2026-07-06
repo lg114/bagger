@@ -681,10 +681,13 @@ class SqliteStorage:
         self._events = SqliteEventRepository(self._conn)
         self._search = SqliteSearchIndex(self._conn)
 
-        # Rebuild FTS on every connect.  Fast for personal-scale data
-        # (< 10k events takes ~50 ms) and guarantees tokenized content
-        # without migration tracking.
-        self._search.rebuild_fts_index()
+        # Migrate: old FTS data was inserted raw (not tokenized) via the
+        # legacy trigger.  Rebuild once on first connect, then skip.
+        version = self._conn.execute("PRAGMA user_version").fetchone()[0]
+        if version < 1:
+            self._search.rebuild_fts_index()
+            self._conn.execute("PRAGMA user_version = 1")
+            self._conn.commit()
 
     def close(self) -> None:
         """Close the SQLite database and null out repositories."""
