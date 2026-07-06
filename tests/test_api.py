@@ -33,10 +33,12 @@ def _make_event(
 
 def _override_db(tmpdir: Path) -> SqliteStorage:
     """Set up a test database and override the default settings."""
-    import bagger.api.dependencies as deps
+    import bagger.config as config
 
-    deps.settings = Settings(bagger_dir=tmpdir)
-    db_path = deps.settings.db_path  # same file that get_storage() will open
+    # create_storage() reads from bagger.config.settings; patch it so
+    # get_storage() opens the temp DB instead of the user's real DB.
+    config.settings = Settings(bagger_dir=tmpdir)
+    db_path = config.settings.db_path
 
     storage = SqliteStorage(db_path)
     storage.connect()

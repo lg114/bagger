@@ -6,7 +6,7 @@ from pathlib import Path
 import click
 
 from bagger.config import settings
-from bagger.storage.sqlite import SqliteStorage
+from bagger.storage import create_storage
 
 # ── Decorators ──────────────────────────────────────────────
 
@@ -28,12 +28,11 @@ def require_db():
 
 
 def with_storage(f):
-    """Decorator: open + close SqliteStorage around the command."""
+    """Decorator: open + close a Storage backend around the command."""
 
     @wraps(f)
     def wrapper(*args, **kwargs):
-        storage = SqliteStorage(settings.db_path)
-        storage.connect()
+        storage = create_storage()
         try:
             return f(storage, *args, **kwargs)
         finally:
@@ -57,8 +56,7 @@ def init():
     """Initialize ~/.bagger directory and create SQLite database."""
     settings.bagger_dir.mkdir(parents=True, exist_ok=True)
 
-    storage = SqliteStorage(settings.db_path)
-    storage.connect()
+    storage = create_storage()
     storage.close()
 
     click.echo(click.style(f"  {settings.bagger_dir} initialized", fg="green"))
@@ -219,8 +217,7 @@ def doctor():
 
     # Check database
     if settings.db_path.exists():
-        storage = SqliteStorage(settings.db_path)
-        storage.connect()
+        storage = create_storage()
         try:
             issues = storage.check_integrity()
             s = storage.get_stats()

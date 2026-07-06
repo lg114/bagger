@@ -67,3 +67,11 @@ class Storage(SessionRepository, EventRepository, SearchIndex, Protocol):
     SqliteStorage satisfies this structurally. Split sub-protocols above exist
     for consumers that only need a subset (e.g. search service only needs SearchIndex).
     """
+
+    def connect(self) -> None:
+        """Open the underlying connection (file, socket, etc.)."""
+        ...
+
+    def close(self) -> None:
+        """Close the underlying connection. Safe to call multiple times."""
+        ...
