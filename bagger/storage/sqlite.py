@@ -1,4 +1,22 @@
-"""SQLite storage with FTS5 full-text search for bagger."""
+"""SQLite storage with FTS5 full-text search for bagger.
+
+O V E R V I E W
+
+``SqliteStorage`` is a facade that delegates to three inner repositories,
+each operating on a shared ``sqlite3.Connection``::
+
+    SqliteStorage (facade, implements Storage Protocol)
+        ├── SqliteSessionRepository  (SessionRepository Protocol)
+        ├── SqliteEventRepository    (EventRepository Protocol)
+        └── SqliteSearchIndex        (SearchIndex Protocol)
+
+All three repos are thin wrappers around ``conn.execute()`` — they do not
+own the connection lifecycle. ``SqliteStorage.connect()`` creates the
+connection *and* the repos; ``.close()`` tears them all down.
+
+Module-level helpers (``_row_to_dict``, ``_extract_text``, ``_contains_cjk``,
+etc.) are shared across repos and remain stateless.
+"""
 
 import contextlib
 import json
@@ -8,6 +26,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from bagger.models.event import BlockType, MemoryEvent, Session
+
+# ── Schema ──────────────────────────────────────────────────
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -145,15 +165,22 @@ def _extract_text(event: MemoryEvent) -> str:
     return " ".join(parts)
 
 
-# ── Row helpers ────────────────────────────────────────────
-
-
 def _row_to_dict(row: sqlite3.Row) -> dict:
     """Convert a sqlite3.Row to a plain dict using column names."""
     return dict(row)
 
 
-# ── Storage ────────────────────────────────────────────────
+def _pagination_meta(page: int, per_page: int, total: int) -> dict:
+    """Build pagination metadata dict."""
+    return {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": max(1, (total + per_page - 1) // per_page),
+    }
+
+
+# ── INSERT SQL (shared across event repo and facade) ───────
 
 _INSERT_EVENT_SQL = """INSERT OR IGNORE INTO events
     (event_id, session_id, parent_event_id, timestamp, role,
@@ -162,47 +189,19 @@ _INSERT_EVENT_SQL = """INSERT OR IGNORE INTO events
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
 
 
-class SqliteStorage:
-    """SQLite-backed storage with FTS5 full-text search."""
+# ===================================================================
+# Repository classes (thin wrappers around sqlite3.Connection)
+# ===================================================================
 
-    def __init__(self, db_path: Path):
-        self.db_path = db_path
-        self._conn: sqlite3.Connection | None = None
 
-    def connect(self) -> None:
-        # Ensure parent directory exists (needed for WAL file creation)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.db_path.resolve()))
-        self._conn.row_factory = sqlite3.Row
-        try:
-            self._conn.execute("PRAGMA journal_mode=WAL")
-        except sqlite3.OperationalError:
-            # WAL can fail on some Windows configurations (restricted fs,
-            # network drives, etc.). Fall back to DELETE (default) mode —
-            # slightly less concurrent but fully functional.
-            self._conn.execute("PRAGMA journal_mode=DELETE")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.executescript(SCHEMA)
-        self._conn.executescript(FTS_SCHEMA)
-        self._conn.commit()
+class SqliteSessionRepository:
+    """Session CRUD backed by a shared SQLite connection."""
 
-    def close(self) -> None:
-        if self._conn:
-            with contextlib.suppress(sqlite3.Error):
-                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            self._conn.close()
-            self._conn = None
-
-    @property
-    def conn(self) -> sqlite3.Connection:
-        if self._conn is None:
-            raise RuntimeError("Storage not connected. Call connect() first.")
-        return self._conn
-
-    # ── Session operations ──────────────────────────────────
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
 
     def upsert_session(self, session: Session) -> None:
-        self.conn.execute(
+        self._conn.execute(
             """INSERT INTO sessions (id, summary, project_path, message_count,
                first_message_at, last_message_at, last_synced_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -223,24 +222,23 @@ class SqliteStorage:
                 datetime.now(UTC).isoformat(),
             ),
         )
-        self.conn.commit()
+        self._conn.commit()
 
     def session_exists(self, session_id: str) -> bool:
         return (
-            self.conn.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            self._conn.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone()
             is not None
         )
 
     def get_session(self, session_id: str) -> dict | None:
-        row = self.conn.execute(
+        row = self._conn.execute(
             f"SELECT {SESSION_COLS} FROM sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
         return _row_to_dict(row) if row else None
 
     def find_session_by_prefix(self, prefix: str) -> dict | None:
-        """Find a session by ID prefix match. Returns None if ambiguous (0 or >1)."""
-        rows = self.conn.execute(
+        rows = self._conn.execute(
             f"SELECT {SESSION_COLS} FROM sessions WHERE id LIKE ?",
             (f"{prefix}%",),
         ).fetchall()
@@ -249,15 +247,56 @@ class SqliteStorage:
         return None
 
     def list_sessions(self, limit: int = 50) -> list[dict]:
-        rows = self.conn.execute(
+        rows = self._conn.execute(
             f"SELECT {SESSION_COLS} FROM sessions ORDER BY last_message_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
 
-    # ── Event operations ───────────────────────────────────
+    def list_sessions_paginated(
+        self,
+        page: int = 1,
+        per_page: int = 50,
+        sort: str = "last_message_at",
+        order: str = "desc",
+    ) -> dict:
+        offset = (page - 1) * per_page
+        allowed_sort = {"last_message_at", "message_count", "first_message_at", "id"}
+        col = sort if sort in allowed_sort else "last_message_at"
+        direction = "DESC" if order.lower() == "desc" else "ASC"
 
-    def _event_params(self, event: MemoryEvent) -> tuple:
+        total = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        rows = self._conn.execute(
+            f"SELECT {SESSION_COLS} FROM sessions "
+            f"ORDER BY {col} {direction} NULLS LAST LIMIT ? OFFSET ?",
+            (per_page, offset),
+        ).fetchall()
+
+        return {
+            "data": [_row_to_dict(r) for r in rows],
+            "meta": _pagination_meta(page, per_page, total),
+        }
+
+    def get_event_count(self, session_id: str) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM events WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return row[0] if row else 0
+
+
+# ────────────────────────────────────────────────────────────
+
+
+class SqliteEventRepository:
+    """Event storage + stats backed by a shared SQLite connection."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    # -- helpers --------------------------------------------------
+
+    @staticmethod
+    def _event_params(event: MemoryEvent) -> tuple:
         """Serialize a MemoryEvent into INSERT parameter tuple."""
         content_json = json.dumps(
             [b.model_dump() for b in event.content_blocks], ensure_ascii=False
@@ -278,25 +317,6 @@ class SqliteStorage:
             event.model,
         )
 
-    def insert_event(self, event: MemoryEvent) -> None:
-        self.conn.execute(_INSERT_EVENT_SQL, self._event_params(event))
-        self._insert_tool_uses(event)
-        self.conn.commit()
-
-    def insert_events(self, events: list[MemoryEvent]) -> int:
-        """Batch insert events. Returns count of new events inserted."""
-        params = [self._event_params(e) for e in events]
-        before = self.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-        self.conn.executemany(_INSERT_EVENT_SQL, params)
-        self.conn.commit()
-        # Insert tool_uses rows (delete-before-insert for idempotency;
-        # events table uses OR IGNORE, so the same event may be re-submitted
-        # with the same tool_use blocks from re-parsing).
-        for e in events:
-            self._insert_tool_uses(e)
-        after = self.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-        return after - before
-
     def _insert_tool_uses(self, event: MemoryEvent) -> None:
         """Extract TOOL_USE blocks from an event and insert into tool_uses table.
 
@@ -313,20 +333,110 @@ class SqliteStorage:
             if b.block_type == BlockType.TOOL_USE
         ]
         if rows:
-            self.conn.execute("DELETE FROM tool_uses WHERE event_id = ?", (event.event_id,))
-            self.conn.executemany(
+            self._conn.execute("DELETE FROM tool_uses WHERE event_id = ?", (event.event_id,))
+            self._conn.executemany(
                 "INSERT INTO tool_uses(event_id, tool_name, tool_id, tool_input_json) "
                 "VALUES (?, ?, ?, ?)",
                 rows,
             )
 
-    def get_event_count(self, session_id: str) -> int:
-        row = self.conn.execute(
-            "SELECT COUNT(*) FROM events WHERE session_id = ?", (session_id,)
-        ).fetchone()
-        return row[0] if row else 0
+    # -- public API -----------------------------------------------
 
-    # ── Full-text search ────────────────────────────────────
+    def insert_event(self, event: MemoryEvent) -> None:
+        self._conn.execute(_INSERT_EVENT_SQL, self._event_params(event))
+        self._insert_tool_uses(event)
+        self._conn.commit()
+
+    def insert_events(self, events: list[MemoryEvent]) -> int:
+        """Batch insert events. Returns count of new events inserted."""
+        params = [self._event_params(e) for e in events]
+        before = self._conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        self._conn.executemany(_INSERT_EVENT_SQL, params)
+        self._conn.commit()
+        for e in events:
+            self._insert_tool_uses(e)
+        after = self._conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        return after - before
+
+    def get_session_events(self, session_id: str, context: int = 0) -> list[dict]:
+        rows = self._conn.execute(
+            f"SELECT {EVENT_DETAIL_COLS} FROM events WHERE session_id = ? ORDER BY timestamp",
+            (session_id,),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+    def get_stats(self) -> dict:
+        row = self._conn.execute(
+            "SELECT "
+            "COUNT(*) as total_events, "
+            "COALESCE(SUM(token_input + token_output), 0) as total_tokens, "
+            "SUM(CASE WHEN role='user' THEN 1 ELSE 0 END) as user_events, "
+            "SUM(CASE WHEN role='assistant' THEN 1 ELSE 0 END) as assistant_events "
+            "FROM events"
+        ).fetchone()
+        total_sessions = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        tool_uses = self._conn.execute("SELECT COUNT(*) FROM tool_uses").fetchone()[0]
+
+        return {
+            "total_sessions": total_sessions,
+            "total_events": row["total_events"],
+            "total_tokens": row["total_tokens"],
+            "user_events": row["user_events"],
+            "assistant_events": row["assistant_events"],
+            "tool_uses": tool_uses,
+        }
+
+    def get_daily_stats(self, days: int = 30) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT substr(timestamp, 1, 10) as date, "
+            "COUNT(*) as count, "
+            "COALESCE(SUM(token_input + token_output), 0) as tokens "
+            "FROM events GROUP BY date ORDER BY date DESC LIMIT ?",
+            (days,),
+        ).fetchall()
+        return [_row_to_dict(r) for r in reversed(rows)]
+
+    def get_tool_usage_stats(self, limit: int = 20) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT tool_name, COUNT(*) as count "
+            "FROM tool_uses "
+            "GROUP BY tool_name ORDER BY count DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+    def check_integrity(self) -> list[dict]:
+        issues: list[dict] = []
+
+        try:
+            self._conn.execute("PRAGMA integrity_check").fetchone()
+        except sqlite3.Error as e:
+            issues.append({"level": "error", "message": f"Database corrupt: {e}"})
+
+        if self._conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0:
+            issues.append({"level": "info", "message": "No events in database"})
+
+        empty_sessions = self._conn.execute(
+            "SELECT COUNT(*) FROM sessions WHERE message_count = 0"
+        ).fetchone()[0]
+        if empty_sessions:
+            issues.append(
+                {"level": "warn", "message": f"{empty_sessions} sessions have 0 messages"}
+            )
+
+        return issues
+
+
+# ────────────────────────────────────────────────────────────
+
+
+class SqliteSearchIndex:
+    """FTS5 + CJK full-text search backed by a shared SQLite connection."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    # -- routing --------------------------------------------------
 
     def search(
         self,
@@ -359,151 +469,18 @@ class SqliteStorage:
             query, session_id=session_id, page=page, per_page=per_page
         )
 
+    # -- FTS5 -----------------------------------------------------
+
     def _fts_enabled(self) -> bool:
-        """Check if the FTS5 virtual table exists."""
         try:
             return (
-                self.conn.execute(
+                self._conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='events_fts'"
                 ).fetchone()
                 is not None
             )
         except sqlite3.Error:
             return False
-
-    def _search_like(
-        self,
-        query: str,
-        session_id: str | None = None,
-        limit: int = 20,
-    ) -> list[dict]:
-        """LIKE-based search fallback."""
-        pattern = f"%{query}%"
-        sql = (
-            f"SELECT {EVENT_COLS} FROM events e "
-            f"LEFT JOIN sessions s ON s.id = e.session_id "
-            f"WHERE e.content_text LIKE ?"
-        )
-        params: list = [pattern]
-        if session_id:
-            sql += " AND e.session_id = ?"
-            params.append(session_id)
-        sql += " ORDER BY e.timestamp DESC LIMIT ?"
-        params.append(limit)
-        return [_row_to_dict(r) for r in self.conn.execute(sql, params).fetchall()]
-
-    def _search_like_paginated(
-        self,
-        query: str,
-        session_id: str | None = None,
-        page: int = 1,
-        per_page: int = 20,
-    ) -> dict:
-        """LIKE search with pagination."""
-        pattern = f"%{query}%"
-        offset = (page - 1) * per_page
-
-        # Count
-        count_sql = "SELECT COUNT(*) FROM events e WHERE e.content_text LIKE ?"
-        count_params: list = [pattern]
-        if session_id:
-            count_sql += " AND e.session_id = ?"
-            count_params.append(session_id)
-        total = self.conn.execute(count_sql, count_params).fetchone()[0]
-
-        # Fetch
-        sql = (
-            f"SELECT {EVENT_COLS} FROM events e "
-            f"LEFT JOIN sessions s ON s.id = e.session_id "
-            f"WHERE e.content_text LIKE ?"
-        )
-        params: list = [pattern]
-        if session_id:
-            sql += " AND e.session_id = ?"
-            params.append(session_id)
-        sql += " ORDER BY e.timestamp DESC LIMIT ? OFFSET ?"
-        params.extend([per_page, offset])
-
-        rows = self.conn.execute(sql, params).fetchall()
-        return {
-            "data": [_row_to_dict(r) for r in rows],
-            "meta": _pagination_meta(page, per_page, total),
-        }
-
-    # ── CJK scored search (jieba tokenization) ───────────────
-
-    def _search_cjk_scored(
-        self,
-        query: str,
-        session_id: str | None = None,
-        limit: int = 20,
-    ) -> list[dict]:
-        """CJK search with jieba tokenization + token-overlap scoring."""
-        return self._do_cjk_scored(query, session_id, limit=limit)["data"]
-
-    def _search_cjk_scored_paginated(
-        self,
-        query: str,
-        session_id: str | None = None,
-        page: int = 1,
-        per_page: int = 20,
-    ) -> dict:
-        """CJK scored search with pagination."""
-        return self._do_cjk_scored(query, session_id, page=page, per_page=per_page)
-
-    def _do_cjk_scored(
-        self,
-        query: str,
-        session_id: str | None = None,
-        limit: int = 20,
-        page: int | None = None,
-        per_page: int | None = None,
-    ) -> dict:
-        """Core CJK scoring: jieba tokenize → score candidates by token count."""
-        import jieba
-
-        tokens = [t.strip() for t in jieba.cut(query) if len(t.strip()) > 0]
-        if not tokens:
-            return {"data": [], "meta": _pagination_meta(1, per_page or limit, 0)}
-
-        # Candidate fetch via LIKE (cheap pre-filter)
-        pattern = f"%{query}%"
-        sql = (
-            f"SELECT {EVENT_COLS} FROM events e "
-            "LEFT JOIN sessions s ON s.id = e.session_id "
-            "WHERE e.content_text LIKE ?"
-        )
-        params: list = [pattern]
-        if session_id:
-            sql += " AND e.session_id = ?"
-            params.append(session_id)
-        rows = self.conn.execute(sql, params).fetchall()
-
-        # Score by number of unique query tokens found in text
-        unique_tokens = set(tokens)
-        scored = []
-        for r in rows:
-            d = _row_to_dict(r)
-            text = d.get("content_text", "")
-            score = sum(1 for t in unique_tokens if t in text)
-            if score > 0:
-                scored.append((score, d))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        total = len(scored)
-
-        if page is not None and per_page is not None:
-            offset = (page - 1) * per_page
-            page_data = [d for _, d in scored[offset : offset + per_page]]
-        else:
-            page_data = [d for _, d in scored[:limit]]
-
-        return {
-            "data": page_data,
-            "meta": _pagination_meta(page or 1, per_page or limit, total),
-        }
-
-    # ── FTS5 search ──────────────────────────────────────────
 
     def search_fts(
         self,
@@ -516,15 +493,13 @@ class SqliteStorage:
         safe_query = _escape_fts5_query(query)
         offset = (page - 1) * limit
 
-        # Count
         count_sql = "SELECT COUNT(*) FROM events_fts WHERE events_fts MATCH ?"
         count_params: list = [safe_query]
         if session_id:
             count_sql += " AND session_id = ?"
             count_params.append(session_id)
-        total = self.conn.execute(count_sql, count_params).fetchone()[0]
+        total = self._conn.execute(count_sql, count_params).fetchone()[0]
 
-        # Search
         sql = (
             f"SELECT {EVENT_COLS}, "
             f"snippet(events_fts, 0, '<mark>', '</mark>', '...', 32) as snippet, "
@@ -541,27 +516,228 @@ class SqliteStorage:
         sql += " ORDER BY rank LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
-        rows = self.conn.execute(sql, params).fetchall()
+        rows = self._conn.execute(sql, params).fetchall()
         return {
             "data": [_row_to_dict(r) for r in rows],
             "meta": _pagination_meta(page, limit, total),
         }
 
     def rebuild_fts_index(self) -> int:
-        """Rebuild the FTS5 index. Returns number of events indexed."""
-        self.conn.execute("DROP TABLE IF EXISTS events_fts")
-        self.conn.execute("DROP TRIGGER IF EXISTS events_ai")
-        self.conn.executescript(FTS_SCHEMA)
+        self._conn.execute("DROP TABLE IF EXISTS events_fts")
+        self._conn.execute("DROP TRIGGER IF EXISTS events_ai")
+        self._conn.executescript(FTS_SCHEMA)
 
-        rows = self.conn.execute("SELECT content_text, session_id, event_id FROM events").fetchall()
-        self.conn.executemany(
+        rows = self._conn.execute(
+            "SELECT content_text, session_id, event_id FROM events"
+        ).fetchall()
+        self._conn.executemany(
             "INSERT INTO events_fts(content_text, session_id, event_id) VALUES (?, ?, ?)",
             [tuple(r) for r in rows],
         )
-        self.conn.commit()
+        self._conn.commit()
         return len(rows)
 
-    # ── Paginated queries ──────────────────────────────────
+    # -- LIKE fallback --------------------------------------------
+
+    def _search_like(
+        self,
+        query: str,
+        session_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        pattern = f"%{query}%"
+        sql = (
+            f"SELECT {EVENT_COLS} FROM events e "
+            f"LEFT JOIN sessions s ON s.id = e.session_id "
+            f"WHERE e.content_text LIKE ?"
+        )
+        params: list = [pattern]
+        if session_id:
+            sql += " AND e.session_id = ?"
+            params.append(session_id)
+        sql += " ORDER BY e.timestamp DESC LIMIT ?"
+        params.append(limit)
+        return [_row_to_dict(r) for r in self._conn.execute(sql, params).fetchall()]
+
+    def _search_like_paginated(
+        self,
+        query: str,
+        session_id: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict:
+        pattern = f"%{query}%"
+        offset = (page - 1) * per_page
+
+        count_sql = "SELECT COUNT(*) FROM events e WHERE e.content_text LIKE ?"
+        count_params: list = [pattern]
+        if session_id:
+            count_sql += " AND e.session_id = ?"
+            count_params.append(session_id)
+        total = self._conn.execute(count_sql, count_params).fetchone()[0]
+
+        sql = (
+            f"SELECT {EVENT_COLS} FROM events e "
+            f"LEFT JOIN sessions s ON s.id = e.session_id "
+            f"WHERE e.content_text LIKE ?"
+        )
+        params: list = [pattern]
+        if session_id:
+            sql += " AND e.session_id = ?"
+            params.append(session_id)
+        sql += " ORDER BY e.timestamp DESC LIMIT ? OFFSET ?"
+        params.extend([per_page, offset])
+
+        rows = self._conn.execute(sql, params).fetchall()
+        return {
+            "data": [_row_to_dict(r) for r in rows],
+            "meta": _pagination_meta(page, per_page, total),
+        }
+
+    # -- CJK scored (jieba) ---------------------------------------
+
+    def _search_cjk_scored(
+        self,
+        query: str,
+        session_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        return self._do_cjk_scored(query, session_id, limit=limit)["data"]
+
+    def _search_cjk_scored_paginated(
+        self,
+        query: str,
+        session_id: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict:
+        return self._do_cjk_scored(query, session_id, page=page, per_page=per_page)
+
+    def _do_cjk_scored(
+        self,
+        query: str,
+        session_id: str | None = None,
+        limit: int = 20,
+        page: int | None = None,
+        per_page: int | None = None,
+    ) -> dict:
+        import jieba
+
+        tokens = [t.strip() for t in jieba.cut(query) if len(t.strip()) > 0]
+        if not tokens:
+            return {"data": [], "meta": _pagination_meta(1, per_page or limit, 0)}
+
+        pattern = f"%{query}%"
+        sql = (
+            f"SELECT {EVENT_COLS} FROM events e "
+            "LEFT JOIN sessions s ON s.id = e.session_id "
+            "WHERE e.content_text LIKE ?"
+        )
+        params: list = [pattern]
+        if session_id:
+            sql += " AND e.session_id = ?"
+            params.append(session_id)
+        rows = self._conn.execute(sql, params).fetchall()
+
+        unique_tokens = set(tokens)
+        scored = []
+        for r in rows:
+            d = _row_to_dict(r)
+            text = d.get("content_text", "")
+            score = sum(1 for t in unique_tokens if t in text)
+            if score > 0:
+                scored.append((score, d))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        total = len(scored)
+
+        if page is not None and per_page is not None:
+            offset_cjk = (page - 1) * per_page
+            page_data = [d for _, d in scored[offset_cjk : offset_cjk + per_page]]
+        else:
+            page_data = [d for _, d in scored[:limit]]
+
+        return {
+            "data": page_data,
+            "meta": _pagination_meta(page or 1, per_page or limit, total),
+        }
+
+
+# ===================================================================
+# Facade
+# ===================================================================
+
+
+class SqliteStorage:
+    """SQLite-backed storage with FTS5 full-text search.
+
+    Delegates to ``SqliteSessionRepository``, ``SqliteEventRepository``,
+    and ``SqliteSearchIndex`` — each operating on a shared connection.
+
+    Implements ``bagger.storage.base.Storage`` structurally.
+    """
+
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+        self._conn: sqlite3.Connection | None = None
+        self._sessions: SqliteSessionRepository | None = None
+        self._events: SqliteEventRepository | None = None
+        self._search: SqliteSearchIndex | None = None
+
+    # -- lifecycle ---------------------------------------------------
+
+    def connect(self) -> None:
+        """Open the SQLite database, apply schema, and wire repositories."""
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(self.db_path.resolve()))
+        self._conn.row_factory = sqlite3.Row
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            self._conn.execute("PRAGMA journal_mode=DELETE")
+        self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.executescript(SCHEMA)
+        self._conn.executescript(FTS_SCHEMA)
+        self._conn.commit()
+
+        self._sessions = SqliteSessionRepository(self._conn)
+        self._events = SqliteEventRepository(self._conn)
+        self._search = SqliteSearchIndex(self._conn)
+
+    def close(self) -> None:
+        """Close the SQLite database and null out repositories."""
+        if self._conn:
+            with contextlib.suppress(sqlite3.Error):
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self._conn.close()
+            self._conn = None
+            self._sessions = None
+            self._events = None
+            self._search = None
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """The underlying SQLite connection (raises if not connected)."""
+        if self._conn is None:
+            raise RuntimeError("Storage not connected. Call connect() first.")
+        return self._conn
+
+    # -- Session delegation -----------------------------------------
+
+    def upsert_session(self, session: Session) -> None:
+        self._sessions.upsert_session(session)  # type: ignore[union-attr]
+
+    def session_exists(self, session_id: str) -> bool:
+        return self._sessions.session_exists(session_id)  # type: ignore[union-attr]
+
+    def get_session(self, session_id: str) -> dict | None:
+        return self._sessions.get_session(session_id)  # type: ignore[union-attr]
+
+    def find_session_by_prefix(self, prefix: str) -> dict | None:
+        return self._sessions.find_session_by_prefix(prefix)  # type: ignore[union-attr]
+
+    def list_sessions(self, limit: int = 50) -> list[dict]:
+        return self._sessions.list_sessions(limit)  # type: ignore[union-attr]
 
     def list_sessions_paginated(
         self,
@@ -570,109 +746,71 @@ class SqliteStorage:
         sort: str = "last_message_at",
         order: str = "desc",
     ) -> dict:
-        """List sessions with pagination."""
-        offset = (page - 1) * per_page
-        allowed_sort = {"last_message_at", "message_count", "first_message_at", "id"}
-        col = sort if sort in allowed_sort else "last_message_at"
-        direction = "DESC" if order.lower() == "desc" else "ASC"
+        return self._sessions.list_sessions_paginated(  # type: ignore[union-attr]
+            page, per_page, sort, order
+        )
 
-        total = self.conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-        rows = self.conn.execute(
-            f"SELECT {SESSION_COLS} FROM sessions "
-            f"ORDER BY {col} {direction} NULLS LAST LIMIT ? OFFSET ?",
-            (per_page, offset),
-        ).fetchall()
+    def get_event_count(self, session_id: str) -> int:
+        return self._sessions.get_event_count(session_id)  # type: ignore[union-attr]
 
-        return {
-            "data": [_row_to_dict(r) for r in rows],
-            "meta": _pagination_meta(page, per_page, total),
-        }
+    # -- Event delegation -------------------------------------------
 
-    def get_daily_stats(self, days: int = 30) -> list[dict]:
-        """Get daily event and token counts for charting."""
-        rows = self.conn.execute(
-            "SELECT substr(timestamp, 1, 10) as date, "
-            "COUNT(*) as count, "
-            "COALESCE(SUM(token_input + token_output), 0) as tokens "
-            "FROM events GROUP BY date ORDER BY date DESC LIMIT ?",
-            (days,),
-        ).fetchall()
-        return [_row_to_dict(r) for r in reversed(rows)]
+    def insert_event(self, event: MemoryEvent) -> None:
+        self._events.insert_event(event)  # type: ignore[union-attr]
 
-    def get_tool_usage_stats(self, limit: int = 20) -> list[dict]:
-        """Get most frequently used tools from the tool_uses table."""
-        rows = self.conn.execute(
-            "SELECT tool_name, COUNT(*) as count "
-            "FROM tool_uses "
-            "GROUP BY tool_name ORDER BY count DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-        return [_row_to_dict(r) for r in rows]
-
-    # ── Replay ──────────────────────────────────────────────
+    def insert_events(self, events: list[MemoryEvent]) -> int:
+        return self._events.insert_events(events)  # type: ignore[union-attr]
 
     def get_session_events(self, session_id: str, context: int = 0) -> list[dict]:
-        """Get all events for a session, ordered by timestamp."""
-        rows = self.conn.execute(
-            f"SELECT {EVENT_DETAIL_COLS} FROM events WHERE session_id = ? ORDER BY timestamp",
-            (session_id,),
-        ).fetchall()
-        return [_row_to_dict(r) for r in rows]
-
-    # ── Stats ───────────────────────────────────────────────
+        return self._events.get_session_events(session_id, context)  # type: ignore[union-attr]
 
     def get_stats(self) -> dict:
-        """Return aggregate statistics (combined query)."""
-        row = self.conn.execute(
-            "SELECT "
-            "COUNT(*) as total_events, "
-            "COALESCE(SUM(token_input + token_output), 0) as total_tokens, "
-            "SUM(CASE WHEN role='user' THEN 1 ELSE 0 END) as user_events, "
-            "SUM(CASE WHEN role='assistant' THEN 1 ELSE 0 END) as assistant_events "
-            "FROM events"
-        ).fetchone()
-        total_sessions = self.conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-        tool_uses = self.conn.execute("SELECT COUNT(*) FROM tool_uses").fetchone()[0]
+        return self._events.get_stats()  # type: ignore[union-attr]
 
-        return {
-            "total_sessions": total_sessions,
-            "total_events": row["total_events"],
-            "total_tokens": row["total_tokens"],
-            "user_events": row["user_events"],
-            "assistant_events": row["assistant_events"],
-            "tool_uses": tool_uses,
-        }
+    def get_daily_stats(self, days: int = 30) -> list[dict]:
+        return self._events.get_daily_stats(days)  # type: ignore[union-attr]
 
-    # ── Doctor ──────────────────────────────────────────────
+    def get_tool_usage_stats(self, limit: int = 20) -> list[dict]:
+        return self._events.get_tool_usage_stats(limit)  # type: ignore[union-attr]
 
     def check_integrity(self) -> list[dict]:
-        """Run integrity checks. Empty list = healthy."""
-        issues: list[dict] = []
+        return self._events.check_integrity()  # type: ignore[union-attr]
 
-        try:
-            self.conn.execute("PRAGMA integrity_check").fetchone()
-        except sqlite3.Error as e:
-            issues.append({"level": "error", "message": f"Database corrupt: {e}"})
+    # -- Search delegation ------------------------------------------
 
-        if self.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0:
-            issues.append({"level": "info", "message": "No events in database"})
+    def search(
+        self,
+        query: str,
+        session_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        return self._search.search(query, session_id=session_id, limit=limit)  # type: ignore[union-attr]
 
-        empty_sessions = self.conn.execute(
-            "SELECT COUNT(*) FROM sessions WHERE message_count = 0"
-        ).fetchone()[0]
-        if empty_sessions:
-            issues.append(
-                {"level": "warn", "message": f"{empty_sessions} sessions have 0 messages"}
-            )
+    def search_paginated(
+        self,
+        query: str,
+        session_id: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict:
+        return self._search.search_paginated(  # type: ignore[union-attr]
+            query, session_id=session_id, page=page, per_page=per_page
+        )
 
-        return issues
+    def search_fts(
+        self,
+        query: str,
+        session_id: str | None = None,
+        limit: int = 20,
+        page: int = 1,
+    ) -> dict:
+        return self._search.search_fts(  # type: ignore[union-attr]
+            query, session_id=session_id, limit=limit, page=page
+        )
 
+    def rebuild_fts_index(self) -> int:
+        return self._search.rebuild_fts_index()  # type: ignore[union-attr]
 
-def _pagination_meta(page: int, per_page: int, total: int) -> dict:
-    """Build pagination metadata dict."""
-    return {
-        "page": page,
-        "per_page": per_page,
-        "total": total,
-        "pages": max(1, (total + per_page - 1) // per_page),
-    }
+    def _fts_enabled(self) -> bool:
+        """Check if the FTS5 virtual table exists (used by health/doctor)."""
+        return self._search._fts_enabled()  # type: ignore[union-attr]
