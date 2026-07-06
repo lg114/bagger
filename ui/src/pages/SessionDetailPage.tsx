@@ -1,6 +1,7 @@
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Calendar, Folder, MessageSquare, Hash, AlertCircle } from "lucide-react";
+import { useState } from "react";
+import { ArrowLeft, Calendar, Folder, MessageSquare, Hash, AlertCircle, Search } from "lucide-react";
 import { getSession, getSessionEvents } from "@/lib/api";
 import { formatDateShort, formatTokens } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import type { Event } from "@/lib/api";
 
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const { data: session, isLoading: sessLoading, error: sessError } = useQuery({
     queryKey: ["sessions", id],
@@ -70,9 +72,22 @@ export default function SessionDetailPage() {
             Conversations
           </Link>
         </Button>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {session.summary || "Untitled Session"}
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight flex-1 min-w-0 truncate">
+            {session.summary || "Untitled Session"}
+          </h1>
+          <button
+            onClick={() => setSearchOpen((v) => !v)}
+            className="flex items-center gap-2 px-3 py-2 rounded-element border border-border text-xs font-mono text-muted-foreground hover:text-primary hover:border-primary/35 transition-all duration-200"
+            title="Search in conversation (Ctrl+F)"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Search</span>
+            <kbd className="hidden sm:inline ml-1 px-1.5 py-0.5 rounded bg-secondary text-[10px] text-muted-foreground border border-border">
+              Ctrl+F
+            </kbd>
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-8">
@@ -84,7 +99,12 @@ export default function SessionDetailPage() {
               <p className="text-sm">No events in this session</p>
             </div>
           ) : (
-            <ConversationView events={events} />
+            <ConversationView
+              events={events}
+              searchOpen={searchOpen}
+              onToggleSearch={() => setSearchOpen((v) => !v)}
+              onCloseSearch={() => setSearchOpen(false)}
+            />
           )}
         </div>
 

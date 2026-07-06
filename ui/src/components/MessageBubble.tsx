@@ -4,10 +4,21 @@ import type { Event } from "@/lib/api";
 
 interface MessageBubbleProps {
   event: Event;
+  /** True when this message matches the current search query. */
+  highlight?: boolean;
+  /** True when this message is the *currently navigated* search match. */
+  activeMatch?: boolean;
 }
 
-export default function MessageBubble({ event }: MessageBubbleProps) {
+export default function MessageBubble({ event, highlight, activeMatch }: MessageBubbleProps) {
   const isUser = event.role === "user";
+
+  // Ring color for search matches
+  const ringClass = activeMatch
+    ? "ring-2 ring-accent/60 ring-offset-2 ring-offset-background"
+    : highlight
+      ? "ring-1 ring-primary/30 ring-offset-1 ring-offset-background"
+      : "";
 
   return (
     <div className={`flex gap-4 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -28,7 +39,7 @@ export default function MessageBubble({ event }: MessageBubbleProps) {
 
       {/* Bubble */}
       <div
-        className={`max-w-[80%] min-w-0 ${isUser ? "items-end" : ""}`}
+        className={`max-w-[80%] min-w-0 ${isUser ? "items-end" : ""} ${ringClass} rounded-card transition-all duration-300`}
       >
         <div
           className={`rounded-card px-5 py-4 transition-colors duration-300 ease-apple ${
