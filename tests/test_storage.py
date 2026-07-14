@@ -432,3 +432,128 @@ def test_get_stats_tool_uses_count():
         assert stats["tool_uses"] == 4
 
         storage.close()
+
+
+def test_get_stats_includes_cache_rate_and_breakdown():
+    """get_stats() exposes cache_hit_rate, per_model, and per_provider."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        e1 = _make_event(event_id="e1", session_id="s1", role=Role.USER)
+        e1.token_input = 20
+        e1.token_output = 10
+        e1.token_cache_read = 80
+        e1.model = "claude-sonnet-4"
+        e1.provider = "anthropic"
+
+        e2 = _make_event(event_id="e2", session_id="s2", role=Role.ASSISTANT)
+        e2.token_input = 10
+        e2.token_output = 5
+        e2.token_cache_read = 40
+        e2.model = "claude-sonnet-4"
+        e2.provider = "anthropic"
+
+        storage.insert_events([e1, e2])
+
+        stats = storage.get_stats()
+        # cache_hit_rate = cache_read / (cache_read + input) = 120 / 150
+        assert stats["cache_hit_rate"] == 0.8
+        assert stats["total_tokens"] == 45
+        assert len(stats["per_model"]) == 1
+        assert stats["per_model"][0]["model"] == "claude-sonnet-4"
+        assert stats["per_model"][0]["tokens"] == 45
+        assert len(stats["per_provider"]) == 1
+        assert stats["per_provider"][0]["provider"] == "anthropic"
+
+        storage.close()
+
+
+def test_get_stats_cache_rate_none_when_no_token_data():
+    """cache_hit_rate is None only when there is no token data at all."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        e = _make_event(event_id="e-zero")
+        e.token_input = 0
+        e.token_output = 0
+        e.token_cache_read = 0
+        storage.insert_event(e)
+
+        stats = storage.get_stats()
+        assert stats["cache_hit_rate"] is None
+
+        storage.close()
+
+
+def test_get_stats_cache_rate_zero_when_no_cache_hit():
+    """With input tokens but no cache hit, rate is 0.0 (not None)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        # default _make_event has token_input=10 -> rate = 0 / 10 = 0.0
+        storage.insert_event(_make_event(event_id="e-no-cache"))
+
+        stats = storage.get_stats()
+        assert stats["cache_hit_rate"] == 0.0
+
+        storage.close()
+
+
+def test_migration_v2_adds_usage_columns():
+    """A legacy (v1) database gets the new columns via ALTER on connect()."""
+    import sqlite3
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "legacy.db"
+        # Simulate a pre-v2 database (events table without new columns)
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(
+            """
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY, summary TEXT NOT NULL DEFAULT '',
+                project_path TEXT NOT NULL DEFAULT '', message_count INTEGER NOT NULL DEFAULT 0,
+                first_message_at TEXT, last_message_at TEXT, last_synced_at TEXT);
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE NOT NULL,
+                session_id TEXT NOT NULL, parent_event_id TEXT, timestamp TEXT NOT NULL,
+                role TEXT NOT NULL, content_json TEXT NOT NULL, content_text TEXT NOT NULL DEFAULT '',
+                token_input INTEGER NOT NULL DEFAULT 0, token_output INTEGER NOT NULL DEFAULT 0,
+                cwd TEXT, git_branch TEXT, model TEXT);
+            CREATE TABLE tool_uses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL, tool_id TEXT NOT NULL DEFAULT '',
+                tool_input_json TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY (event_id) REFERENCES events(event_id));
+            """
+        )
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+        conn.close()
+
+        storage = SqliteStorage(db_path)
+        storage.connect()  # should apply v2 migration without error
+
+        # New columns exist and accept values after migration
+        event = _make_event(event_id="migrated-1")
+        event.token_cache_read = 5
+        event.provider = "anthropic"
+        storage.insert_event(event)
+
+        row = storage.conn.execute(
+            "SELECT token_cache_read, token_cache_write, cost_usd, currency, "
+            "service_tier, provider FROM events WHERE event_id='migrated-1'"
+        ).fetchone()
+        d = dict(row)
+        assert d["token_cache_read"] == 5
+        assert d["token_cache_write"] == 0
+        assert d["cost_usd"] is None
+        assert d["currency"] == "USD"
+        assert d["provider"] == "anthropic"
+
+        storage.close()

@@ -33,6 +33,9 @@ describe("useStats", () => {
       assistant_events: 10,
       tool_uses: 3,
       total_tokens: 8000,
+      cache_hit_rate: 0.5,
+      per_model: [{ model: "claude-opus-4", tokens: 6000, events: 12 }],
+      per_provider: [{ provider: "anthropic", tokens: 8000, events: 20 }],
     });
 
     const { result } = renderHook(() => useStats(), { wrapper });
@@ -40,6 +43,8 @@ describe("useStats", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.total_sessions).toBe(4);
     expect(result.current.data?.total_tokens).toBe(8000);
+    expect(result.current.data?.cache_hit_rate).toBe(0.5);
+    expect(result.current.data?.per_model[0].model).toBe("claude-opus-4");
   });
 });
 

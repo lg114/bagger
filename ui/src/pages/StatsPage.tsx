@@ -1,8 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Activity, Coins, FolderOpen, MessageCircle, Wrench, TrendingUp, AlertCircle, Bot } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+  Activity,
+  Coins,
+  FolderOpen,
+  MessageCircle,
+  Wrench,
+  TrendingUp,
+  AlertCircle,
+  Bot,
+  Zap,
+  Cpu,
+  Server,
+} from "lucide-react";
 import { getStats, getDailyStats, getToolUsageStats } from "@/lib/api";
+import { useStats } from "@/hooks/useStats";
 import { cn, formatTokens } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -25,6 +39,8 @@ export default function StatsPage() {
 
       <StatsGrid />
       <DailyChartSection />
+      <ModelUsageSection />
+      <ProviderUsageSection />
       <ToolUsageSection />
     </div>
   );
@@ -45,6 +61,14 @@ function StatsGrid() {
     { label: "Assistant", value: stats?.assistant_events, icon: Bot, color: "text-cyan-400", bg: "bg-cyan-500/10", border: "border-cyan-500/15" },
     { label: "Tool Uses", value: stats?.tool_uses, icon: Wrench, color: "text-violet-400", bg: "bg-violet-500/10", border: "border-violet-500/15" },
     { label: "Tokens", value: stats ? formatTokens(stats.total_tokens) : undefined, icon: Coins, color: "text-accent", bg: "bg-accent/10", border: "border-accent/15" },
+    {
+      label: "Cache Hit",
+      value: stats?.cache_hit_rate != null ? `${(stats.cache_hit_rate * 100).toFixed(1)}%` : undefined,
+      icon: Zap,
+      color: "text-amber-400",
+      bg: "bg-amber-500/10",
+      border: "border-amber-500/15",
+    },
   ];
 
   return (
@@ -326,4 +350,90 @@ function ToolUsageSection() {
       )}
     </section>
   );
+}
+
+// ── Ranked usage: by model / provider ──
+
+interface RankedUsageItem {
+  label: string;
+  tokens: number;
+  events: number;
+}
+
+function RankedUsageSection({
+  title,
+  icon: Icon,
+  items,
+  loading,
+  error,
+}: {
+  title: string;
+  icon: LucideIcon;
+  items: RankedUsageItem[];
+  loading: boolean;
+  error: unknown;
+}) {
+  const max = Math.max(...items.map((i) => i.tokens), 1);
+  return (
+    <section className="space-y-5">
+      <h2 className="text-xl font-semibold tracking-tight flex items-center gap-2.5">
+        <Icon className="w-5 h-5 text-primary" />
+        {title}
+      </h2>
+      {error ? (
+        <ErrorBlock message={`Failed to load ${title.toLowerCase()}`} />
+      ) : loading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-10 w-full rounded-element bg-secondary/50" />
+          ))}
+        </div>
+      ) : items.length === 0 ? (
+        <div className="text-center py-12 text-sm text-muted-foreground glass-card-static p-6">
+          No data yet
+        </div>
+      ) : (
+        <div className="glass-card-static divide-y divide-primary/10">
+          {items.map((item, i) => (
+            <div
+              key={item.label}
+              className="flex items-center gap-4 px-6 py-4 hover:bg-primary/5 transition-colors duration-200 ease-out"
+            >
+              <span className="text-xs text-muted-foreground font-mono w-5 tabular-nums">{i + 1}</span>
+              <span className="flex-1 text-sm font-mono text-foreground/80 truncate">{item.label}</span>
+              <div className="w-28 h-1.5 bg-secondary rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary/40 rounded-full transition-all duration-500 ease-apple"
+                  style={{ width: `${(item.tokens / max) * 100}%` }}
+                />
+              </div>
+              <span className="text-xs text-muted-foreground tabular-nums font-mono w-20 text-right">
+                {formatTokens(item.tokens)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ModelUsageSection() {
+  const { data: stats, isLoading, error } = useStats();
+  const items: RankedUsageItem[] = (stats?.per_model ?? []).map((m) => ({
+    label: m.model,
+    tokens: m.tokens,
+    events: m.events,
+  }));
+  return <RankedUsageSection title="By Model" icon={Cpu} items={items} loading={isLoading} error={error} />;
+}
+
+function ProviderUsageSection() {
+  const { data: stats, isLoading, error } = useStats();
+  const items: RankedUsageItem[] = (stats?.per_provider ?? []).map((p) => ({
+    label: p.provider,
+    tokens: p.tokens,
+    events: p.events,
+  }));
+  return <RankedUsageSection title="By Provider" icon={Server} items={items} loading={isLoading} error={error} />;
 }

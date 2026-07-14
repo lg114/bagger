@@ -39,9 +39,15 @@ class MemoryEvent(BaseModel):
     content_blocks: list[ContentBlock] = Field(default_factory=list)
     token_input: int = 0
     token_output: int = 0
+    token_cache_read: int = 0
+    token_cache_write: int = 0
+    cost_usd: float | None = None  # only stored, never computed by bagger
+    currency: str = "USD"
+    service_tier: str | None = None
     cwd: str | None = None
     git_branch: str | None = None
     model: str | None = None
+    provider: str | None = None  # resolved backend (e.g. "anthropic", "xiaomi")
 
 
 class Session(BaseModel):

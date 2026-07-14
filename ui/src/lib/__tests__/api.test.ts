@@ -125,12 +125,25 @@ describe("search", () => {
 
 describe("getStats", () => {
   it("returns aggregate stats", async () => {
-    const stats = { total_sessions: 3, total_events: 15, user_events: 8, assistant_events: 7, tool_uses: 4, total_tokens: 5000 };
+    const stats = {
+      total_sessions: 3,
+      total_events: 15,
+      user_events: 8,
+      assistant_events: 7,
+      tool_uses: 4,
+      total_tokens: 5000,
+      cache_hit_rate: 0.42,
+      per_model: [{ model: "claude-sonnet-4", tokens: 4000, events: 10 }],
+      per_provider: [{ provider: "anthropic", tokens: 5000, events: 15 }],
+    };
     mockApiResponse(stats);
 
     const result = await getStats();
     expect(result.total_sessions).toBe(3);
     expect(result.tool_uses).toBe(4);
+    expect(result.cache_hit_rate).toBe(0.42);
+    expect(result.per_model[0].model).toBe("claude-sonnet-4");
+    expect(result.per_provider[0].provider).toBe("anthropic");
   });
 });
 

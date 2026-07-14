@@ -11,6 +11,7 @@ from bagger.models.event import (
     Role,
 )
 from bagger.parser.base import Parser as _Parser
+from bagger.parser.base import StandardUsage
 
 # ── Parser implementation ──────────────────────────────────
 
@@ -51,6 +52,9 @@ class ClaudeParser(_Parser):
 
     def parse_incremental(self, path: Path, offset: int) -> list[MemoryEvent]:
         return _parse_new_lines(path, offset)
+
+    def normalize_usage(self, raw_usage: dict, raw_model: str | None = None) -> StandardUsage:
+        return normalize_claude_usage(raw_usage, raw_model)
 
     def extract_summary(self, path: Path) -> str:
         return _extract_summary(path)
@@ -163,6 +167,48 @@ def _truncate(text: str, max_len: int) -> str:
     return text[: max_len - 3] + "..."
 
 
+def normalize_claude_usage(raw_usage: dict, raw_model: str | None = None) -> StandardUsage:
+    """Map Claude Code's usage dict to bagger's StandardUsage.
+
+    ``cost_usd`` is stored as-is when present and > 0 (Anthropic backends
+    only); bagger never computes cost. Non-Anthropic backends leave it None.
+    """
+    u = raw_usage or {}
+    raw_cost = u.get("cost_usd")
+    cost = float(raw_cost) if isinstance(raw_cost, (int, float)) and raw_cost > 0 else None
+    return StandardUsage(
+        token_input=u.get("input_tokens", 0),
+        token_output=u.get("output_tokens", 0),
+        token_cache_read=u.get("cache_read_input_tokens", 0),
+        token_cache_write=u.get("cache_creation_input_tokens", 0),
+        cost_usd=cost,
+        currency="USD",
+        service_tier=u.get("service_tier"),
+    )
+
+
+def _resolve_provider(model: str | None) -> str | None:
+    """Best-effort backend detection from the model name.
+
+    Heuristic only: a non-Anthropic backend reached through a proxy that
+    spoofs the model name (e.g. MiMo served as ``claude-*``) will be mislabeled.
+    A future config-based ``source_alias`` mapping resolves that — out of scope
+    for the price-free subset.
+    """
+    if not model:
+        return None
+    m = model.lower()
+    if m.startswith("claude") or "anthropic" in m:
+        return "anthropic"
+    if "xiaomi" in m or m.startswith("mimo"):
+        return "xiaomi"
+    if m.startswith("gpt") or "openai" in m:
+        return "openai"
+    if "deepseek" in m:
+        return "deepseek"
+    return None
+
+
 def _parse_entry(raw: dict) -> MemoryEvent | None:
     """Parse a single JSONL entry into a MemoryEvent."""
     entry_type = raw["type"]
@@ -173,8 +219,7 @@ def _parse_entry(raw: dict) -> MemoryEvent | None:
     content_blocks = _parse_content(role, msg.get("content", ""))
 
     usage = msg.get("usage", {}) or {}
-    token_input = usage.get("input_tokens", 0)
-    token_output = usage.get("output_tokens", 0)
+    u = normalize_claude_usage(usage, msg.get("model"))
 
     return MemoryEvent(
         event_id=raw.get("uuid", ""),
@@ -185,11 +230,17 @@ def _parse_entry(raw: dict) -> MemoryEvent | None:
         ),
         role=role,
         content_blocks=content_blocks,
-        token_input=token_input,
-        token_output=token_output,
+        token_input=u.token_input,
+        token_output=u.token_output,
+        token_cache_read=u.token_cache_read,
+        token_cache_write=u.token_cache_write,
+        cost_usd=u.cost_usd,
+        currency=u.currency,
+        service_tier=u.service_tier,
         cwd=raw.get("cwd"),
         git_branch=raw.get("gitBranch"),
         model=msg.get("model"),
+        provider=_resolve_provider(msg.get("model")),
     )
 
 

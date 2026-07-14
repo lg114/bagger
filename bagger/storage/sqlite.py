@@ -53,7 +53,13 @@ CREATE TABLE IF NOT EXISTS events (
     token_output INTEGER NOT NULL DEFAULT 0,
     cwd TEXT,
     git_branch TEXT,
-    model TEXT
+    model TEXT,
+    token_cache_read INTEGER NOT NULL DEFAULT 0,
+    token_cache_write INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    service_tier TEXT,
+    provider TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_session
@@ -94,7 +100,8 @@ EVENT_COLS = (
 EVENT_DETAIL_COLS = (
     "event_id, session_id, parent_event_id, timestamp, role, "
     "content_json, content_text, token_input, token_output, "
-    "cwd, git_branch, model"
+    "cwd, git_branch, model, "
+    "token_cache_read, token_cache_write, cost_usd, currency, service_tier, provider"
 )
 
 # ── CJK detection ──────────────────────────────────────────
@@ -198,8 +205,9 @@ def _pagination_meta(page: int, per_page: int, total: int) -> dict:
 _INSERT_EVENT_SQL = """INSERT OR IGNORE INTO events
     (event_id, session_id, parent_event_id, timestamp, role,
      content_json, content_text, token_input, token_output,
-     cwd, git_branch, model)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+     cwd, git_branch, model,
+     token_cache_read, token_cache_write, cost_usd, currency, service_tier, provider)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
 
 
 # ===================================================================
@@ -328,6 +336,12 @@ class SqliteEventRepository:
             event.cwd,
             event.git_branch,
             event.model,
+            event.token_cache_read,
+            event.token_cache_write,
+            event.cost_usd,
+            event.currency,
+            event.service_tier,
+            event.provider,
         )
 
     def _insert_tool_uses(self, event: MemoryEvent) -> None:
@@ -401,11 +415,32 @@ class SqliteEventRepository:
             "COUNT(*) as total_events, "
             "COALESCE(SUM(token_input + token_output), 0) as total_tokens, "
             "SUM(CASE WHEN role='user' THEN 1 ELSE 0 END) as user_events, "
-            "SUM(CASE WHEN role='assistant' THEN 1 ELSE 0 END) as assistant_events "
+            "SUM(CASE WHEN role='assistant' THEN 1 ELSE 0 END) as assistant_events, "
+            "COALESCE(SUM(token_cache_read), 0) as cache_read, "
+            "COALESCE(SUM(token_cache_write), 0) as cache_write, "
+            "COALESCE(SUM(token_input), 0) as total_input "
             "FROM events"
         ).fetchone()
         total_sessions = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
         tool_uses = self._conn.execute("SELECT COUNT(*) FROM tool_uses").fetchone()[0]
+
+        cache_denom = row["cache_read"] + row["total_input"]
+        cache_hit_rate = row["cache_read"] / cache_denom if cache_denom > 0 else None
+
+        per_model = self._conn.execute(
+            "SELECT model, "
+            "COALESCE(SUM(token_input + token_output), 0) as tokens, "
+            "COUNT(*) as events "
+            "FROM events WHERE model IS NOT NULL "
+            "GROUP BY model ORDER BY tokens DESC LIMIT 10"
+        ).fetchall()
+        per_provider = self._conn.execute(
+            "SELECT provider, "
+            "COALESCE(SUM(token_input + token_output), 0) as tokens, "
+            "COUNT(*) as events "
+            "FROM events WHERE provider IS NOT NULL "
+            "GROUP BY provider ORDER BY tokens DESC LIMIT 10"
+        ).fetchall()
 
         return {
             "total_sessions": total_sessions,
@@ -414,6 +449,9 @@ class SqliteEventRepository:
             "user_events": row["user_events"],
             "assistant_events": row["assistant_events"],
             "tool_uses": tool_uses,
+            "cache_hit_rate": cache_hit_rate,
+            "per_model": [_row_to_dict(r) for r in per_model],
+            "per_provider": [_row_to_dict(r) for r in per_provider],
         }
 
     def get_daily_stats(self, days: int = 30) -> list[dict]:
@@ -688,6 +726,29 @@ class SqliteStorage:
             self._search.rebuild_fts_index()
             self._conn.execute("PRAGMA user_version = 1")
             self._conn.commit()
+        if version < 2:
+            self._apply_migration_v2()
+            self._conn.execute("PRAGMA user_version = 2")
+            self._conn.commit()
+
+    def _apply_migration_v2(self) -> None:
+        """Add usage/provider columns to legacy (v1) databases.
+
+        New databases get these columns from SCHEMA directly; this only
+        patches databases created before this migration existed.
+        """
+        alters = [
+            "ALTER TABLE events ADD COLUMN token_cache_read INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE events ADD COLUMN token_cache_write INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE events ADD COLUMN cost_usd REAL",
+            "ALTER TABLE events ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD'",
+            "ALTER TABLE events ADD COLUMN service_tier TEXT",
+            "ALTER TABLE events ADD COLUMN provider TEXT",
+        ]
+        for sql in alters:
+            with contextlib.suppress(sqlite3.OperationalError):
+                self._conn.execute(sql)  # column already exists
+        self._conn.commit()
 
     def close(self) -> None:
         """Close the SQLite database and null out repositories."""
