@@ -202,12 +202,30 @@ def _pagination_meta(page: int, per_page: int, total: int) -> dict:
 
 # ── INSERT SQL (shared across event repo and facade) ───────
 
-_INSERT_EVENT_SQL = """INSERT OR IGNORE INTO events
+_INSERT_EVENT_SQL = """INSERT INTO events
     (event_id, session_id, parent_event_id, timestamp, role,
      content_json, content_text, token_input, token_output,
      cwd, git_branch, model,
      token_cache_read, token_cache_write, cost_usd, currency, service_tier, provider)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(event_id) DO UPDATE SET
+        session_id=excluded.session_id,
+        parent_event_id=excluded.parent_event_id,
+        timestamp=excluded.timestamp,
+        role=excluded.role,
+        content_json=excluded.content_json,
+        content_text=excluded.content_text,
+        token_input=excluded.token_input,
+        token_output=excluded.token_output,
+        cwd=excluded.cwd,
+        git_branch=excluded.git_branch,
+        model=excluded.model,
+        token_cache_read=excluded.token_cache_read,
+        token_cache_write=excluded.token_cache_write,
+        cost_usd=excluded.cost_usd,
+        currency=excluded.currency,
+        service_tier=excluded.service_tier,
+        provider=excluded.provider"""
 
 
 # ===================================================================

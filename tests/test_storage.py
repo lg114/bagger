@@ -21,6 +21,7 @@ def _make_event(
     role=Role.USER,
     text="Hello world",
     parent_event_id=None,
+    token_cache_read=0,
 ) -> MemoryEvent:
     return MemoryEvent(
         event_id=event_id,
@@ -31,6 +32,7 @@ def _make_event(
         content_blocks=[ContentBlock(block_type=BlockType.TEXT, text=text)],
         token_input=10,
         token_output=20,
+        token_cache_read=token_cache_read,
         cwd="/tmp/project",
         git_branch="main",
         model="claude-sonnet",
@@ -65,6 +67,29 @@ def test_insert_ignore_duplicates():
         storage.insert_event(event)  # Duplicate
 
         assert storage.get_event_count("sess-1") == 1
+        storage.close()
+
+
+def test_insert_event_upserts_existing_row():
+    """Re-inserting the same event_id with new field values updates the row
+    (upsert, not ignore), so a re-scan after a parser upgrade backfills newly
+    added columns like token_cache_read instead of being skipped."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        storage.insert_event(_make_event(event_id="e-upsert", token_cache_read=0))
+        # Same event_id, now with cache data populated (simulates re-scan).
+        storage.insert_event(_make_event(event_id="e-upsert", token_cache_read=500))
+
+        assert storage.get_event_count("sess-1") == 1  # no duplicate row
+        row = storage.conn.execute(
+            "SELECT token_cache_read FROM events WHERE event_id = ?",
+            ("e-upsert",),
+        ).fetchone()
+        assert row[0] == 500  # field was updated, not ignored
+
         storage.close()
 
 
