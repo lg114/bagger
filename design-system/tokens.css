@@ -1,0 +1,129 @@
+/* ============================================================
+   bagger · Design Tokens
+   Aesthetic : "Quiet editorial / personal knowledge journal"
+   Light-first, warm paper, ink, single clay accent.
+   Calm & low-density — glare-sensitive friendly.
+   Author : UI Designer (像素君)
+   ============================================================ */
+
+:root {
+  /* ---- Primitive · Brand hue (warm clay / terracotta) ---- */
+  --clay-300: oklch(82% 0.08 45);
+  --clay-400: oklch(70% 0.12 42);
+  --clay-500: oklch(60% 0.14 40);   /* base accent */
+  --clay-600: oklch(52% 0.15 38);   /* accent text on paper (AA-safe) */
+  --clay-700: oklch(44% 0.14 36);
+
+  /* ---- Primitive · Semantic (desaturated, never loud) ---- */
+  --pine-500: oklch(56% 0.09 155);  /* success */
+  --pine-600: oklch(48% 0.10 155);
+  --amber-500: oklch(72% 0.12 75);  /* warning */
+  --amber-600: oklch(62% 0.13 70);
+  --rust-500: oklch(55% 0.15 28);   /* error */
+  --rust-600: oklch(47% 0.15 26);
+
+  /* ---- Primitive · Warm neutral scale (tinted, never pure gray) ---- */
+  --paper:     oklch(97% 0.008 75);   /* app background */
+  --surface:   oklch(99% 0.005 75);   /* cards / raised */
+  --surface-2: oklch(94% 0.008 75);   /* subtle wells, sidebar */
+  --ink:       oklch(26% 0.015 60);   /* primary text */
+  --ink-soft:  oklch(45% 0.012 60);   /* secondary text (AA on paper) */
+  --ink-faint: oklch(60% 0.010 60);   /* decorative / large text only */
+  --line:      oklch(90% 0.008 75);   /* hairline borders (calm) */
+  --line-strong: oklch(84% 0.010 75);
+
+  /* ---- Semantic tokens (components use THESE) ---- */
+  --bg-app: var(--paper);
+  --bg-surface: var(--surface);
+  --bg-subtle: var(--surface-2);
+  --text-strong: var(--ink);
+  --text: var(--ink);
+  --text-muted: var(--ink-soft);
+  --text-faint: var(--ink-faint);
+  --border: var(--line);
+  --border-strong: var(--line-strong);
+
+  --accent: var(--clay-500);
+  --accent-strong: var(--clay-600);
+  --accent-soft: var(--clay-300);      /* tinted fills, highlights */
+  --on-accent: oklch(98% 0.01 75);     /* text on accent fill */
+
+  --c-success: var(--pine-500);
+  --c-warning: var(--amber-500);
+  --c-error: var(--rust-500);
+  --c-info: var(--accent);
+
+  /* ---- Typography ---- */
+  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --font-sans: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", "Menlo", monospace;
+
+  /* Fixed rem scale for app UI (predictable spatial rhythm) */
+  --fs-xs: 0.75rem;     /* 12 · meta */
+  --fs-sm: 0.8125rem;   /* 13 · secondary UI */
+  --fs-base: 1rem;      /* 16 · body */
+  --fs-lg: 1.25rem;     /* 20 · subhead */
+  --fs-xl: 1.75rem;     /* 28 · h2 */
+  --fs-hero: clamp(2rem, 1.4rem + 2vw, 3rem); /* hero only, fluid */
+
+  --lh-tight: 1.2;
+  --lh-snug: 1.4;
+  --lh-base: 1.6;       /* calm reading */
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+
+  /* ---- Spacing (4pt base) ---- */
+  --space-1: 0.25rem;   /* 4  */
+  --space-2: 0.5rem;    /* 8  */
+  --space-3: 0.75rem;   /* 12 */
+  --space-4: 1rem;      /* 16 */
+  --space-5: 1.5rem;    /* 24 */
+  --space-6: 2rem;      /* 32 */
+  --space-7: 3rem;      /* 48 */
+  --space-8: 4rem;      /* 64 */
+  --space-9: 6rem;      /* 96 */
+
+  /* ---- Radius (moderate, not extreme) ---- */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --r-pill: 999px;
+
+  /* ---- Elevation (subtle; hairlines do most of the work) ---- */
+  --shadow-sm: 0 1px 2px oklch(26% 0.015 60 / 0.04);
+  --shadow-md: 0 6px 20px oklch(26% 0.015 60 / 0.07);
+  --shadow-focus: 0 0 0 3px oklch(60% 0.14 40 / 0.30);
+
+  /* ---- Motion (ease-out-quart, no bounce) ---- */
+  --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+  --dur-fast: 160ms;
+  --dur: 260ms;
+  --dur-slow: 380ms;
+
+  /* ---- Layout ---- */
+  --shell-max: 1180px;
+  --sidebar-w: 248px;
+  --header-h: 64px;
+}
+
+/* ---- Dark theme (ready for later; light is default) ---- */
+:root[data-theme="dark"] {
+  --paper:     oklch(18% 0.008 70);
+  --surface:   oklch(21% 0.009 70);
+  --surface-2: oklch(24% 0.010 70);
+  --ink:       oklch(92% 0.008 75);
+  --ink-soft:  oklch(72% 0.010 70);
+  --ink-faint: oklch(58% 0.010 70);
+  --line:      oklch(30% 0.010 70);
+  --line-strong: oklch(38% 0.012 70);
+
+  --clay-500: oklch(66% 0.13 42);
+  --clay-600: oklch(72% 0.12 42);
+  --on-accent: oklch(18% 0.01 70);
+
+  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.30);
+  --shadow-md: 0 6px 20px oklch(0% 0 0 / 0.40);
+  --shadow-focus: 0 0 0 3px oklch(66% 0.13 42 / 0.40);
+}

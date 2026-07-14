@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bagger · 界面设计方案预览</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./components.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ HEADER ============ -->
+  <header class="app__header">
+    <div class="brand">
+      <span class="brand__mark">bagger</span>
+      <span class="brand__tag">AI 编码记忆检索</span>
+    </div>
+
+    <div class="header__search">
+      <label class="sr-only" for="hsearch">搜索历史对话</label>
+      <div class="search">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+        </svg>
+        <input id="hsearch" type="search" placeholder="搜索历史对话、命令、报错…">
+      </div>
+    </div>
+
+    <div class="header__actions">
+      <span class="pill"><span class="pill__dot"></span>已同步 · 2 分钟前</span>
+      <button class="btn btn--ghost" id="themeToggle" aria-label="切换深浅主题">◐ 主题</button>
+    </div>
+  </header>
+
+  <!-- ============ BODY ============ -->
+  <div class="app__body">
+
+    <!-- Sidebar -->
+    <nav class="side" aria-label="筛选">
+      <div class="side__group">
+        <span class="side__label">项目</span>
+        <a class="side__link" href="#" aria-current="true"><span class="side__dot"></span>bagger</a>
+        <a class="side__link" href="#"><span class="side__dot"></span>memorized</a>
+        <a class="side__link" href="#"><span class="side__dot"></span>api-server</a>
+      </div>
+      <div class="side__group">
+        <span class="side__label">时间</span>
+        <a class="side__link" href="#">今天</a>
+        <a class="side__link" href="#">本周</a>
+        <a class="side__link" href="#">本月</a>
+        <a class="side__link" href="#">更早</a>
+      </div>
+      <div class="side__group">
+        <span class="side__label">类型</span>
+        <a class="side__link" href="#">对话</a>
+        <a class="side__link" href="#">工具调用</a>
+        <a class="side__link" href="#">报错</a>
+      </div>
+    </nav>
+
+    <!-- MAIN -->
+    <main>
+      <div class="seg" role="tablist" aria-label="视图切换" style="margin-bottom: var(--space-5)">
+        <button role="tab" aria-pressed="true" data-view="search">检索</button>
+        <button role="tab" aria-pressed="false" data-view="session">回看</button>
+      </div>
+
+      <!-- ===== VIEW: SEARCH ===== -->
+      <section class="view is-active" id="view-search" role="tabpanel">
+        <div class="hero">
+          <h1>找回你写过的每一行 AI 记忆</h1>
+          <p>把 Claude Code 的对话沉淀成可搜索的记忆。输入一个关键词，回到你当时是怎么解决那个问题的。</p>
+          <div class="search">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+            </svg>
+            <input type="search" aria-label="搜索记忆" placeholder="搜索历史对话、命令、报错…">
+            <span class="kbd">⌘K</span>
+          </div>
+          <div class="chips">
+            <button class="chip">jieba 中文分词</button>
+            <button class="chip">FTS5 BM25</button>
+            <button class="chip">Tauri 打包</button>
+            <button class="chip">CJK 搜索</button>
+          </div>
+        </div>
+
+        <div class="results">
+          <div class="results__head">
+            <strong>3 条记忆</strong>
+            <span class="results__count">用时 12ms</span>
+          </div>
+
+          <article class="memory">
+            <div class="memory__date">07-12<br>14:32</div>
+            <div>
+              <h2 class="memory__title">用 jieba 给 FTS5 做中文分词</h2>
+              <div class="memory__meta">bagger · 会话 #a1f9 · 18 条消息</div>
+              <p class="memory__snippet">当时想解决 LIKE 全表扫描的问题，尝试用 <mark>jieba</mark> 预分词再写入 FTS5，配合 BM25 排序，中文检索从 800ms 降到 20ms。</p>
+              <div class="tags"><span class="tag">中文搜索</span><span class="tag">性能</span><span class="tag">SQLite</span></div>
+            </div>
+          </article>
+
+          <article class="memory">
+            <div class="memory__date">07-09<br>09:15</div>
+            <div>
+              <h2 class="memory__title">Parser Protocol 抽象 Claude 转录</h2>
+              <div class="memory__meta">bagger · 会话 #7c20 · 24 条消息</div>
+              <p class="memory__snippet">为了让 bagger 以后能接别的 AI 工具，把解析逻辑抽成 <mark>Parser</mark> ABC + Registry，ClaudeParser 只是其中一个实现。</p>
+              <div class="tags"><span class="tag">架构</span><span class="tag">抽象</span></div>
+            </div>
+          </article>
+
+          <article class="memory">
+            <div class="memory__date">07-03<br>21:48</div>
+            <div>
+              <h2 class="memory__title">Tauri 把 Python 后端打成 sidecar</h2>
+              <div class="memory__meta">bagger · 会话 #3e88 · 31 条消息</div>
+              <p class="memory__snippet">前端 React 通过 fetch 调本地 REST，Rust 负责拉起 Python 进程。踩了 sidecar 路径和打包白名单两个坑。</p>
+              <div class="tags"><span class="tag">Tauri</span><span class="tag">打包</span><span class="tag">桌面端</span></div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ===== VIEW: SESSION REVIEW ===== -->
+      <section class="view" id="view-session" role="tabpanel">
+        <div class="hero" style="padding-top: 0">
+          <h1 style="font-size: var(--fs-xl)">会话 #a1f9 · 用 jieba 给 FTS5 做中文分词</h1>
+          <p>bagger · 2026-07-12 14:32 – 15:10 · 18 条消息</p>
+          <p style="margin-top: var(--space-3)"><a href="#" id="backLink">← 返回检索</a></p>
+        </div>
+
+        <div class="thread">
+          <div class="event event--user">
+            <div class="event__rail"><span class="event__dot event__dot--user"></span>用户</div>
+            <div class="event__body">
+              <div class="event__text"><p>怎么给 SQLite FTS5 加中文搜索？现在用 LIKE 一查就是全表扫描，800ms 太慢了。</p></div>
+              <div class="event__time">14:32:08</div>
+            </div>
+          </div>
+
+          <div class="event">
+            <div class="event__rail"><span class="event__dot event__dot--assistant"></span>助手</div>
+            <div class="event__body">
+              <div class="event__text">
+                <p>核心思路是<strong>预分词</strong>：写入前用 jieba 把中文切好，再存进 FTS5 的 token。这样查询也能走索引，配合 BM25 排序效果很好。</p>
+                <p>要点：建表时用 <code>tokenize = 'unicode61'</code> 兜底，分词交给应用层；查询串同样先 jieba 再拼 MATCH。</p>
+              </div>
+              <div class="event__time">14:32:51</div>
+            </div>
+          </div>
+
+          <div class="event">
+            <div class="event__rail"><span class="event__dot event__dot--tool"></span>工具</div>
+            <div class="event__body">
+              <div class="code">Read: bagger/storage/sqlite.py (138 lines)
+→ 在 SqliteSearchIndex 中插入 jieba.cut 预处理
+⏱ 0.4s</div>
+              <div class="event__time">14:33:20</div>
+            </div>
+          </div>
+
+          <div class="event event--user">
+            <div class="event__rail"><span class="event__dot event__dot--user"></span>用户</div>
+            <div class="event__body">
+              <div class="event__text"><p>那 CJK 混合英文的情况呢？jieba 会不会把英文也切碎？</p></div>
+              <div class="event__time">14:40:02</div>
+            </div>
+          </div>
+
+          <div class="event">
+            <div class="event__rail"><span class="event__dot event__dot--assistant"></span>助手</div>
+            <div class="event__body">
+              <div class="event__text"><p>jieba 默认会保留英文单词整体，不会切碎。实测混合串「jieba FTS5 中文搜索」会切成 <code>jieba / FTS5 / 中文 / 搜索</code>，正好符合预期。</p></div>
+              <div class="event__time">14:40:39</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+  // 视图切换（检索 / 回看）
+  const tabs = document.querySelectorAll('.seg button');
+  const views = { search: document.getElementById('view-search'), session: document.getElementById('view-session') };
+  tabs.forEach(btn => btn.addEventListener('click', () => {
+    const v = btn.dataset.view;
+    tabs.forEach(b => b.setAttribute('aria-pressed', b === btn));
+    Object.entries(views).forEach(([k, el]) => el.classList.toggle('is-active', k === v));
+  }));
+
+  // 深 / 浅主题切换（验证令牌双主题可用）
+  const root = document.documentElement;
+  document.getElementById('themeToggle').addEventListener('click', () => {
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+  });
+</script>
+</body>
+</html>
