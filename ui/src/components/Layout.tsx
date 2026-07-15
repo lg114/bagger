@@ -145,18 +145,9 @@ export default function Layout() {
           <div
             className={cn(
               "titlebar-drag h-14 shrink-0 flex items-center transition-all duration-200",
-              sidebarOpen ? "px-4 justify-between" : "justify-center px-2",
+              sidebarOpen ? "px-4 justify-end" : "justify-center px-2",
             )}
           >
-            {sidebarOpen ? (
-              <span className="font-display text-lg tracking-tight text-foreground select-none">
-                bagger
-              </span>
-            ) : (
-              <span className="font-display text-lg tracking-tight text-[var(--brand-500)] select-none">
-                b
-              </span>
-            )}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-1.5 rounded-element text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-200 focus:outline-none shrink-0"
@@ -301,17 +292,6 @@ export default function Layout() {
                   </nav>
                 </div>
               </div>
-
-              {/* Footer — sync status */}
-              <div className="shrink-0 border-t border-[var(--border-subtle)] px-3 py-2.5">
-                <Link
-                  to="/settings"
-                  className="flex items-center gap-2 text-[11px] text-tertiary hover:text-foreground transition-colors duration-200"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] shrink-0" />
-                  <span className="font-mono">Synced</span>
-                </Link>
-              </div>
             </>
           ) : (
             /* Collapsed: icon spine */
@@ -342,11 +322,6 @@ export default function Layout() {
                     <item.icon className="w-[18px] h-[18px]" strokeWidth={1.5} />
                   </NavLink>
                 ))}
-              </div>
-              <div className="shrink-0 border-t border-[var(--border-subtle)] py-2.5 flex justify-center">
-                <Link to="/settings" title="Synced">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)]" />
-                </Link>
               </div>
             </>
           )}
