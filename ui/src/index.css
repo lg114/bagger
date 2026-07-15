@@ -140,12 +140,6 @@ body {
   overflow: hidden;
 }
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--text-tertiary); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
-
 /* ── Cards ── */
 .glass-card {
   background: var(--bg-surface);
@@ -298,25 +292,29 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* ── Scrollbar ── */
+/* ── Scrollbar ──
+   Thin + low-contrast by default so it recedes into the surface;
+   reveals the clay accent only on hover/drag. Fits the editorial tone
+   and keeps glare-sensitive surfaces calm. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2a2a2e transparent;
+  scrollbar-color: var(--border-subtle) transparent;
 }
 
 *::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: #2a2a2e;
-  border-radius: 3px;
+  background: var(--border-subtle);
+  border-radius: 4px;
+  transition: background 150ms ease;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: #3a3b42;
+  background: var(--brand-500);
 }
 *::-webkit-scrollbar-corner {
   background: transparent;
