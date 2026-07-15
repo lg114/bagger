@@ -91,7 +91,6 @@ function WindowControls() {
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [q, setQ] = useState("");
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const activeProject = searchParams.get("project");
@@ -145,9 +144,14 @@ export default function Layout() {
           <div
             className={cn(
               "titlebar-drag h-14 shrink-0 flex items-center transition-all duration-200",
-              sidebarOpen ? "px-4 justify-end" : "justify-center px-2",
+              sidebarOpen ? "px-4 justify-between" : "justify-center px-2",
             )}
           >
+            {sidebarOpen && (
+              <span className="font-display text-lg tracking-tight text-foreground select-none">
+                bagger
+              </span>
+            )}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-1.5 rounded-element text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-200 focus:outline-none shrink-0"
@@ -168,30 +172,6 @@ export default function Layout() {
 
           {sidebarOpen ? (
             <>
-              {/* Persistent search — the front door */}
-              <div className="px-3 pb-3">
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const v = q.trim();
-                    if (v) navigate(`/search?q=${encodeURIComponent(v)}`);
-                  }}
-                >
-                  <div className="flex items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-input)] px-2.5 py-2 transition-colors focus-within:border-[var(--brand-500)]">
-                    <Search className="w-4 h-4 text-muted-foreground shrink-0" strokeWidth={1.5} />
-                    <input
-                      value={q}
-                      onChange={(e) => setQ(e.target.value)}
-                      placeholder="Search memory…"
-                      className="flex-1 min-w-0 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
-                    />
-                    <kbd className="text-[10px] font-mono text-tertiary border border-[var(--border-subtle)] rounded px-1.5 py-0.5 shrink-0">
-                      ⌘K
-                    </kbd>
-                  </div>
-                </form>
-              </div>
-
               {/* Scrollable body: Projects map + Views */}
               <div className="flex-1 min-h-0 overflow-y-auto px-2.5 py-1 space-y-5">
                 {/* Projects — the memory map */}
