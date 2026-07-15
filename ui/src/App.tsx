@@ -3,6 +3,7 @@ import Layout from "./components/Layout";
 import HomePage from "./pages/HomePage";
 import SessionsPage from "./pages/SessionsPage";
 import SessionDetailPage from "./pages/SessionDetailPage";
+import ProjectsPage from "./pages/ProjectsPage";
 import SearchPage from "./pages/SearchPage";
 import StatsPage from "./pages/StatsPage";
 import ImportPage from "./pages/ImportPage";
@@ -16,6 +17,7 @@ export default function App() {
           <Route index element={<HomePage />} />
           <Route path="sessions" element={<SessionsPage />} />
           <Route path="sessions/:id" element={<SessionDetailPage />} />
+          <Route path="projects" element={<ProjectsPage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="stats" element={<StatsPage />} />
           <Route path="import" element={<ImportPage />} />

@@ -1,12 +1,5 @@
-import { useState, useMemo } from "react";
-import {
-  NavLink,
-  Outlet,
-  useNavigate,
-  useSearchParams,
-  Link,
-} from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { type Window, getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Home,
@@ -15,10 +8,9 @@ import {
   RefreshCw,
   Settings,
   Folder,
-  FolderOpen,
+  type LucideIcon,
 } from "lucide-react";
-import { cn, formatDateShort } from "@/lib/utils";
-import { getSessions, type Session } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import StatusBar from "./StatusBar";
 
 let cachedWin: Window | null | undefined;
@@ -32,17 +24,17 @@ function getWin(): Window | null {
   return cachedWin;
 }
 
-function basename(p: string): string {
-  const parts = p.split("/").filter(Boolean);
-  return parts[parts.length - 1] || p;
-}
-
-const viewItems = [
-  { to: "/", icon: Home, label: "Dashboard" },
-  { to: "/stats", icon: BarChart3, label: "Analytics" },
-  { to: "/import", icon: RefreshCw, label: "Scan" },
-  { to: "/settings", icon: Settings, label: "Settings" },
-];
+const navItems = {
+  browse: [
+    { to: "/", icon: Home, label: "Dashboard" },
+    { to: "/projects", icon: Folder, label: "Projects" },
+  ],
+  manage: [
+    { to: "/stats", icon: BarChart3, label: "Analytics" },
+    { to: "/import", icon: RefreshCw, label: "Scan" },
+    { to: "/settings", icon: Settings, label: "Settings" },
+  ],
+} as const;
 
 function WindowControls() {
   const win = getWin();
@@ -88,47 +80,36 @@ function WindowControls() {
   );
 }
 
+function NavRow({ to, icon: Icon, label }: { to: string; icon: LucideIcon; label: string }) {
+  return (
+    <NavLink
+      to={to}
+      end={to === "/"}
+      className={({ isActive }) =>
+        cn(
+          "relative flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors duration-200",
+          isActive
+            ? "text-[var(--brand-500)]"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+        )
+      }
+    >
+      {({ isActive }) => (
+        <>
+          {isActive && (
+            <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-[var(--brand-500)]" />
+          )}
+          <Icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.5} />
+          <span className="flex-1 truncate text-sm font-medium">{label}</span>
+        </>
+      )}
+    </NavLink>
+  );
+}
+
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [expanded, setExpanded] = useState<string | null>(null);
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const activeProject = searchParams.get("project");
-
-  // Pull a wide slice of sessions once to build the project map.
-  const { data } = useQuery({
-    queryKey: ["sidebar-projects"],
-    queryFn: () => getSessions(1, 200),
-  });
-
-  const projects = useMemo(() => {
-    const map = new Map<
-      string,
-      { path: string; name: string; sessions: Session[]; last: string }
-    >();
-    (data?.data ?? []).forEach((s) => {
-      const entry =
-        map.get(s.project_path) ??
-        ({ path: s.project_path, name: basename(s.project_path), sessions: [], last: s.last_message_at } as {
-          path: string;
-          name: string;
-          sessions: Session[];
-          last: string;
-        });
-      entry.sessions.push(s);
-      if (s.last_message_at > entry.last) entry.last = s.last_message_at;
-      map.set(s.project_path, entry);
-    });
-    return [...map.values()]
-      .sort((a, b) => b.last.localeCompare(a.last))
-      .slice(0, 6)
-      .map((p) => ({
-        ...p,
-        sessions: [...p.sessions]
-          .sort((a, b) => b.last_message_at.localeCompare(a.last_message_at))
-          .slice(0, 3),
-      }));
-  }, [data]);
 
   return (
     <div className="flex flex-col h-screen">
@@ -171,139 +152,62 @@ export default function Layout() {
           </div>
 
           {sidebarOpen ? (
-            <>
-              {/* Scrollable body: Projects map + Views */}
-              <div className="flex-1 min-h-0 overflow-y-auto px-2.5 py-1 space-y-5">
-                {/* Projects — the memory map */}
-                <div>
+            /* Expanded: grouped nav */
+            <div className="flex-1 min-h-0 overflow-y-auto px-2.5 py-1 space-y-5">
+              {(["browse", "manage"] as const).map((group) => (
+                <div key={group}>
                   <p className="text-[11px] uppercase tracking-wider text-tertiary px-2 mb-1.5 font-medium">
-                    Projects
-                  </p>
-                  <div className="space-y-0.5">
-                    {projects.length === 0 && (
-                      <p className="text-xs text-muted-foreground px-2 py-1">
-                        No sessions yet
-                      </p>
-                    )}
-                    {projects.map((p) => {
-                      const isOpen = expanded === p.path || activeProject === p.path;
-                      const isActive = activeProject === p.path;
-                      return (
-                        <div key={p.path}>
-                          <button
-                            onClick={() => setExpanded(isOpen ? null : p.path)}
-                            className={cn(
-                              "relative w-full flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors duration-200",
-                              isActive
-                                ? "text-[var(--brand-500)]"
-                                : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
-                            )}
-                          >
-                            {isActive && (
-                              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-[var(--brand-500)]" />
-                            )}
-                            {isOpen ? (
-                              <FolderOpen className="w-[18px] h-[18px] shrink-0" strokeWidth={1.5} />
-                            ) : (
-                              <Folder className="w-[18px] h-[18px] shrink-0" strokeWidth={1.5} />
-                            )}
-                            <span className="flex-1 min-w-0 truncate text-sm font-medium">
-                              {p.name}
-                            </span>
-                            <span className="text-[11px] font-mono text-tertiary shrink-0">
-                              {p.sessions.length}
-                            </span>
-                          </button>
-                          {isOpen && (
-                            <div className="mt-0.5 pb-1 space-y-0.5">
-                              {p.sessions.map((s) => (
-                                <Link
-                                  key={s.id}
-                                  to={`/sessions/${s.id}`}
-                                  className="group flex items-center gap-2 pl-9 pr-2 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors duration-200"
-                                >
-                                  <span className="flex-1 min-w-0 truncate text-xs">
-                                    {s.summary || "Untitled session"}
-                                  </span>
-                                  <span className="text-[10px] font-mono text-tertiary shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    {formatDateShort(s.last_message_at)}
-                                  </span>
-                                </Link>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Views — demoted to secondary */}
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-tertiary px-2 mb-1.5 font-medium">
-                    Views
+                    {group === "browse" ? "Browse" : "Manage"}
                   </p>
                   <nav className="space-y-0.5">
-                    {viewItems.map((item) => (
-                      <NavLink
+                    {navItems[group].map((item) => (
+                      <NavRow
                         key={item.to}
                         to={item.to}
-                        end={item.to === "/"}
-                        className={({ isActive }) =>
-                          cn(
-                            "relative flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors duration-200",
-                            isActive
-                              ? "text-[var(--brand-500)]"
-                              : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
-                          )
-                        }
-                      >
-                        {({ isActive }) => (
-                          <>
-                            {isActive && (
-                              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-[var(--brand-500)]" />
-                            )}
-                            <item.icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.5} />
-                            <span className="flex-1 truncate text-sm font-medium">{item.label}</span>
-                          </>
-                        )}
-                      </NavLink>
+                        icon={item.icon}
+                        label={item.label}
+                      />
                     ))}
                   </nav>
                 </div>
-              </div>
-            </>
+              ))}
+            </div>
           ) : (
             /* Collapsed: icon spine */
-            <>
-              <div className="flex-1 min-h-0 overflow-y-auto py-2 space-y-1 flex flex-col items-center">
-                <button
-                  onClick={() => navigate("/search")}
-                  className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors duration-200"
-                  title="Search"
-                >
-                  <Search className="w-[18px] h-[18px]" strokeWidth={1.5} />
-                </button>
-                {viewItems.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.to === "/"}
-                    title={item.label}
-                    className={({ isActive }) =>
-                      cn(
-                        "p-2 rounded-md transition-colors duration-200",
-                        isActive
-                          ? "text-[var(--brand-500)]"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
-                      )
-                    }
-                  >
-                    <item.icon className="w-[18px] h-[18px]" strokeWidth={1.5} />
-                  </NavLink>
-                ))}
-              </div>
-            </>
+            <div className="flex-1 min-h-0 overflow-y-auto py-2 space-y-1 flex flex-col items-center">
+              <button
+                onClick={() => navigate("/search")}
+                className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors duration-200"
+                title="Search"
+              >
+                <Search className="w-[18px] h-[18px]" strokeWidth={1.5} />
+              </button>
+              {(["browse", "manage"] as const).map((group) => (
+                <div key={group} className="flex flex-col items-center gap-1 w-full">
+                  {navItems[group].map((item) => (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      end={item.to === "/"}
+                      title={item.label}
+                      className={({ isActive }) =>
+                        cn(
+                          "p-2 rounded-md transition-colors duration-200",
+                          isActive
+                            ? "text-[var(--brand-500)]"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                        )
+                      }
+                    >
+                      <item.icon className="w-[18px] h-[18px]" strokeWidth={1.5} />
+                    </NavLink>
+                  ))}
+                  {group === "browse" && (
+                    <div className="w-5 my-1 border-t border-[var(--border-subtle)]" />
+                  )}
+                </div>
+              ))}
+            </div>
           )}
         </aside>
 
