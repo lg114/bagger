@@ -87,23 +87,33 @@ export default function Layout() {
   return (
     <div className="flex flex-col h-screen">
       <div className="flex flex-row flex-1 min-h-0">
-        {/* ── Left column: Sidebar ── */}
+        {/* ── Left column: Sidebar (editorial spine) ── */}
         <aside
           className={cn(
-            "shrink-0 flex flex-col bg-surface h-full transition-all duration-200 ease-apple",
-            sidebarOpen ? "w-[220px]" : "w-10",
+            "shrink-0 flex flex-col h-full bg-base border-r border-[var(--border-subtle)] transition-all duration-200 ease-apple",
+            sidebarOpen ? "w-56" : "w-14",
           )}
         >
-          {/* Sidebar header — drag region + bagger logo toggle */}
+          {/* Sidebar header — wordmark + drag region + toggle */}
           <div
             className={cn(
-              "titlebar-drag h-12 shrink-0 flex items-center transition-all duration-200",
-              sidebarOpen ? "px-4 justify-between" : "justify-center",
+              "titlebar-drag h-14 shrink-0 flex items-center border-b border-[var(--border-subtle)] transition-all duration-200",
+              sidebarOpen ? "px-4 justify-between" : "justify-center px-2",
             )}
           >
+            {sidebarOpen ? (
+              <span className="font-display text-lg tracking-tight text-foreground select-none">
+                bagger
+              </span>
+            ) : (
+              <span className="font-display text-lg tracking-tight text-[var(--brand-500)] select-none">
+                b
+              </span>
+            )}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-1.5 rounded-element text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-200 focus:outline-none shrink-0"
+              style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
               title={sidebarOpen ? "折叠侧栏" : "展开侧栏"}
             >
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -119,12 +129,7 @@ export default function Layout() {
           </div>
 
           {/* Navigation */}
-          <nav
-            className={cn(
-              "flex-1 space-y-1 overflow-hidden transition-all duration-200",
-              sidebarOpen ? "p-3" : "px-0.5 py-3",
-            )}
-          >
+          <nav className="flex-1 py-4 px-2.5 space-y-0.5 overflow-hidden">
             {navItems.map((item, idx) => (
               <NavLink
                 key={item.to}
@@ -132,26 +137,40 @@ export default function Layout() {
                 end={item.to === "/"}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center rounded-element text-sm transition-all duration-200 ease-out whitespace-nowrap",
-                    sidebarOpen ? "gap-2.5 px-3 py-2" : "justify-center py-2",
-                    idx === 4 && sidebarOpen ? "mt-3" : "",
+                    "relative flex items-center rounded-md transition-colors duration-200 ease-out whitespace-nowrap",
+                    sidebarOpen ? "gap-3 px-3 py-2" : "justify-center px-2 py-2.5",
+                    idx === 4 && sidebarOpen ? "mt-4" : "",
                     isActive
-                      ? "bg-primary/10 text-[var(--nav-active-text)] font-medium border border-[var(--nav-active-border)]"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent",
+                      ? "text-[var(--brand-500)]"
+                      : "text-muted-foreground hover:text-foreground",
                   )
                 }
               >
-                <item.icon className="w-[18px] h-[18px] shrink-0" />
-                {sidebarOpen && <span className="flex-1 truncate">{item.label}</span>}
+                {({ isActive }) => (
+                  <>
+                    {isActive && (
+                      <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-[var(--brand-500)]" />
+                    )}
+                    <item.icon
+                      className="w-[18px] h-[18px] shrink-0"
+                      strokeWidth={1.5}
+                    />
+                    {sidebarOpen && (
+                      <span className="flex-1 truncate text-sm font-medium">
+                        {item.label}
+                      </span>
+                    )}
+                  </>
+                )}
               </NavLink>
             ))}
           </nav>
         </aside>
 
         {/* ── Right column: Title strip + Content ── */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-base">
           {/* Title bar strip — drag region + window controls */}
-          <div className="titlebar-drag h-12 shrink-0 flex items-center justify-end px-4">
+          <div className="titlebar-drag h-14 shrink-0 flex items-center justify-end px-4 border-b border-[var(--border-subtle)]">
             <WindowControls />
           </div>
 

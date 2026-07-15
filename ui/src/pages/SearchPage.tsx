@@ -27,7 +27,7 @@ export default function SearchPage() {
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-fade-in-up">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight mb-1">Search</h1>
+        <h1 className="font-display text-3xl font-semibold tracking-tight mb-2 text-foreground">Search</h1>
         <p className="text-sm text-muted-foreground">
           Full-text search with BM25 ranking. Supports English and CJK.
         </p>
@@ -69,9 +69,9 @@ export default function SearchPage() {
               <SearchResults results={results} isLoading={isLoading} query={query} />
 
               {!isLoading && results.length === 0 && (
-                <div className="text-center py-20 text-muted-foreground glass-card-static p-16">
+                <div className="text-center py-20 text-muted-foreground glass-card-static p-12">
                   <SearchIcon className="w-12 h-12 mx-auto mb-4 text-primary/15" />
-                  <p className="text-sm mb-2">No results found</p>
+                  <p className="font-display text-base mb-2 text-foreground/90">No results found</p>
                   <p className="text-xs opacity-50">Try different keywords or broader terms</p>
                 </div>
               )}
@@ -105,9 +105,9 @@ export default function SearchPage() {
           )}
         </>
       ) : (
-        <div className="text-center py-20 text-muted-foreground glass-card-static p-16">
+        <div className="text-center py-20 text-muted-foreground glass-card-static p-12">
           <SearchIcon className="w-12 h-12 mx-auto mb-4 text-primary/15" />
-          <p className="text-sm mb-2">Search your conversation history</p>
+          <p className="font-display text-base mb-2 text-foreground/90">Search your conversation history</p>
           <p className="text-xs opacity-50 font-mono">
             FTS5 with BM25 ranking. CJK falls back to LIKE.
           </p>

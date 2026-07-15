@@ -10,7 +10,7 @@ export default function StatusBar() {
   });
 
   return (
-    <footer className="h-7 shrink-0 flex items-center gap-4 px-6 bg-surface text-[11px] font-mono text-muted-foreground">
+    <footer className="h-7 shrink-0 flex items-center gap-4 px-6 bg-base border-t border-[var(--border-subtle)] text-[11px] font-mono text-tertiary">
       {/* Sync status */}
       <span className="flex items-center gap-1.5">
         <Circle
