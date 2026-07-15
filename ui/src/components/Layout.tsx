@@ -97,7 +97,7 @@ export default function Layout() {
           {/* Sidebar header — wordmark + drag region + toggle */}
           <div
             className={cn(
-              "titlebar-drag h-14 shrink-0 flex items-center border-b border-[var(--border-subtle)] transition-all duration-200",
+              "titlebar-drag h-14 shrink-0 flex items-center transition-all duration-200",
               sidebarOpen ? "px-4 justify-between" : "justify-center px-2",
             )}
           >
@@ -170,7 +170,7 @@ export default function Layout() {
         {/* ── Right column: Title strip + Content ── */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-base">
           {/* Title bar strip — drag region + window controls */}
-          <div className="titlebar-drag h-14 shrink-0 flex items-center justify-end px-4 border-b border-[var(--border-subtle)]">
+          <div className="titlebar-drag h-14 shrink-0 flex items-center justify-end px-4">
             <WindowControls />
           </div>
 
