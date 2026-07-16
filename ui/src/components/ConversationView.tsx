@@ -124,7 +124,7 @@ export default function ConversationView({ events, searchOpen, onToggleSearch, o
     <div className="space-y-5 pb-6">
       {/* In-session search bar */}
       {searchOpen && (
-        <div className="flex items-center gap-3 px-4 py-2.5 glass-card-static border-primary/20 animate-fade-in-up">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 glass-card-static border-primary/20 animate-fade-in-up">
           <Search className="w-4 h-4 text-muted-foreground shrink-0" />
           <input
             ref={searchInputRef}
@@ -132,7 +132,7 @@ export default function ConversationView({ events, searchOpen, onToggleSearch, o
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search in conversation..."
-            className="flex-1 bg-transparent border-none outline-none text-sm text-foreground placeholder:text-muted-foreground font-mono"
+            className="flex-1 min-w-[8rem] bg-transparent border-none outline-none text-sm text-foreground placeholder:text-muted-foreground font-mono"
             autoFocus
           />
           {matchIds.length > 0 && (
@@ -140,29 +140,31 @@ export default function ConversationView({ events, searchOpen, onToggleSearch, o
               {safeMatchIndex + 1} of {matchIds.length}
             </span>
           )}
-          <button
-            onClick={navigateMatch(-1)}
-            disabled={matchIds.length === 0}
-            className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:cursor-default"
-            title="Previous match (Shift+Enter)"
-          >
-            <ChevronUp className="w-4 h-4" />
-          </button>
-          <button
-            onClick={navigateMatch(1)}
-            disabled={matchIds.length === 0}
-            className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:cursor-default"
-            title="Next match (Enter)"
-          >
-            <ArrowDown className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => { onCloseSearch(); setSearchQuery(""); }}
-            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-            title="Close search (Esc)"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={navigateMatch(-1)}
+              disabled={matchIds.length === 0}
+              className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:cursor-default"
+              title="Previous match (Shift+Enter)"
+            >
+              <ChevronUp className="w-4 h-4" />
+            </button>
+            <button
+              onClick={navigateMatch(1)}
+              disabled={matchIds.length === 0}
+              className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:cursor-default"
+              title="Next match (Enter)"
+            >
+              <ArrowDown className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => { onCloseSearch(); setSearchQuery(""); }}
+              className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+              title="Close search (Esc)"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -191,8 +193,8 @@ export default function ConversationView({ events, searchOpen, onToggleSearch, o
       })}
 
       {remaining > 0 && (
-        <div className="flex items-center gap-3 py-4">
-          <div className="flex-1 h-px bg-border" />
+        <div className="flex flex-wrap items-center justify-center gap-3 py-4">
+          <div className="flex-1 h-px bg-border min-w-[3rem]" />
           <button
             onClick={loadMore}
             className="flex items-center gap-1.5 px-4 py-2 rounded-element border border-border text-xs font-mono text-muted-foreground hover:text-primary hover:border-primary/35 transition-all duration-200"
@@ -206,7 +208,7 @@ export default function ConversationView({ events, searchOpen, onToggleSearch, o
           >
             All &darr;
           </button>
-          <div className="flex-1 h-px bg-border" />
+          <div className="flex-1 h-px bg-border min-w-[3rem]" />
         </div>
       )}
 

@@ -73,12 +73,12 @@ export default function SessionDetailPage() {
           </Link>
         </Button>
         <div className="flex items-center gap-3">
-          <h1 className="font-display text-3xl font-medium tracking-tight flex-1 min-w-0 truncate text-foreground">
+          <h1 className="font-display text-2xl md:text-3xl font-medium tracking-tight flex-1 min-w-0 truncate text-foreground">
             {session.summary || "Untitled Session"}
           </h1>
           <button
             onClick={() => setSearchOpen((v) => !v)}
-            className="flex items-center gap-2 px-3 py-2 rounded-element border border-border text-xs font-mono text-muted-foreground hover:text-primary hover:border-primary/35 transition-all duration-200"
+            className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-element border border-border text-xs font-mono text-muted-foreground hover:text-primary hover:border-primary/35 transition-all duration-200"
             title="Search in conversation (Ctrl+F)"
           >
             <Search className="w-3.5 h-3.5" />
@@ -90,9 +90,9 @@ export default function SessionDetailPage() {
         </div>
       </div>
 
-      <div className="flex gap-8">
+      <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
         {/* Main: conversation */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 order-2 lg:order-1">
           {events.length === 0 ? (
             <div className="text-center py-16 text-muted-foreground glass-card-static p-10">
               <MessageSquare className="w-10 h-10 mx-auto mb-4 text-primary/15" />
@@ -109,7 +109,7 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Right panel: metadata */}
-        <aside className="w-[240px] shrink-0 space-y-4">
+        <aside className="w-full lg:w-[240px] lg:shrink-0 order-1 lg:order-2">
           <div className="glass-card-static p-5 space-y-3">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Metadata</h3>
 
@@ -135,7 +135,7 @@ export default function SessionDetailPage() {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border">
+            <div className="grid grid-cols-2 lg:grid-cols-1 gap-3 pt-2 border-t border-border">
               <div>
                 <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Messages</span>
                 <p className="text-sm font-mono font-semibold text-foreground/80 mt-0.5 flex items-center gap-1">

@@ -34,8 +34,8 @@ export default function MessageBubble({ event, highlight, activeMatch }: Message
   const tokens = (event.token_input || 0) + (event.token_output || 0);
 
   return (
-    <article className={`relative ${ringClass} rounded-card`}>
-      <div className="flex gap-3">
+    <article className={`relative min-w-0 ${ringClass} rounded-card`}>
+      <div className="flex gap-3 min-w-0">
         {/* Dot gutter */}
         <div className="shrink-0 pt-1.5">
           <span
@@ -54,7 +54,7 @@ export default function MessageBubble({ event, highlight, activeMatch }: Message
               {event.timestamp?.slice(11, 19) || ""}
             </span>
             {event.model && (
-              <span className="text-[10px] font-mono text-tertiary/70">{event.model}</span>
+              <span className="text-[10px] font-mono text-tertiary/70 truncate max-w-[10rem] sm:max-w-[16rem]">{event.model}</span>
             )}
             {tokens > 0 && (
               <span className="text-[10px] font-mono text-tertiary/70 tabular-nums">
@@ -64,9 +64,9 @@ export default function MessageBubble({ event, highlight, activeMatch }: Message
           </div>
 
           {/* Content card — calm bordered surface, no chat-bubble tint */}
-          <div className="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-3 transition-colors duration-300">
+          <div className="min-w-0 rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-3 transition-colors duration-300">
             {event.content_blocks?.length > 0 ? (
-              <div className="space-y-3">
+              <div className="space-y-3 min-w-0">
                 {event.content_blocks.map((block, i) => (
                   <ContentBlockRenderer key={i} block={block} />
                 ))}

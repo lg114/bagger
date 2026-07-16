@@ -23,7 +23,6 @@ export default function SessionsPage() {
 
   const sessions = data?.data ?? [];
   const meta = data?.meta;
-  const visibleSessions = sessions;
 
   const goToPage = (p: number) => {
     const params = new URLSearchParams(searchParams);
@@ -108,12 +107,12 @@ export default function SessionsPage() {
           <p className="text-xs mt-2 opacity-50 font-mono">{(error as Error).message}</p>
         </div>
       ) : isLoading ? (
-        <div className="space-y-2">
+        <div className="rounded-card overflow-hidden border border-[var(--border-subtle)]">
           {Array.from({ length: 8 }).map((_, i) => (
             <SessionCardSkeleton key={i} />
           ))}
         </div>
-      ) : visibleSessions.length === 0 ? (
+      ) : sessions.length === 0 ? (
         <div className="text-center py-20 text-muted-foreground glass-card-static p-16">
           <MessageSquare className="w-12 h-12 mx-auto mb-4 text-primary/15" />
           <p className="text-sm mb-2">{project ? `No sessions in ${project === "no-project" ? "unknown project" : basename(project)}` : "No sessions found"}</p>
@@ -122,8 +121,8 @@ export default function SessionsPage() {
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {visibleSessions.map((session) => (
+        <div className="rounded-card overflow-hidden border border-[var(--border-subtle)]">
+          {sessions.map((session) => (
             <SessionCard key={session.id} session={session} />
           ))}
         </div>

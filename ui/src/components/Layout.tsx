@@ -218,8 +218,8 @@ export default function Layout() {
             <WindowControls />
           </div>
 
-          <main className="flex-1 overflow-y-auto">
-            <div className="px-12 py-10 min-h-full">
+          <main className="flex-1 min-w-0 overflow-y-auto">
+            <div className="px-5 py-6 md:px-8 md:py-8 lg:px-10 lg:py-10 xl:px-12 xl:py-10 min-h-full">
               <Outlet />
             </div>
           </main>

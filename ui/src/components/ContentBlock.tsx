@@ -110,17 +110,17 @@ function ToolUseBlock({
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="my-1.5">
+    <div className="my-1.5 min-w-0">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 text-xs font-medium text-success hover:text-primary transition-colors duration-300 ease-apple cursor-pointer"
+        className="flex items-center gap-2 w-full text-left text-xs font-medium text-success hover:text-primary transition-colors duration-300 ease-apple cursor-pointer"
       >
-        <Wrench className="w-3.5 h-3.5 text-success/70" />
-        <span className="font-mono">Tool: {name}</span>
+        <Wrench className="w-3.5 h-3.5 text-success/70 shrink-0" />
+        <span className="font-mono truncate min-w-0">Tool: {name}</span>
         {open ? (
-          <ChevronDown className="w-3.5 h-3.5 ml-auto" />
+          <ChevronDown className="w-3.5 h-3.5 ml-auto shrink-0" />
         ) : (
-          <ChevronRight className="w-3.5 h-3.5 ml-auto" />
+          <ChevronRight className="w-3.5 h-3.5 ml-auto shrink-0" />
         )}
       </button>
       {open && input && (
