@@ -6,7 +6,9 @@ import { getSessions, type Session } from "@/lib/api";
 import { cn, formatDateShort } from "@/lib/utils";
 
 function basename(p: string): string {
-  const parts = p.split("/").filter(Boolean);
+  if (!p || p === "no-project") return "Unknown project";
+  const normalized = p.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
   return parts[parts.length - 1] || p;
 }
 
@@ -57,7 +59,12 @@ export default function ProjectsPage() {
       map.set(path, entry);
     });
     return [...map.values()]
-      .sort((a, b) => b.last.localeCompare(a.last))
+      .sort((a, b) => {
+        const aUnknown = a.path === "no-project" ? 1 : 0;
+        const bUnknown = b.path === "no-project" ? 1 : 0;
+        if (aUnknown !== bUnknown) return aUnknown - bUnknown; // unknowns sink to bottom
+        return b.last.localeCompare(a.last);
+      })
       .map((p) => ({
         ...p,
         sessions: [...p.sessions].sort((a, b) =>
@@ -151,7 +158,7 @@ export default function ProjectsPage() {
                       {p.name}
                     </p>
                     <p className="text-xs text-muted-foreground font-mono truncate mt-0.5">
-                      {p.path}
+                      {p.path === "no-project" ? "No project path" : p.path}
                     </p>
                   </div>
                   <span className="text-[11px] font-mono text-tertiary shrink-0">
