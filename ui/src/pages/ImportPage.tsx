@@ -1,92 +1,186 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, CheckCircle, Clock } from "lucide-react";
-import { triggerScan } from "@/lib/api";
+import type { LucideIcon } from "lucide-react";
+import {
+  RefreshCw,
+  CheckCircle,
+  FolderOpen,
+  Activity,
+  SkipForward,
+  AlertCircle,
+  Info,
+} from "lucide-react";
+import { triggerScan, triggerFullScan } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+
+type ScanResult = { status: string; sessions: number; events: number; skipped: number };
 
 export default function ImportPage() {
   const queryClient = useQueryClient();
   const [scanning, setScanning] = useState(false);
-  const [lastResult, setLastResult] = useState<{ sessions: number; events: number; skipped: number } | null>(null);
+  const [mode, setMode] = useState<"incremental" | "full" | null>(null);
+  const [lastResult, setLastResult] = useState<ScanResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleScan = async () => {
+  const runScan = async (kind: "incremental" | "full") => {
     setScanning(true);
+    setMode(kind);
+    setError(null);
     try {
-      const result = await triggerScan();
+      const result =
+        kind === "incremental" ? await triggerScan() : await triggerFullScan();
       setLastResult(result);
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });
       queryClient.invalidateQueries({ queryKey: ["health"] });
-    } catch {
-      // Error handled by React Query
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Scan failed");
     } finally {
       setScanning(false);
+      setMode(null);
     }
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8 animate-fade-in-up">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight mb-2">Scan</h1>
-        <p className="text-sm text-muted-foreground">
-          Scan Claude Code JSONL sessions from ~/.claude/projects
+    <div className="max-w-3xl mx-auto space-y-10 animate-fade-in-up">
+      {/* Page header */}
+      <header className="pt-2 space-y-2">
+        <h1 className="font-display text-3xl font-medium tracking-tight text-foreground">
+          Scan
+        </h1>
+        <p className="text-sm text-muted-foreground font-mono">
+          Index Claude Code sessions into your local archive
         </p>
-      </div>
+      </header>
 
-      {/* Scan card */}
-      <div className="glass-card-static p-8 space-y-5">
+      {/* Scan console */}
+      <section className="glass-card-static p-6 sm:p-8 space-y-6">
         <div className="flex items-start gap-4">
-          <div className="w-10 h-10 rounded-element bg-primary/10 flex items-center justify-center border border-primary/15 shrink-0">
-            <RefreshCw className="w-5 h-5 text-primary" />
+          <div className="w-10 h-10 rounded-element bg-[var(--brand-bg)] flex items-center justify-center border border-[var(--brand-500)]/15 shrink-0">
+            <RefreshCw className="w-5 h-5 text-[var(--brand-500)]" />
           </div>
-          <div>
-            <h2 className="text-sm font-semibold">Scan for sessions</h2>
-            <p className="text-xs text-muted-foreground mt-1">
-              Searches ~/.claude/projects for JSONL files and imports new conversations.
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-foreground">Sync source</h2>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+              Imports new transcripts from{" "}
+              <span className="font-mono text-foreground/70">
+                ~/.claude/projects/*.jsonl
+              </span>{" "}
+              and parses them into searchable sessions.
             </p>
           </div>
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleScan}
-          disabled={scanning}
-          className="w-full justify-center border-primary/15 hover:border-primary/35 hover:bg-primary/10 hover:text-primary transition-all duration-200"
-        >
-          <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", scanning && "animate-spin")} />
-          {scanning ? "Scanning..." : "Start Scan"}
-        </Button>
-      </div>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Button
+            size="lg"
+            onClick={() => runScan("incremental")}
+            disabled={scanning}
+            className="flex-1 justify-center"
+          >
+            <RefreshCw
+              className={cn(
+                "w-4 h-4 mr-1.5",
+                scanning && mode === "incremental" && "animate-spin",
+              )}
+            />
+            {scanning && mode === "incremental" ? "Scanning..." : "Start Scan"}
+          </Button>
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={() => runScan("full")}
+            disabled={scanning}
+            className="flex-1 justify-center sm:flex-none sm:px-6"
+          >
+            <RefreshCw
+              className={cn(
+                "w-4 h-4 mr-1.5",
+                scanning && mode === "full" && "animate-spin",
+              )}
+            />
+            {scanning && mode === "full" ? "Rescanning..." : "Full Rescan"}
+          </Button>
+        </div>
+      </section>
 
       {/* Last scan result */}
-      {lastResult && (
-        <div className="glass-card-static p-8 space-y-4 animate-fade-in-up">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-success" />
-            Last Scan Complete
-          </h3>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="text-center">
-              <p className="text-2xl font-bold font-mono text-primary">{lastResult.sessions}</p>
-              <p className="text-[11px] text-muted-foreground mt-1">Sessions</p>
-            </div>
-            <div className="text-center">
-              <p className="text-2xl font-bold font-mono text-success">{lastResult.events}</p>
-              <p className="text-[11px] text-muted-foreground mt-1">New Events</p>
-            </div>
-            <div className="text-center">
-              <p className="text-2xl font-bold font-mono text-muted-foreground">{lastResult.skipped}</p>
-              <p className="text-[11px] text-muted-foreground mt-1">Skipped</p>
-            </div>
+      {lastResult && !error && (
+        <section className="space-y-4 animate-fade-in-up">
+          <h2 className="font-display text-xl font-medium tracking-tight text-foreground flex items-center gap-2.5">
+            <CheckCircle className="w-4 h-4 text-[var(--success)]" />
+            Last Scan
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <ResultTile
+              label="Sessions"
+              value={lastResult.sessions}
+              color="var(--brand-500)"
+              icon={FolderOpen}
+            />
+            <ResultTile
+              label="New Events"
+              value={lastResult.events}
+              color="var(--success)"
+              icon={Activity}
+            />
+            <ResultTile
+              label="Skipped"
+              value={lastResult.skipped}
+              color="var(--text-tertiary)"
+              icon={SkipForward}
+            />
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-mono">
-            <Clock className="w-3 h-3" />
-            Source: ~/.claude/projects/*.jsonl
-          </div>
+        </section>
+      )}
+
+      {/* Error block */}
+      {error && (
+        <div className="flex items-center gap-2 text-sm text-[var(--error)] glass-card-static p-4 animate-fade-in-up">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span className="font-mono">{error}</span>
         </div>
       )}
+
+      {/* Source note */}
+      <section className="flex items-start gap-2.5 text-[11px] text-muted-foreground font-mono leading-relaxed glass-card-static p-4">
+        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-muted-foreground/50" />
+        <p>
+          <span className="text-foreground/70">Start Scan</span> adds only new or
+          changed sessions.{" "}
+          <span className="text-foreground/70">Full Rescan</span> re-parses every
+          transcript from disk. Source:{" "}
+          <span className="text-foreground/70">~/.claude/projects/*.jsonl</span>
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function ResultTile({
+  label,
+  value,
+  color,
+  icon: Icon,
+}: {
+  label: string;
+  value: number;
+  color: string;
+  icon: LucideIcon;
+}) {
+  return (
+    <div className="glass-card p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+        <span className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-mono">
+          {label}
+        </span>
+        <Icon className="w-3.5 h-3.5 ml-auto text-muted-foreground/40" />
+      </div>
+      <div className="font-display text-[34px] leading-none font-medium tabular-nums text-foreground">
+        {value.toLocaleString()}
+      </div>
     </div>
   );
 }
