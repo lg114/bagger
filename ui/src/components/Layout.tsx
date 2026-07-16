@@ -27,6 +27,7 @@ function getWin(): Window | null {
 const navItems = {
   browse: [
     { to: "/", icon: Home, label: "Dashboard" },
+    { to: "/search", icon: Search, label: "Search" },
     { to: "/projects", icon: Folder, label: "Projects" },
   ],
   manage: [
