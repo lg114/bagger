@@ -66,14 +66,14 @@ export default function SessionDetailPage() {
     <div className="max-w-6xl mx-auto animate-fade-in-up">
       {/* Header */}
       <div className="mb-6">
-        <Button variant="ghost" size="sm" asChild className="-ml-3 mb-3 text-muted-foreground hover:text-primary transition-colors duration-200">
-          <Link to="/sessions">
+          <Button variant="ghost" size="sm" asChild className="-ml-3 mb-3 text-muted-foreground hover:text-foreground transition-colors duration-200">
+            <Link to="/sessions">
             <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
             Conversations
           </Link>
         </Button>
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight flex-1 min-w-0 truncate">
+          <h1 className="font-display text-3xl font-medium tracking-tight flex-1 min-w-0 truncate text-foreground">
             {session.summary || "Untitled Session"}
           </h1>
           <button
@@ -116,10 +116,14 @@ export default function SessionDetailPage() {
             {session.project_path && (
               <div className="space-y-1">
                 <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Project</span>
-                <p className="text-xs font-mono text-foreground/70 flex items-center gap-1.5 truncate" title={session.project_path}>
+                <Link
+                  to={`/sessions?project=${encodeURIComponent(session.project_path)}`}
+                  className="text-xs font-mono text-foreground/70 hover:text-[var(--brand-500)] flex items-center gap-1.5 truncate transition-colors duration-200"
+                  title={session.project_path}
+                >
                   <Folder className="w-3 h-3 shrink-0 text-primary/40" />
                   {session.project_path}
-                </p>
+                </Link>
               </div>
             )}
 
