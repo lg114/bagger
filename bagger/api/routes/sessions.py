@@ -15,11 +15,17 @@ def list_sessions(
     per_page: int = Query(50, ge=1, le=200, description="Items per page"),
     sort: str = Query("last_message_at", description="Sort field"),
     order: str = Query("desc", description="Sort order (asc/desc)"),
+    project: str | None = Query(None, description="Filter by exact project_path"),
 ) -> dict:
-    """Paginated list of all sessions with configurable sorting."""
+    """Paginated list of all sessions with configurable sorting.
+
+    When ``project`` is provided (e.g. from the Projects page "View all"
+    link), the result and its total count are scoped to that project so the
+    Conversations page header matches the project's session count.
+    """
     with get_storage() as storage:
         result = storage.list_sessions_paginated(
-            page=page, per_page=per_page, sort=sort, order=order
+            page=page, per_page=per_page, sort=sort, order=order, project=project
         )
     return result
 

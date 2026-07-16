@@ -20,6 +20,7 @@ class SessionRepository(Protocol):
         per_page: int = 50,
         sort: str = "last_message_at",
         order: str = "desc",
+        project: str | None = None,
     ) -> dict: ...
     def get_event_count(self, session_id: str) -> int: ...
 

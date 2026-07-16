@@ -75,7 +75,7 @@ export interface PaginatedResponse<T> {
 
 async function fetchApi<T>(
   path: string,
-  params?: Record<string, string | number>,
+  params?: Record<string, string | number | undefined>,
 ): Promise<T> {
   const url = new URL(`${API_BASE}${path}`);
   if (params) {
@@ -111,12 +111,14 @@ export function getSessions(
   perPage = 50,
   sort = "last_message_at",
   order = "desc",
+  project?: string,
 ): Promise<PaginatedResponse<Session>> {
   return fetchApi<PaginatedResponse<Session>>("/sessions", {
     page,
     per_page: perPage,
     sort,
     order,
+    project,
   });
 }
 

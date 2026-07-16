@@ -292,23 +292,43 @@ class SqliteSessionRepository:
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
 
+    @staticmethod
+    def _project_filter(project: str | None) -> tuple[str, list]:
+        """Build a WHERE clause (and params) for an optional project_path filter.
+
+        ``project`` values:
+          - falsy (None/""):  no filter (all sessions)
+          - "no-project":     sessions with no project_path (NULL or empty)
+          - anything else:    exact ``project_path`` match
+        """
+        if not project:
+            return "", []
+        if project == "no-project":
+            return " WHERE project_path IS NULL OR project_path = ''", []
+        return " WHERE project_path = ?", [project]
+
     def list_sessions_paginated(
         self,
         page: int = 1,
         per_page: int = 50,
         sort: str = "last_message_at",
         order: str = "desc",
+        project: str | None = None,
     ) -> dict:
         offset = (page - 1) * per_page
         allowed_sort = {"last_message_at", "message_count", "first_message_at", "id"}
         col = sort if sort in allowed_sort else "last_message_at"
         direction = "DESC" if order.lower() == "desc" else "ASC"
 
-        total = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        where, where_params = self._project_filter(project)
+
+        total = self._conn.execute(
+            f"SELECT COUNT(*) FROM sessions{where}", where_params
+        ).fetchone()[0]
         rows = self._conn.execute(
-            f"SELECT {SESSION_COLS} FROM sessions "
+            f"SELECT {SESSION_COLS} FROM sessions{where} "
             f"ORDER BY {col} {direction} NULLS LAST LIMIT ? OFFSET ?",
-            (per_page, offset),
+            (*where_params, per_page, offset),
         ).fetchall()
 
         return {
@@ -809,9 +829,10 @@ class SqliteStorage:
         per_page: int = 50,
         sort: str = "last_message_at",
         order: str = "desc",
+        project: str | None = None,
     ) -> dict:
         return self._sessions.list_sessions_paginated(  # type: ignore[union-attr]
-            page, per_page, sort, order
+            page, per_page, sort, order, project
         )
 
     def get_event_count(self, session_id: str) -> int:

@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { getSessions, getSession, getSessionEvents } from "../lib/api";
 
-export function useSessions(page = 1, sort = "last_message_at") {
+export function useSessions(page = 1, sort = "last_message_at", project?: string) {
   return useQuery({
-    queryKey: ["sessions", page, sort],
-    queryFn: () => getSessions(page, 50, sort),
+    queryKey: ["sessions", page, sort, project],
+    queryFn: () => getSessions(page, 50, sort, "desc", project),
   });
 }
 

@@ -15,15 +15,15 @@ export default function SessionsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const page = parseInt(searchParams.get("page") || "1", 10);
   const sort = (searchParams.get("sort") || "last_message_at") as SortKey;
+  const project = searchParams.get("project");
 
-  const { data, isLoading, error } = useSessions(page, sort);
+  // Server-side project filtering: the backend scopes both the returned rows
+  // AND meta.total to the project, so the count header matches the Projects page.
+  const { data, isLoading, error } = useSessions(page, sort, project ?? undefined);
 
   const sessions = data?.data ?? [];
   const meta = data?.meta;
-  const project = searchParams.get("project");
-  const visibleSessions = project
-    ? sessions.filter((s) => s.project_path === project)
-    : sessions;
+  const visibleSessions = sessions;
 
   const goToPage = (p: number) => {
     const params = new URLSearchParams(searchParams);
@@ -61,7 +61,9 @@ export default function SessionsPage() {
           {project && (
             <div className="flex items-center gap-2 text-sm mt-1">
               <span className="text-muted-foreground">in</span>
-              <span className="font-medium text-foreground">{basename(project)}</span>
+              <span className="font-medium text-foreground">
+                {project === "no-project" ? "unknown project" : basename(project)}
+              </span>
               <button
                 onClick={() => {
                   const p = new URLSearchParams(searchParams);
@@ -114,7 +116,7 @@ export default function SessionsPage() {
       ) : visibleSessions.length === 0 ? (
         <div className="text-center py-20 text-muted-foreground glass-card-static p-16">
           <MessageSquare className="w-12 h-12 mx-auto mb-4 text-primary/15" />
-          <p className="text-sm mb-2">{project ? `No sessions in ${basename(project)}` : "No sessions found"}</p>
+          <p className="text-sm mb-2">{project ? `No sessions in ${project === "no-project" ? "unknown project" : basename(project)}` : "No sessions found"}</p>
           <p className="text-xs opacity-50 font-mono">
             Run <code className="text-success bg-success/8 px-1.5 py-0.5 rounded border border-success/15">bagger scan</code> to import sessions
           </p>
