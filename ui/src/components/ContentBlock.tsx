@@ -90,7 +90,7 @@ function ThinkingBlock({ text }: { text: string }) {
         <span className="font-mono">Thinking ({text.length} chars)</span>
       </button>
       {open && (
-        <div className="mt-2 p-4 rounded-element bg-secondary/40 border border-primary/10 text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap break-words italic">
+        <div className="mt-2 p-4 rounded-element bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap break-words italic">
           {text}
         </div>
       )}
@@ -124,7 +124,7 @@ function ToolUseBlock({
         )}
       </button>
       {open && input && (
-        <div className="mt-2 p-4 rounded-element bg-secondary/40 border border-primary/10 text-xs font-mono text-muted-foreground overflow-x-auto">
+        <div className="mt-2 p-4 rounded-element bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs font-mono text-muted-foreground overflow-x-auto">
           <JSONBlock value={input} />
         </div>
       )}
