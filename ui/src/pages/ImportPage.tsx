@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { LucideIcon } from "lucide-react";
 import {
   RefreshCw,
   CheckCircle,
@@ -13,6 +12,7 @@ import {
 import { triggerScan, triggerFullScan } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { MetricCard } from "@/components/MetricCard";
 
 type ScanResult = { status: string; sessions: number; events: number; skipped: number };
 
@@ -113,19 +113,19 @@ export default function ImportPage() {
             Last Scan
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <ResultTile
+            <MetricCard
               label="Sessions"
               value={lastResult.sessions}
               color="var(--brand-500)"
               icon={FolderOpen}
             />
-            <ResultTile
+            <MetricCard
               label="New Events"
               value={lastResult.events}
               color="var(--success)"
               icon={Activity}
             />
-            <ResultTile
+            <MetricCard
               label="Skipped"
               value={lastResult.skipped}
               color="var(--text-tertiary)"
@@ -154,33 +154,6 @@ export default function ImportPage() {
           <span className="text-foreground/70">~/.claude/projects/*.jsonl</span>
         </p>
       </section>
-    </div>
-  );
-}
-
-function ResultTile({
-  label,
-  value,
-  color,
-  icon: Icon,
-}: {
-  label: string;
-  value: number;
-  color: string;
-  icon: LucideIcon;
-}) {
-  return (
-    <div className="glass-card p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
-        <span className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-mono">
-          {label}
-        </span>
-        <Icon className="w-3.5 h-3.5 ml-auto text-muted-foreground/40" />
-      </div>
-      <div className="font-display text-[34px] leading-none font-medium tabular-nums text-foreground">
-        {value.toLocaleString()}
-      </div>
     </div>
   );
 }

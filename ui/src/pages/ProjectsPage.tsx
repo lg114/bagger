@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Folder, FolderOpen, ChevronRight, AlertCircle } from "lucide-react";
 import { getSessions, type Session } from "@/lib/api";
 import { cn, formatDateShort } from "@/lib/utils";
+import { EmptyState } from "@/components/EmptyState";
 
 function basename(p: string): string {
   if (!p || p === "no-project") return "Unknown project";
@@ -120,17 +121,19 @@ export default function ProjectsPage() {
           ))}
         </div>
       ) : projects.length === 0 ? (
-        <div className="text-center py-20 text-muted-foreground glass-card-static p-16">
-          <Folder className="w-12 h-12 mx-auto mb-4 text-primary/15" />
-          <p className="text-sm mb-2">No projects yet</p>
-          <p className="text-xs opacity-50 font-mono">
-            Run{" "}
-            <code className="text-success bg-success/8 px-1.5 py-0.5 rounded border border-success/15">
-              bagger scan
-            </code>{" "}
-            to import sessions
-          </p>
-        </div>
+        <EmptyState
+          icon={Folder}
+          title="No projects yet"
+          description={
+            <span>
+              Run{" "}
+              <code className="text-success bg-success/8 px-1.5 py-0.5 rounded border border-success/15">
+                bagger scan
+              </code>{" "}
+              to import sessions
+            </span>
+          }
+        />
       ) : (
         <ul className="rounded-card overflow-hidden border border-[var(--border-subtle)]">
           {projects.map((p) => {

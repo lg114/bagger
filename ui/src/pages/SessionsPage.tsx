@@ -1,7 +1,8 @@
 import { useSearchParams } from "react-router-dom";
 import { MessageSquare, AlertCircle, X } from "lucide-react";
 import { useSessions } from "@/hooks/useSessions";
-import SessionCard, { SessionCardSkeleton } from "@/components/SessionCard";
+import { SessionRow, SessionRowSkeleton } from "@/components/SessionRow";
+import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 
 type SortKey = "last_message_at" | "message_count" | "first_message_at";
@@ -109,21 +110,27 @@ export default function SessionsPage() {
       ) : isLoading ? (
         <div className="rounded-card overflow-hidden border border-[var(--border-subtle)]">
           {Array.from({ length: 8 }).map((_, i) => (
-            <SessionCardSkeleton key={i} />
+            <SessionRowSkeleton key={i} />
           ))}
         </div>
       ) : sessions.length === 0 ? (
-        <div className="text-center py-20 text-muted-foreground glass-card-static p-16">
-          <MessageSquare className="w-12 h-12 mx-auto mb-4 text-primary/15" />
-          <p className="text-sm mb-2">{project ? `No sessions in ${project === "no-project" ? "unknown project" : basename(project)}` : "No sessions found"}</p>
-          <p className="text-xs opacity-50 font-mono">
-            Run <code className="text-success bg-success/8 px-1.5 py-0.5 rounded border border-success/15">bagger scan</code> to import sessions
-          </p>
-        </div>
+        <EmptyState
+          icon={MessageSquare}
+          title={project ? `No sessions in ${project === "no-project" ? "unknown project" : basename(project)}` : "No sessions found"}
+          description={
+            <span>
+              Run{" "}
+              <code className="text-success bg-success/8 px-1.5 py-0.5 rounded border border-success/15">
+                bagger scan
+              </code>{" "}
+              to import sessions
+            </span>
+          }
+        />
       ) : (
         <div className="rounded-card overflow-hidden border border-[var(--border-subtle)]">
           {sessions.map((session) => (
-            <SessionCard key={session.id} session={session} />
+            <SessionRow key={session.id} session={session} />
           ))}
         </div>
       )}

@@ -9,7 +9,6 @@ import {
   MessageCircle,
   Wrench,
   TrendingUp,
-  AlertCircle,
   Bot,
   Zap,
   Cpu,
@@ -21,15 +20,8 @@ import { getStats, getDailyStats, getToolUsageStats } from "@/lib/api";
 import { formatTokens } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-
-function ErrorBlock({ message }: { message: string }) {
-  return (
-    <div className="flex flex-col items-center py-12 text-muted-foreground">
-      <AlertCircle className="w-8 h-8 mb-3 text-warning/60" />
-      <p className="text-sm font-mono">{message}</p>
-    </div>
-  );
-}
+import { MetricCard } from "@/components/MetricCard";
+import { ErrorBlock } from "@/components/ErrorBlock";
 
 export default function StatsPage() {
   return (
@@ -120,39 +112,6 @@ function KpiSection() {
         </div>
       )}
     </section>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  icon: Icon,
-  color,
-  isLoading,
-}: {
-  label: string;
-  value: string | number | undefined;
-  icon: LucideIcon;
-  color: string;
-  isLoading: boolean;
-}) {
-  return (
-    <div className="glass-card p-5 group">
-      <div className="flex items-center gap-2 mb-5">
-        <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
-        <span className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-mono">
-          {label}
-        </span>
-        <Icon className="w-3.5 h-3.5 ml-auto text-muted-foreground/40 group-hover:text-foreground/50 transition-colors duration-200" />
-      </div>
-      {isLoading ? (
-        <Skeleton className="h-9 w-16 rounded-md bg-[var(--bg-elevated)]/60" />
-      ) : (
-        <div className="font-display text-[34px] leading-none font-medium tabular-nums text-foreground animate-count-up">
-          {value ?? "—"}
-        </div>
-      )}
-    </div>
   );
 }
 

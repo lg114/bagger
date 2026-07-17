@@ -3,6 +3,7 @@ import { Search as SearchIcon, AlertCircle, Clock } from "lucide-react";
 import { useSearch } from "@/hooks/useSearch";
 import SearchBar from "@/components/SearchBar";
 import SearchResults from "@/components/SearchResults";
+import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 
 export default function SearchPage() {
@@ -69,11 +70,11 @@ export default function SearchPage() {
               <SearchResults results={results} isLoading={isLoading} query={query} />
 
               {!isLoading && results.length === 0 && (
-                <div className="text-center py-20 text-muted-foreground glass-card-static p-12">
-                  <SearchIcon className="w-12 h-12 mx-auto mb-4 text-primary/15" />
-                  <p className="font-display text-base mb-2 text-foreground/90">No results found</p>
-                  <p className="text-xs opacity-50">Try different keywords or broader terms</p>
-                </div>
+                <EmptyState
+                  icon={SearchIcon}
+                  title="No results found"
+                  description="Try different keywords or broader terms"
+                />
               )}
 
               {meta && meta.pages > 1 && (
@@ -105,13 +106,11 @@ export default function SearchPage() {
           )}
         </>
       ) : (
-        <div className="text-center py-20 text-muted-foreground glass-card-static p-12">
-          <SearchIcon className="w-12 h-12 mx-auto mb-4 text-primary/15" />
-          <p className="font-display text-base mb-2 text-foreground/90">Search your conversation history</p>
-          <p className="text-xs opacity-50 font-mono">
-            FTS5 with BM25 ranking. CJK falls back to LIKE.
-          </p>
-        </div>
+        <EmptyState
+          icon={SearchIcon}
+          title="Search your conversation history"
+          description="FTS5 with BM25 ranking. CJK falls back to LIKE."
+        />
       )}
     </div>
   );

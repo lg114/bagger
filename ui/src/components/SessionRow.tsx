@@ -1,18 +1,16 @@
 import { Link } from "react-router-dom";
-import { MessageSquare, Folder } from "lucide-react";
-import { cn, formatDateShort } from "@/lib/utils";
+import { Folder, MessageSquare } from "lucide-react";
+import { formatDateShort } from "@/lib/utils";
 import type { Session } from "@/lib/api";
 
-interface SessionCardProps {
-  session: Session;
-}
-
-// Editorial hairline row — mirrors the Dashboard's Recent Sessions list so the
-// two read as one visual language. Wrap in a bordered `rounded-card overflow-hidden`
-// container; the border-b / last:border-0 lives on the <Link> (a direct child of
-// that container) so the inter-row hairlines actually render and the last one
-// drops cleanly.
-export default function SessionCard({ session }: SessionCardProps) {
+/**
+ * Editorial hairline session row — the single shared row used by both the
+ * Dashboard "Recent Sessions" list and the Conversations page. Wrap in a
+ * `rounded-card overflow-hidden border border-[var(--border-subtle)]` container;
+ * the `border-b / last:border-0` lives on this <Link> (a direct child of that
+ * container) so inter-row hairlines actually render and the last one drops cleanly.
+ */
+export function SessionRow({ session }: { session: Session }) {
   return (
     <Link
       to={`/sessions/${session.id}`}
@@ -35,24 +33,17 @@ export default function SessionCard({ session }: SessionCardProps) {
             <MessageSquare className="w-3 h-3 opacity-40" />
             {session.message_count}
           </span>
-          <span>{formatDateShort(session.last_message_at || session.first_message_at)}</span>
+          <span>{formatDateShort(session.last_message_at)}</span>
         </div>
       </div>
     </Link>
   );
 }
 
-interface SessionCardSkeletonProps {
-  className?: string;
-}
-
-export function SessionCardSkeleton({ className }: SessionCardSkeletonProps) {
+export function SessionRowSkeleton({ className }: { className?: string }) {
   return (
     <div
-      className={cn(
-        "flex items-center justify-between gap-4 px-4 py-4 border-b border-[var(--border-subtle)] last:border-0 animate-pulse",
-        className,
-      )}
+      className={`flex items-center justify-between gap-4 px-4 py-4 border-b border-[var(--border-subtle)] last:border-0 animate-pulse ${className ?? ""}`}
     >
       <div className="flex-1 min-w-0 space-y-3">
         <div className="h-4 w-3/4 rounded bg-[var(--bg-elevated)]/60" />
