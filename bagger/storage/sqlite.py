@@ -37,7 +37,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     message_count INTEGER NOT NULL DEFAULT 0,
     first_message_at TEXT,
     last_message_at TEXT,
-    last_synced_at TEXT
+    last_synced_at TEXT,
+    parent_session_id TEXT,
+    resume_of TEXT,
+    is_compaction INTEGER NOT NULL DEFAULT 0,
+    compaction_of TEXT
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -76,6 +80,16 @@ CREATE TABLE IF NOT EXISTS tool_uses (
 
 CREATE INDEX IF NOT EXISTS idx_tool_uses_event ON tool_uses(event_id);
 CREATE INDEX IF NOT EXISTS idx_tool_uses_name ON tool_uses(tool_name);
+
+CREATE TABLE IF NOT EXISTS event_edges (
+    event_id TEXT PRIMARY KEY,
+    parent_event_id TEXT,
+    session_id TEXT NOT NULL,
+    depth INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_edges_session ON event_edges(session_id);
 """
 
 FTS_SCHEMA = """
@@ -89,7 +103,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
 
 # ── Column lists for row→dict mapping ──────────────────────
 
-SESSION_COLS = "id, summary, project_path, message_count, first_message_at, last_message_at"
+SESSION_COLS = (
+    "id, summary, project_path, message_count, first_message_at, last_message_at, "
+    "parent_session_id, resume_of, is_compaction, compaction_of"
+)
 
 EVENT_COLS = (
     "e.id as db_id, e.event_id, e.session_id, s.summary as session_summary, "
@@ -242,15 +259,20 @@ class SqliteSessionRepository:
     def upsert_session(self, session: Session) -> None:
         self._conn.execute(
             """INSERT INTO sessions (id, summary, project_path, message_count,
-               first_message_at, last_message_at, last_synced_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
+               first_message_at, last_message_at, last_synced_at,
+               parent_session_id, resume_of, is_compaction, compaction_of)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                summary=excluded.summary,
                project_path=excluded.project_path,
                message_count=excluded.message_count,
                first_message_at=excluded.first_message_at,
                last_message_at=excluded.last_message_at,
-               last_synced_at=excluded.last_synced_at""",
+               last_synced_at=excluded.last_synced_at,
+               parent_session_id=excluded.parent_session_id,
+               resume_of=excluded.resume_of,
+               is_compaction=excluded.is_compaction,
+               compaction_of=excluded.compaction_of""",
             (
                 session.session_id,
                 session.summary,
@@ -259,6 +281,10 @@ class SqliteSessionRepository:
                 session.first_message_at.isoformat() if session.first_message_at else None,
                 session.last_message_at.isoformat() if session.last_message_at else None,
                 datetime.now(UTC).isoformat(),
+                session.parent_session_id,
+                session.resume_of,
+                int(session.is_compaction),
+                session.compaction_of,
             ),
         )
         self._conn.commit()
@@ -768,6 +794,10 @@ class SqliteStorage:
             self._apply_migration_v2()
             self._conn.execute("PRAGMA user_version = 2")
             self._conn.commit()
+        if version < 3:
+            self._apply_migration_v3()
+            self._conn.execute("PRAGMA user_version = 3")
+            self._conn.commit()
 
     def _apply_migration_v2(self) -> None:
         """Add usage/provider columns to legacy (v1) databases.
@@ -787,6 +817,184 @@ class SqliteStorage:
             with contextlib.suppress(sqlite3.OperationalError):
                 self._conn.execute(sql)  # column already exists
         self._conn.commit()
+
+    def _apply_migration_v3(self) -> None:
+        """Add event-edge topology + session lineage columns (ADR-0001).
+
+        Idempotent and safe to re-run on any database that already has
+        ``events``/``sessions``. The ``event_edges`` table is *derived* from
+        ``events.parent_event_id``; this backfills it for existing data so a
+        legacy DB is not left with an empty tree.
+        """
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS event_edges (
+                event_id TEXT PRIMARY KEY,
+                parent_event_id TEXT,
+                session_id TEXT NOT NULL,
+                depth INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(event_id)
+            )
+            """
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_event_edges_session ON event_edges(session_id)"
+        )
+
+        alters = [
+            "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT",
+            "ALTER TABLE sessions ADD COLUMN resume_of TEXT",
+            "ALTER TABLE sessions ADD COLUMN is_compaction INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE sessions ADD COLUMN compaction_of TEXT",
+        ]
+        for sql in alters:
+            with contextlib.suppress(sqlite3.OperationalError):
+                self._conn.execute(sql)  # column already exists
+
+        self._backfill_event_edges()
+        self._conn.commit()
+
+    def _upsert_event_edges_for_sessions(self, session_ids: list[str] | None = None) -> None:
+        """Recompute ``event_edges`` for the given sessions (None = whole DB).
+
+        ``depth`` is the number of edges from the session root (direct children
+        = 1). A cycle guard prevents infinite loops on malformed input. Edges
+        are upserted (``ON CONFLICT(event_id) DO UPDATE``) so this is safe to
+        re-run on any database.
+        """
+        if session_ids is None:
+            rows = self._conn.execute(
+                "SELECT event_id, parent_event_id, session_id "
+                "FROM events WHERE parent_event_id IS NOT NULL"
+            ).fetchall()
+        else:
+            placeholders = ",".join("?" for _ in session_ids)
+            rows = self._conn.execute(
+                f"SELECT event_id, parent_event_id, session_id FROM events "
+                f"WHERE parent_event_id IS NOT NULL AND session_id IN ({placeholders})",
+                session_ids,
+            ).fetchall()
+        parent_of = {r["event_id"]: r["parent_event_id"] for r in rows}
+
+        def depth(event_id: str) -> int:
+            d = 0
+            cur = parent_of.get(event_id)
+            seen: set[str] = set()
+            while cur is not None and cur not in seen:
+                seen.add(cur)
+                d += 1
+                cur = parent_of.get(cur)
+            return d
+
+        edges = [
+            (r["event_id"], r["parent_event_id"], r["session_id"], depth(r["event_id"]))
+            for r in rows
+        ]
+        if edges:
+            self._conn.executemany(
+                """INSERT INTO event_edges (event_id, parent_event_id, session_id, depth)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(event_id) DO UPDATE SET
+                       parent_event_id=excluded.parent_event_id,
+                       session_id=excluded.session_id,
+                       depth=excluded.depth""",
+                edges,
+            )
+
+    def _backfill_event_edges(self) -> None:
+        """Recompute all ``event_edges`` (v3 migration + full re-scan)."""
+        self._upsert_event_edges_for_sessions(None)
+
+    def upsert_event_edges(self, events: list[MemoryEvent]) -> None:
+        """Derive and upsert ``event_edges`` for a batch of just-inserted events.
+
+        Called from the shared sync pipeline (``sync_file``) immediately after
+        ``insert_events``, so edges stay in lock-step with events for both
+        incremental watch and full re-scan. Depth is recomputed per affected
+        session — cheap, since a single session is at most a few thousand events.
+
+        This is the single write point that keeps ``event_edges`` fresh (ADR-0001
+        "Freshness guarantee").
+        """
+        session_ids = list({e.session_id for e in events})
+        if session_ids:
+            self._upsert_event_edges_for_sessions(session_ids)
+            self._conn.commit()
+
+    def get_event_edges(self, session_id: str) -> list[dict]:
+        """Return all edges for a session (child -> parent + depth)."""
+        rows = self._conn.execute(
+            "SELECT event_id, parent_event_id, session_id, depth "
+            "FROM event_edges WHERE session_id = ? ORDER BY depth, event_id",
+            (session_id,),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+    def get_session_tree(self, session_id: str) -> list[dict]:
+        """Return the session as a forest of nested nodes (ADR-0001 topology).
+
+        Each node: ``{event_id, role, timestamp, depth, children:[...]}``. Roots
+        are events whose ``parent_event_id`` is NULL (absent from ``event_edges``).
+        """
+        rows = self._conn.execute(
+            "SELECT event_id, role, timestamp, parent_event_id FROM events WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+        nodes: dict[str, dict] = {}
+        for r in rows:
+            nodes[r["event_id"]] = {
+                "event_id": r["event_id"],
+                "role": r["role"],
+                "timestamp": r["timestamp"],
+                "depth": 0,
+                "children": [],
+            }
+        roots: list[dict] = []
+        for r in rows:
+            node = nodes[r["event_id"]]
+            pid = r["parent_event_id"]
+            if pid and pid in nodes:
+                nodes[pid]["children"].append(node)
+            else:
+                roots.append(node)
+        edge_rows = self._conn.execute(
+            "SELECT event_id, depth FROM event_edges WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+        for er in edge_rows:
+            if er["event_id"] in nodes:
+                nodes[er["event_id"]]["depth"] = er["depth"]
+        return roots
+
+    def reconcile_event_edges(self) -> dict:
+        """Verify ``event_edges`` integrity (ADR-0001 reconciliation guard).
+
+        Returns a report: edge count must equal the number of events that have
+        a parent, orphan edges (event_id missing from ``events``) and dangling
+        parent references (parent_event_id missing from ``events``) must be empty.
+        """
+        edge_count = self._conn.execute("SELECT COUNT(*) FROM event_edges").fetchone()[0]
+        children_count = self._conn.execute(
+            "SELECT COUNT(*) FROM events WHERE parent_event_id IS NOT NULL"
+        ).fetchone()[0]
+        orphan_rows = self._conn.execute(
+            "SELECT e.event_id FROM event_edges e "
+            "LEFT JOIN events ev ON e.event_id = ev.event_id "
+            "WHERE ev.event_id IS NULL"
+        ).fetchall()
+        orphans = [r["event_id"] for r in orphan_rows]
+        dangling = self._conn.execute(
+            "SELECT COUNT(*) FROM event_edges e "
+            "LEFT JOIN events p ON e.parent_event_id = p.event_id "
+            "WHERE e.parent_event_id IS NOT NULL AND p.event_id IS NULL"
+        ).fetchone()[0]
+        return {
+            "event_edges_count": edge_count,
+            "children_count": children_count,
+            "consistent": edge_count == children_count and not orphans and dangling == 0,
+            "orphan_edges": orphans,
+            "dangling_parent_count": dangling,
+        }
 
     def close(self) -> None:
         """Close the SQLite database and null out repositories."""

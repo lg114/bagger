@@ -138,6 +138,9 @@ class SyncService:
             )
 
         new_count = self.storage.insert_events(events)
+        # ADR-0001: keep event_edges in lock-step with events — same file
+        # processing unit, both incremental watch and full re-scan flow here.
+        self.storage.upsert_event_edges(events)
         self._export_events(events)
 
         if upsert_always or new_count > 0:

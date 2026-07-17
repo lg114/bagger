@@ -68,3 +68,28 @@ def replay_session(
         lines.append("")
 
     return "\n".join(lines)
+
+
+def build_tree(storage: Storage, session_id: str) -> list[dict]:
+    """Return the session topology as a forest of nested nodes (ADR-0001).
+
+    Thin, typed entry point over ``storage.get_session_tree`` so callers (CLI,
+    tests, future UI) get a ready-to-render structure without knowing the
+    ``event_edges`` table. Each node: ``{event_id, role, timestamp, depth,
+    children:[...]}``; roots are events with no parent.
+    """
+    return storage.get_session_tree(session_id)
+
+
+def render_tree(tree: list[dict], indent: int = 0) -> str:
+    """Render a session forest as indented text (terminal / debugging)."""
+    lines: list[str] = []
+    for node in tree:
+        prefix = "  " * indent
+        role = node.get("role", "?")
+        ts = (node.get("timestamp") or "")[:19].replace("T", " ")
+        lines.append(f"{prefix}- [{role}] {node['event_id']} ({ts})")
+        children = node.get("children") or []
+        if children:
+            lines.append(render_tree(children, indent + 1))
+    return "\n".join(lines)

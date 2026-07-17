@@ -59,6 +59,11 @@ class Session(BaseModel):
     message_count: int = 0
     first_message_at: datetime | None = None
     last_message_at: datetime | None = None
+    # ── Lineage (ADR-0001, all optional / derived) ──
+    parent_session_id: str | None = None
+    resume_of: str | None = None
+    is_compaction: bool = False
+    compaction_of: str | None = None
 
 
 class WatchState(BaseModel):

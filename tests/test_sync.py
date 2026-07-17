@@ -309,3 +309,71 @@ def test_sync_file_returns_none_on_parse_error(monkeypatch):
         assert result is None
         assert offsets == {}  # offset not advanced on error
         _cleanup(storage, sync)
+
+
+# ── Branch: ADR-0001 event_edges derivation (T5) ────────────────
+
+
+def test_sync_file_derives_event_edges():
+    """After sync_file, event_edges reflects parent_event_id with correct depth."""
+    with _tmpdir() as tmpdir:
+        storage, _parser, sync, projects_dir = _make_stack(tmpdir)
+        path = _write_session(projects_dir, "sess-1", n_events=4)
+        offsets: dict[str, int] = {}
+
+        sync.sync_file(path, offsets)
+
+        edges = storage.get_event_edges("sess-1")
+        # evt-1 has no parent -> absent from event_edges; evt-2..4 form a chain.
+        assert len(edges) == 3
+        by_id = {e["event_id"]: e for e in edges}
+        assert by_id["evt-2"]["parent_event_id"] == "evt-1"
+        assert by_id["evt-2"]["depth"] == 1
+        assert by_id["evt-3"]["depth"] == 2
+        assert by_id["evt-4"]["depth"] == 3
+
+        # Reconciliation must be consistent after a normal sync.
+        assert storage.reconcile_event_edges()["consistent"] is True
+        _cleanup(storage, sync)
+
+
+def test_sync_file_incremental_keeps_edges_fresh():
+    """Appending events and re-syncing incrementally extends the edge chain."""
+    with _tmpdir() as tmpdir:
+        storage, _parser, sync, projects_dir = _make_stack(tmpdir)
+        path = _write_session(projects_dir, "sess-1", n_events=2)
+        offsets: dict[str, int] = {}
+        sync.sync_file(path, offsets)  # evt-1 (root), evt-2 (depth 1)
+
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(_line(_USER_LINE, 3, 2) + "\n")
+            f.write(_line(_ASSISTANT_LINE, 4, 3) + "\n")
+
+        sync.sync_file(path, offsets)  # incremental: adds evt-3, evt-4
+
+        by_id = {e["event_id"]: e for e in storage.get_event_edges("sess-1")}
+        assert by_id["evt-3"]["depth"] == 2
+        assert by_id["evt-4"]["depth"] == 3
+        assert storage.reconcile_event_edges()["consistent"] is True
+        _cleanup(storage, sync)
+
+
+def test_build_tree_returns_forest():
+    """build_tree (ADR-0001) reconstructs the session forest from event_edges."""
+    with _tmpdir() as tmpdir:
+        from bagger.services.replay import build_tree
+
+        storage, _parser, sync, projects_dir = _make_stack(tmpdir)
+        path = _write_session(projects_dir, "sess-1", n_events=4)
+        offsets: dict[str, int] = {}
+        sync.sync_file(path, offsets)
+
+        tree = build_tree(storage, "sess-1")
+        assert len(tree) == 1  # evt-1 is the single root
+        assert tree[0]["event_id"] == "evt-1"
+        assert tree[0]["depth"] == 0
+        child = tree[0]["children"][0]
+        assert child["event_id"] == "evt-2"
+        assert child["depth"] == 1
+        assert child["children"][0]["event_id"] == "evt-3"
+        _cleanup(storage, sync)

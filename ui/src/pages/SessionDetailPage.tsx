@@ -2,7 +2,9 @@ import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ArrowLeft, Calendar, Folder, MessageSquare, Hash, AlertCircle, Search } from "lucide-react";
-import { getSession, getSessionEvents } from "@/lib/api";
+import { getSession, getSessionEvents, getSessionTree } from "@/lib/api";
+import type { TreeNode } from "@/lib/api";
+import SessionTree from "@/components/SessionTree";
 import { formatDateShort, formatTokens } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,6 +26,15 @@ export default function SessionDetailPage() {
     queryFn: () => getSessionEvents(id!),
     enabled: !!id,
   });
+
+  const [view, setView] = useState<"transcript" | "topology">("transcript");
+
+  const { data: treeData, isLoading: treeLoading } = useQuery({
+    queryKey: ["sessions", id, "tree"],
+    queryFn: () => getSessionTree(id!),
+    enabled: !!id,
+  });
+  const tree: TreeNode[] = treeData?.data ?? [];
 
   const events: Event[] = eventsData?.data ?? [];
   const isLoading = sessLoading || evtLoading;
@@ -91,20 +102,46 @@ export default function SessionDetailPage() {
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
-        {/* Main: conversation */}
+        {/* Main: conversation / topology */}
         <div className="flex-1 min-w-0 order-2 lg:order-1">
-          {events.length === 0 ? (
-            <div className="text-center py-16 text-muted-foreground glass-card-static p-10">
-              <MessageSquare className="w-10 h-10 mx-auto mb-4 text-primary/15" />
-              <p className="text-sm">No events in this session</p>
+          <div className="flex items-center gap-1 mb-5 border-b border-border">
+            {(["transcript", "topology"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`-mb-px pb-2 mr-5 text-sm font-medium transition-colors duration-200 border-b-2 ${
+                  view === v
+                    ? "border-[var(--brand-500)] text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {v === "transcript" ? "Transcript" : "Topology"}
+              </button>
+            ))}
+          </div>
+
+          {view === "transcript" ? (
+            events.length === 0 ? (
+              <div className="text-center py-16 text-muted-foreground glass-card-static p-10">
+                <MessageSquare className="w-10 h-10 mx-auto mb-4 text-primary/15" />
+                <p className="text-sm">No events in this session</p>
+              </div>
+            ) : (
+              <ConversationView
+                events={events}
+                searchOpen={searchOpen}
+                onToggleSearch={() => setSearchOpen((v) => !v)}
+                onCloseSearch={() => setSearchOpen(false)}
+              />
+            )
+          ) : treeLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-8 w-full rounded-element bg-secondary/50" />
+              ))}
             </div>
           ) : (
-            <ConversationView
-              events={events}
-              searchOpen={searchOpen}
-              onToggleSearch={() => setSearchOpen((v) => !v)}
-              onCloseSearch={() => setSearchOpen(false)}
-            />
+            <SessionTree tree={tree} />
           )}
         </div>
 

@@ -72,3 +72,21 @@ def get_session_events(session_id: str) -> dict:
         parsed_events.append(evt)
 
     return {"data": parsed_events, "meta": {"total": total}}
+
+
+@router.get("/sessions/{session_id}/tree")
+def get_session_tree(session_id: str) -> dict:
+    """Get the session topology as a nested forest (ADR-0001).
+
+    Returns the event tree (branches, compactions, resumptions) derived from
+    ``event_edges``. Supports prefix matching like the events endpoint.
+    """
+    with get_storage() as storage:
+        session = storage.get_session(session_id)
+        if session is None:
+            session = storage.find_session_by_prefix(session_id)
+            if session is None:
+                raise HTTPException(status_code=404, detail="Session not found")
+            session_id = session["id"]
+        tree = storage.get_session_tree(session_id)
+    return {"data": tree}

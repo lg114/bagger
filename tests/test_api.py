@@ -351,3 +351,40 @@ def test_stats_daily():
         assert "data" in data
         assert "meta" in data
         assert data["meta"]["days"] == 7
+
+
+def test_session_tree_endpoint_returns_forest():
+    """GET /api/sessions/{id}/tree returns nested topology (ADR-0001)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        storage = _override_db(td)
+
+        root = _make_event(
+            event_id="e-root", session_id="sess-1", role=Role.USER, parent_event_id=None
+        )
+        child = _make_event(
+            event_id="e-child", session_id="sess-1", role=Role.ASSISTANT, parent_event_id="e-root"
+        )
+        storage.insert_event(root)
+        storage.insert_event(child)
+        storage.upsert_event_edges([root, child])
+        storage.upsert_session(Session(session_id="sess-1", summary="demo", message_count=2))
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+        client = TestClient(app)
+
+        resp = client.get("/api/sessions/sess-1/tree")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert len(data) == 1
+        assert data[0]["event_id"] == "e-root"
+        assert data[0]["depth"] == 0
+        assert data[0]["children"][0]["event_id"] == "e-child"
+        assert data[0]["children"][0]["depth"] == 1
+
+        # Unknown session -> 404
+        resp404 = client.get("/api/sessions/nope/tree")
+        assert resp404.status_code == 404

@@ -134,6 +134,20 @@ export function getSessionEvents(
   );
 }
 
+export interface TreeNode {
+  event_id: string;
+  role: string;
+  timestamp: string;
+  depth: number;
+  children: TreeNode[];
+}
+
+export function getSessionTree(
+  id: string,
+): Promise<{ data: TreeNode[] }> {
+  return fetchApi<{ data: TreeNode[] }>(`/sessions/${id}/tree`);
+}
+
 export function search(
   query: string,
   page = 1,

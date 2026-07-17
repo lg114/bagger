@@ -582,3 +582,126 @@ def test_migration_v2_adds_usage_columns():
         assert d["provider"] == "anthropic"
 
         storage.close()
+
+
+def test_migration_v2_to_v3_creates_and_backfills_event_edges():
+    """ADR-0001 hard-path: a legacy v2 DB upgrades to v3 with edges backfilled.
+
+    Simulates a pre-ADR database (no ``event_edges`` table, no session lineage
+    columns, user_version=2) that already holds a parent-child event chain,
+    then verifies ``connect()`` applies the v3 migration: creates
+    ``event_edges``, backfills it from ``events.parent_event_id`` (with correct
+    depths), adds the lineage columns, and is idempotent on re-run.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "legacy.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        # Seed a session tree: root -> child -> grandchild.
+        root = _make_event(event_id="e-root", session_id="sess-1", parent_event_id=None)
+        child = _make_event(event_id="e-child", session_id="sess-1", parent_event_id="e-root")
+        grand = _make_event(event_id="e-grand", session_id="sess-1", parent_event_id="e-child")
+        storage.insert_event(root)
+        storage.insert_event(child)
+        storage.insert_event(grand)
+        storage.upsert_session(Session(session_id="sess-1", summary="demo", message_count=3))
+
+        # Simulate a legacy v2 database: drop v3 additions, downgrade version.
+        storage.conn.execute("DROP TABLE IF EXISTS event_edges")
+        for col in ("parent_session_id", "resume_of", "is_compaction", "compaction_of"):
+            storage.conn.execute(f"ALTER TABLE sessions DROP COLUMN {col}")
+        storage.conn.execute("PRAGMA user_version = 2")
+        storage.conn.commit()
+        storage.close()
+
+        # Re-open: connect() should upgrade v2 -> v3 and backfill edges.
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 3
+
+        rows = storage.conn.execute(
+            "SELECT event_id, parent_event_id, depth FROM event_edges ORDER BY depth, event_id"
+        ).fetchall()
+        edge_map = {r["event_id"]: (r["parent_event_id"], r["depth"]) for r in rows}
+        # Root has no parent -> not in event_edges; chain depths: child=1, grand=2.
+        assert edge_map == {
+            "e-child": ("e-root", 1),
+            "e-grand": ("e-child", 2),
+        }
+
+        # Lineage columns now exist on sessions.
+        cols = [r["name"] for r in storage.conn.execute("PRAGMA table_info(sessions)").fetchall()]
+        assert {"parent_session_id", "resume_of", "is_compaction", "compaction_of"} <= set(cols)
+
+        # Explicit re-run is idempotent (upsert, not blind insert).
+        storage._apply_migration_v3()
+        assert storage.conn.execute("SELECT COUNT(*) FROM event_edges").fetchone()[0] == 2
+
+        storage.close()
+
+
+def test_get_session_tree_returns_forest():
+    """get_session_tree returns nested nodes with correct depth/children."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "db.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+        root = _make_event(event_id="e-root", session_id="s1", parent_event_id=None)
+        child = _make_event(event_id="e-child", session_id="s1", parent_event_id="e-root")
+        grand = _make_event(event_id="e-grand", session_id="s1", parent_event_id="e-child")
+        storage.insert_event(root)
+        storage.insert_event(child)
+        storage.insert_event(grand)
+        storage.upsert_event_edges([root, child, grand])
+
+        tree = storage.get_session_tree("s1")
+        assert len(tree) == 1
+        assert tree[0]["event_id"] == "e-root"
+        assert tree[0]["depth"] == 0
+        children = tree[0]["children"]
+        assert len(children) == 1
+        assert children[0]["event_id"] == "e-child"
+        assert children[0]["depth"] == 1
+        assert children[0]["children"][0]["event_id"] == "e-grand"
+        assert children[0]["children"][0]["depth"] == 2
+        storage.close()
+
+
+def test_reconcile_event_edges_detects_inconsistency():
+    """reconcile_event_edges flags orphan edges and dangling parents."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "db.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+        root = _make_event(event_id="e-root", session_id="s1", parent_event_id=None)
+        child = _make_event(event_id="e-child", session_id="s1", parent_event_id="e-root")
+        storage.insert_event(root)
+        storage.insert_event(child)
+        storage.upsert_event_edges([root, child])
+
+        # Healthy state is consistent.
+        assert storage.reconcile_event_edges()["consistent"] is True
+
+        # Orphan edge: event_id missing from events.
+        storage.conn.execute(
+            "INSERT INTO event_edges (event_id, parent_event_id, session_id, depth) "
+            "VALUES ('ghost', 'e-root', 's1', 1)"
+        )
+        storage.conn.commit()
+        report = storage.reconcile_event_edges()
+        assert report["consistent"] is False
+        assert "ghost" in report["orphan_edges"]
+
+        # Dangling parent: parent_event_id missing from events.
+        storage.conn.execute("DELETE FROM event_edges WHERE event_id='ghost'")
+        storage.conn.execute(
+            "UPDATE event_edges SET parent_event_id='missing' WHERE event_id='e-child'"
+        )
+        storage.conn.commit()
+        report = storage.reconcile_event_edges()
+        assert report["consistent"] is False
+        assert report["dangling_parent_count"] >= 1
+
+        storage.close()
