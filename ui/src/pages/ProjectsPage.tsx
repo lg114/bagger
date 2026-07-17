@@ -111,9 +111,12 @@ export default function ProjectsPage() {
           </p>
         </div>
       ) : isLoading ? (
-        <div className="space-y-2">
+        <div className="rounded-card overflow-hidden border border-[var(--border-subtle)]">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="glass-card-static p-5 animate-pulse h-16" />
+            <div
+              key={i}
+              className="px-2 py-4 h-16 border-b border-[var(--border-subtle)] last:border-0 animate-pulse"
+            />
           ))}
         </div>
       ) : projects.length === 0 ? (
@@ -129,13 +132,13 @@ export default function ProjectsPage() {
           </p>
         </div>
       ) : (
-        <ul className="border-y border-[var(--border-subtle)]">
-          {projects.map((p, i) => {
+        <ul className="rounded-card overflow-hidden border border-[var(--border-subtle)]">
+          {projects.map((p) => {
             const isOpen = expanded.has(p.path);
             return (
               <li
                 key={p.path}
-                className={cn(i > 0 && "border-t border-[var(--border-subtle)]")}
+                className="border-b border-[var(--border-subtle)] last:border-0"
               >
                 <button
                   onClick={() => toggle(p.path)}
