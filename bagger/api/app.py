@@ -1,7 +1,30 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from bagger import __version__
+from bagger.api.dependencies import set_shared_storage
 from bagger.api.routes import health, search, sessions, stats, sync
+from bagger.storage import create_storage
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Open a single shared DB connection for the app's lifetime.
+
+    One connection is created at startup and reused by every request handler
+    (see :func:`bagger.api.dependencies.get_storage`), removing the
+    per-request connect/close overhead. It is closed on shutdown.
+    """
+    storage = create_storage()
+    set_shared_storage(storage)
+    try:
+        yield
+    finally:
+        set_shared_storage(None)
+        storage.close()
 
 
 def create_app() -> FastAPI:
@@ -13,7 +36,8 @@ def create_app() -> FastAPI:
         description=(
             "REST API for browsing, searching, and replaying Claude Code conversation history."
         ),
-        version="0.2.0",
+        version=__version__,
+        lifespan=lifespan,
     )
 
     # Lock CORS to configured (loopback) origins — never a wildcard.

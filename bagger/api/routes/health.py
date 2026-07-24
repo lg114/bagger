@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from bagger import __version__
 from bagger.api.dependencies import get_storage
 
 router = APIRouter()
@@ -18,5 +19,5 @@ def health_check() -> dict:
             "sessions_count": stats["total_sessions"],
             "events_count": stats["total_events"],
             "fts_enabled": fts_enabled,
-            "version": "0.2.0",
+            "version": __version__,
         }

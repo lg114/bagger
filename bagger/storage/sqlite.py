@@ -765,7 +765,11 @@ class SqliteStorage:
     def connect(self) -> None:
         """Open the SQLite database, apply schema, and wire repositories."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.db_path.resolve()))
+        # check_same_thread=False: the API shares this single connection across
+        # FastAPI's worker threads (sync endpoints run in a threadpool). WAL mode
+        # (set below) keeps concurrent reads safe; writes serialize at the file
+        # level. The CLI is single-threaded, so this has no effect there.
+        self._conn = sqlite3.connect(str(self.db_path.resolve()), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         try:
             self._conn.execute("PRAGMA journal_mode=WAL")

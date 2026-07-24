@@ -6,6 +6,7 @@ from pathlib import Path
 
 import click
 
+from bagger import __version__ as __bagger_version__
 from bagger.config import settings
 from bagger.storage import create_storage
 
@@ -43,7 +44,7 @@ def with_storage(f):
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="bagger")
+@click.version_option(version=__bagger_version__, prog_name="bagger")
 def cli():
     """bagger — sync Claude Code transcripts to a searchable local database."""
     logging.basicConfig(

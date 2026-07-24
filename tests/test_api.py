@@ -72,6 +72,22 @@ def test_health_check():
         assert data["fts_enabled"] is True
 
 
+def test_health_version_matches_package_metadata():
+    """/api/health version must match bagger.__version__ (single source of truth)."""
+    from bagger import __version__
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _override_db(Path(tmpdir)).close()
+
+        from fastapi.testclient import TestClient
+
+        client = TestClient(create_app())
+        response = client.get("/api/health")
+
+        assert response.status_code == 200
+        assert response.json()["version"] == __version__
+
+
 def test_list_sessions_empty():
     with tempfile.TemporaryDirectory() as tmpdir:
         td = Path(tmpdir)
@@ -412,3 +428,29 @@ def test_cors_is_locked_not_wildcard():
         # A disallowed origin must NOT be echoed (no "*", no leak to evil sites).
         bad = client.get("/api/health", headers={"Origin": "http://evil.test"})
         assert "access-control-allow-origin" not in bad.headers
+
+
+def test_lifespan_shares_one_storage_instance():
+    """The app lifespan opens a single Storage reused across requests.
+
+    Verifies the per-request reconnect fix: two ``get_storage()`` calls inside
+    the running app yield the SAME instance (so handlers don't open/close the
+    DB on every request).
+    """
+    from fastapi.testclient import TestClient
+
+    import bagger.config as config
+    from bagger.api.dependencies import get_storage
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        config.settings = Settings(bagger_dir=td)
+
+        app = create_app()
+        with TestClient(app) as client:  # triggers lifespan -> shared storage
+            with get_storage() as s1, get_storage() as s2:
+                assert s1 is s2
+
+            # A real request also hits the same shared instance.
+            resp = client.get("/api/health")
+            assert resp.status_code == 200
