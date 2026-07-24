@@ -10,8 +10,10 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from bagger.parser.claude import ClaudeParser
-from bagger.services.sync import SyncService
+from bagger.services.sync import SyncError, SyncService
 from bagger.storage.sqlite import SqliteStorage
 
 # A minimal valid user-message line. Tests build files by concatenating these.
@@ -289,11 +291,11 @@ def test_sync_file_full_mode_ignores_offset_and_reparses():
         _cleanup(storage, sync)
 
 
-# ── Parser exception → None (swallowed) ────────────────────────
+# ── Parser exception → SyncError (surfaced, not swallowed) ─────
 
 
-def test_sync_file_returns_none_on_parse_error(monkeypatch):
-    """A parse exception is swallowed and returns None (silent-continue parity)."""
+def test_sync_file_raises_sync_error_on_parse_failure(monkeypatch):
+    """A parse exception is surfaced as SyncError, not silently swallowed."""
     with _tmpdir() as tmpdir:
         storage, parser, sync, projects_dir = _make_stack(tmpdir)
         path = _write_session(projects_dir, "sess-1", n_events=1)
@@ -304,10 +306,12 @@ def test_sync_file_returns_none_on_parse_error(monkeypatch):
         monkeypatch.setattr(parser, "parse", _raise)
         offsets: dict[str, int] = {}
 
-        result = sync.sync_file(path, offsets)
+        with pytest.raises(SyncError) as exc_info:
+            sync.sync_file(path, offsets)
 
-        assert result is None
+        assert exc_info.value.filepath == path
         assert offsets == {}  # offset not advanced on error
+        assert storage.get_event_count("sess-1") == 0  # nothing silently inserted
         _cleanup(storage, sync)
 
 
@@ -376,4 +380,44 @@ def test_build_tree_returns_forest():
         assert child["event_id"] == "evt-2"
         assert child["depth"] == 1
         assert child["children"][0]["event_id"] == "evt-3"
+        _cleanup(storage, sync)
+
+
+# ── Watcher: failed file is logged once, then skipped ─────────
+
+
+def test_watcher_skips_failed_file_after_first_error():
+    """Watcher records a parse error once, then skips that file (no infinite retry)."""
+    with _tmpdir() as tmpdir:
+        storage, _parser, sync, projects_dir = _make_stack(tmpdir)
+        path = _write_session(projects_dir, "sess-1", n_events=1)
+        session_id = path.stem
+
+        from bagger.services.watcher import Watcher
+
+        watcher = Watcher(storage, source="claude")
+        sync_calls = {"n": 0}
+
+        def _fake_sync_file(fp, offsets, **kwargs):
+            sync_calls["n"] += 1
+            raise SyncError(fp, RuntimeError("boom"))
+
+        # Keep the watcher hermetic: feed it exactly our temp session and a sync
+        # that always fails, without mutating the global ParserRegistry.
+        class _FakeParser:
+            source_name = "claude"
+
+            def discover_sessions(self):
+                return [path]
+
+        watcher.parser = _FakeParser()  # type: ignore[assignment]
+        watcher._sync.sync_file = _fake_sync_file  # type: ignore[assignment]
+
+        watcher._poll()  # first poll: raises once, recorded, logged
+        assert session_id in watcher._failed
+        assert sync_calls["n"] == 1
+
+        watcher._poll()  # second poll: file in _failed -> not called again
+        assert sync_calls["n"] == 1
+
         _cleanup(storage, sync)

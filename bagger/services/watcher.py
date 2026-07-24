@@ -6,12 +6,15 @@ module is the polling driver: it discovers session files and delegates
 each file to ``SyncService``.
 """
 
+import logging
 import signal
 import time
 
 from bagger.parser import ParserRegistry
-from bagger.services.sync import SyncService
+from bagger.services.sync import SyncError, SyncService
 from bagger.storage.base import Storage
+
+logger = logging.getLogger(__name__)
 
 
 class Watcher:
@@ -31,6 +34,7 @@ class Watcher:
         self.parser = ParserRegistry.get(source)
         self._sync = SyncService(storage, self.parser)
         self._offsets: dict[str, int] = {}
+        self._failed: set[str] = set()
         self._running = False
 
     def watch(self, interval: float = 1.0) -> None:
@@ -50,7 +54,7 @@ class Watcher:
             except KeyboardInterrupt:
                 break
             except Exception as e:
-                print(f"  [!] Watch error: {e}")
+                logger.warning("Watch cycle error (continuing): %s", e, exc_info=True)
 
         print("\nWatcher stopped.")
 
@@ -58,9 +62,19 @@ class Watcher:
         files = self.parser.discover_sessions()
 
         for filepath in files:
-            result = self._sync.sync_file(filepath, self._offsets, upsert_always=False)
-            if result is None:
-                continue  # parse error swallowed
+            session_id = filepath.stem
+            if session_id in self._failed:
+                continue  # already logged a parse error this run; avoid spam
+            try:
+                result = self._sync.sync_file(filepath, self._offsets, upsert_always=False)
+            except SyncError as exc:
+                self._failed.add(session_id)
+                logger.error(
+                    "Parse failed for %s — skipping for the rest of this run. "
+                    "Fix the file and restart the watcher to retry.",
+                    exc.filepath,
+                )
+                continue
             if result.skipped:
                 continue
 

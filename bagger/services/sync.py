@@ -10,7 +10,7 @@ method on first sight) are expressed as parameters, not branches inside the
 service, so each caller replicates its current behavior exactly.
 """
 
-import contextlib
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +19,22 @@ from bagger.exporters.jsonl import JsonlExporter
 from bagger.models.event import MemoryEvent, Session
 from bagger.parser.base import Parser
 from bagger.storage.base import SessionRepository, Storage
+
+logger = logging.getLogger(__name__)
+
+
+class SyncError(Exception):
+    """Raised when a transcript file cannot be parsed during sync.
+
+    Carries the offending ``filepath`` so callers (scanner / watcher) can log
+    and record the failure instead of silently swallowing it. The old behavior
+    returned ``None`` and dropped the file from the rotation forever.
+    """
+
+    def __init__(self, filepath: Path, error: Exception):
+        self.filepath = filepath
+        self.error = error
+        super().__init__(f"Failed to parse {filepath}: {error}")
 
 
 def upsert_session_from_events(
@@ -87,7 +103,7 @@ class SyncService:
         *,
         full: bool = False,
         upsert_always: bool = True,
-    ) -> SyncResult | None:
+    ) -> SyncResult:
         """Sync a single transcript file, advancing ``offsets`` in place.
 
         Args:
@@ -102,8 +118,12 @@ class SyncService:
                 when ``new_count > 0`` (watcher's behavior).
 
         Returns:
-            ``SyncResult`` describing what happened, or ``None`` if a parse
-            error was swallowed (matching the prior silent-continue behavior).
+            ``SyncResult`` describing what happened.
+
+        Raises:
+            SyncError: if the transcript file cannot be parsed, so the failure
+                is surfaced to the caller (logged + recorded) rather than
+                silently swallowed.
         """
         session_id = filepath.stem
         file_size = filepath.stat().st_size
@@ -126,8 +146,9 @@ class SyncService:
                 if is_first_sight or full
                 else self.parser.parse_incremental(filepath, last_offset)
             )
-        except Exception:
-            return None
+        except Exception as exc:
+            logger.error("Parse failed for %s: %s", filepath, exc, exc_info=exc)
+            raise SyncError(filepath, exc) from exc
 
         if not events:
             return SyncResult(
@@ -155,7 +176,11 @@ class SyncService:
         )
 
     def _export_events(self, events: list[MemoryEvent]) -> None:
-        """Export events to JSONL backup, ignoring per-event errors."""
+        """Export events to the JSONL backup, logging (not swallowing) failures."""
         for ev in events:
-            with contextlib.suppress(Exception):
+            try:
                 self._exporter.export_event(ev)
+            except Exception:
+                logger.warning(
+                    "Failed to export event %s to JSONL backup", ev.event_id, exc_info=True
+                )

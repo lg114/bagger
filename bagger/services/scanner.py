@@ -10,19 +10,16 @@ files, and delegates each file to ``SyncService``.
 """
 
 import json
+import logging
 from pathlib import Path
 
 from bagger.config import settings
 from bagger.models.event import WatchState
 from bagger.parser import ParserRegistry
-from bagger.services.sync import SyncService
-
-# Backward-compat re-export: watcher.py and any external callers imported this
-# from scanner before SyncService existed. Keep the name alive to avoid breakage.
-from bagger.services.sync import (
-    upsert_session_from_events as upsert_session_from_events,  # noqa: F401
-)
+from bagger.services.sync import SyncError, SyncService
 from bagger.storage.base import Storage
+
+logger = logging.getLogger(__name__)
 
 
 def scan_all(
@@ -43,7 +40,8 @@ def scan_all(
         jsonl_path: Path for JSONL exporter backup.
 
     Returns:
-        Stats dict with counts.
+        Stats dict with counts, including an ``errors`` key for files that
+        failed to parse (no longer swallowed silently).
     """
     parser = ParserRegistry.get(source)
     state_path = state_path or settings.state_path
@@ -53,12 +51,15 @@ def scan_all(
     state = _load_state(state_path) if not full else WatchState()
     files = parser.discover_sessions()
 
-    stats = {"sessions": 0, "events": 0, "skipped": 0}
+    stats = {"sessions": 0, "events": 0, "skipped": 0, "errors": 0}
 
     for filepath in files:
-        result = sync.sync_file(filepath, state.sessions, full=full, upsert_always=True)
-        if result is None:
-            continue  # parse error swallowed
+        try:
+            result = sync.sync_file(filepath, state.sessions, full=full, upsert_always=True)
+        except SyncError as exc:
+            stats["errors"] += 1
+            logger.error("Skipping %s during scan: %s", exc.filepath, exc.error)
+            continue
         if result.skipped:
             stats["skipped"] += 1
             continue
@@ -77,6 +78,7 @@ def _load_state(path: Path) -> WatchState:
     try:
         return WatchState(**json.loads(path.read_text(encoding="utf-8")))
     except Exception:
+        logger.warning("Could not read watch state %s; starting fresh", path, exc_info=True)
         return WatchState()
 
 

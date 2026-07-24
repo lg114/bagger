@@ -1,5 +1,6 @@
 """bagger CLI — AI Coding Agent Data Collector."""
 
+import logging
 from functools import wraps
 from pathlib import Path
 
@@ -45,7 +46,10 @@ def with_storage(f):
 @click.version_option(version="0.1.0", prog_name="bagger")
 def cli():
     """bagger — sync Claude Code transcripts to a searchable local database."""
-    pass
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
 
 
 # ── init ────────────────────────────────────────────────────
@@ -78,6 +82,13 @@ def scan(storage, full):
     click.echo(f"  {stats['sessions']} sessions, {stats['events']} events imported")
     if stats["skipped"]:
         click.echo(f"  {stats['skipped']} sessions skipped (already synced)")
+    if stats.get("errors"):
+        click.echo(
+            click.style(
+                f"  {stats['errors']} file(s) failed to parse — see log above",
+                fg="yellow",
+            )
+        )
 
 
 # ── watch ───────────────────────────────────────────────────
@@ -236,6 +247,24 @@ def doctor():
                 click.echo(
                     click.style("    Run 'bagger rebuild-index' to create FTS5 index", fg="yellow")
                 )
+                issues_found = True
+
+            # ADR-0001 reconciliation guard — was dead code before; doctor now
+            # actually runs it so orphan / dangling event_edges are surfaced.
+            edge_report = storage.reconcile_event_edges()
+            if edge_report["consistent"]:
+                click.echo(click.style("  event_edges: consistent", fg="green"))
+            else:
+                click.echo(click.style("  event_edges: INCONSISTENT", fg="red"))
+                for orphan in edge_report["orphan_edges"]:
+                    click.echo(click.style(f"    orphan edge: {orphan}", fg="red"))
+                if edge_report["dangling_parent_count"]:
+                    click.echo(
+                        click.style(
+                            f"    dangling parents: {edge_report['dangling_parent_count']}",
+                            fg="red",
+                        )
+                    )
                 issues_found = True
 
             has_error = any(i["level"] == "error" for i in issues)

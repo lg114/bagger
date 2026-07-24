@@ -247,3 +247,57 @@ def test_commands_fail_before_init(tmp_path: Path):
     for r in results:
         # require_db prints to stderr via click.echo(..., err=True)
         assert "bagger init" in r.stderr.lower()
+
+
+# ── scan: parse errors are surfaced (P0-1) ───────────────────
+
+
+def test_scan_reports_parse_errors(tmp_path: Path):
+    """``bagger scan`` should surface a parse failure instead of swallowing it."""
+    _setup_env(tmp_path)
+    from bagger.parser import ParserRegistry
+
+    parser = ParserRegistry.get("claude")
+    orig_parse = parser.parse
+
+    def _raise(_path):
+        raise RuntimeError("boom")
+
+    parser.parse = _raise  # type: ignore[method-assign]
+
+    runner = _make_runner()
+    runner.invoke(cli, ["init"])
+    result = runner.invoke(cli, ["scan"])
+    parser.parse = orig_parse  # restore for other tests
+
+    assert result.exit_code == 0
+    assert "failed to parse" in result.stdout
+
+
+# ── doctor: event_edges reconciliation guard (P0-2) ──────────
+
+
+def test_doctor_flags_inconsistent_event_edges(tmp_path: Path):
+    """``bagger doctor`` should surface orphan event_edges via the ADR-0001 guard."""
+    _setup_env(tmp_path)
+    runner = _make_runner()
+    runner.invoke(cli, ["init"])
+
+    # Inject an orphan edge directly into the database.
+    import sqlite3
+
+    import bagger.cli.main as cli_mod
+
+    db_path = cli_mod.settings.db_path
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO event_edges (event_id, parent_event_id, session_id, depth) "
+        "VALUES ('ghost', 'real', 's1', 1)"
+    )
+    conn.commit()
+    conn.close()
+
+    result = runner.invoke(cli, ["doctor"])
+    assert result.exit_code == 0
+    assert "INCONSISTENT" in result.stdout
+    assert "ghost" in result.stdout
