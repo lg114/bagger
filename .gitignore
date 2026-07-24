@@ -21,4 +21,8 @@ ui/src-tauri/target/
 workbuddy/
 .workbuddy/
 
+# Pre-commit (removed, keep ignored)
+.pre-commit-config.yaml
+~/
+
 *.egg-info/
