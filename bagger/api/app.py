@@ -6,6 +6,8 @@ from bagger.api.routes import health, search, sessions, stats, sync
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    from bagger.config import settings
+
     app = FastAPI(
         title="Bagger API",
         description=(
@@ -14,12 +16,17 @@ def create_app() -> FastAPI:
         version="0.2.0",
     )
 
-    # Allow all local origins (dev server and Tauri webview)
+    # Lock CORS to configured (loopback) origins — never a wildcard.
+    # The API can trigger real file scans (POST /api/scan), so an open policy
+    # would let any website drive the user's local agent. allow_origins comes
+    # from settings.cors_origins; override it in ~/.bagger/config.toml only
+    # for origins you trust.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=settings.cors_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "Authorization"],
+        allow_credentials=False,
     )
 
     # Register routes

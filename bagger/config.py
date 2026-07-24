@@ -33,6 +33,20 @@ class Settings(BaseModel):
     parser_source: str = "claude"
     """Default AI tool source for scan / watch commands."""
 
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://127.0.0.1:8723",
+            "http://localhost:8723",
+        ]
+    )
+    """Allowed CORS origins for the REST API.
+
+    Defaults to loopback only. This is deliberately NOT a wildcard: the API
+    can trigger real file scans (``POST /api/scan``), so an open CORS policy
+    would let any website drive the user's local agent. Override in
+    ``~/.bagger/config.toml`` only to whitelist origins you trust.
+    """
+
     # ── Derived paths (properties so they always reflect bagger_dir) ──
 
     @property

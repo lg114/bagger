@@ -1104,6 +1104,6 @@ class SqliteStorage:
     def rebuild_fts_index(self) -> int:
         return self._search.rebuild_fts_index()  # type: ignore[union-attr]
 
-    def _fts_enabled(self) -> bool:
-        """Check if the FTS5 virtual table exists (used by health/doctor)."""
+    def fts_enabled(self) -> bool:
+        """Whether the FTS5 virtual table exists (consumed by health/doctor)."""
         return self._search._fts_enabled()  # type: ignore[union-attr]

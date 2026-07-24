@@ -62,7 +62,9 @@ class SearchIndex(Protocol):
         page: int = 1,
     ) -> dict: ...
     def rebuild_fts_index(self) -> int: ...
-    def _fts_enabled(self) -> bool: ...  # pragma: used by health/doctor
+    def fts_enabled(self) -> bool: ...
+
+    """Whether the FTS5 virtual table exists. Public: consumed by health/doctor."""
 
 
 @runtime_checkable

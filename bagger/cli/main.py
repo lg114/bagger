@@ -236,7 +236,7 @@ def doctor():
             click.echo(click.style(f"  {s['total_sessions']} sessions in DB", fg="green"))
             click.echo(click.style(f"  {s['total_events']} events in DB", fg="green"))
 
-            fts_ok = storage._fts_enabled()
+            fts_ok = storage.fts_enabled()
             click.echo(
                 click.style(
                     f"  FTS5 {'enabled' if fts_ok else 'not enabled'}",

@@ -12,7 +12,7 @@ def health_check() -> dict:
     """Return database health status, event/session counts, and FTS state."""
     with get_storage() as storage:
         stats = storage.get_stats()
-        fts_enabled = storage._fts_enabled()
+        fts_enabled = storage.fts_enabled()
         return {
             "status": "ok",
             "sessions_count": stats["total_sessions"],

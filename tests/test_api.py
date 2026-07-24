@@ -388,3 +388,27 @@ def test_session_tree_endpoint_returns_forest():
         # Unknown session -> 404
         resp404 = client.get("/api/sessions/nope/tree")
         assert resp404.status_code == 404
+
+
+def test_cors_is_locked_not_wildcard():
+    """CORS must not use a wildcard: only configured origins are echoed back."""
+    import bagger.config as config
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        # Override allowed origins so we deterministically know the allow-list.
+        config.settings = Settings(bagger_dir=td, cors_origins=["http://allowed.test"])
+
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+        client = TestClient(app)
+
+        # An allowed origin is reflected in the CORS response header.
+        ok = client.get("/api/health", headers={"Origin": "http://allowed.test"})
+        assert ok.status_code == 200
+        assert ok.headers.get("access-control-allow-origin") == "http://allowed.test"
+
+        # A disallowed origin must NOT be echoed (no "*", no leak to evil sites).
+        bad = client.get("/api/health", headers={"Origin": "http://evil.test"})
+        assert "access-control-allow-origin" not in bad.headers
