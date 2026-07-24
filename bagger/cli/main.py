@@ -105,7 +105,8 @@ def watch(storage, interval):
 
     # Quick scan to catch up, then watch
     scan_all(storage, full=False)
-    Watcher(storage, source="claude").watch(interval=interval)
+    with Watcher(storage, source="claude") as watcher:
+        watcher.watch(interval=interval)
 
 
 # ── search ──────────────────────────────────────────────────

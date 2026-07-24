@@ -421,3 +421,55 @@ def test_watcher_skips_failed_file_after_first_error():
         assert sync_calls["n"] == 1
 
         _cleanup(storage, sync)
+
+
+# ── Watcher: resource release (leak fix) ───────────────────────
+
+
+def test_watcher_close_is_idempotent():
+    """Watcher.close() releases the sync handle exactly once, even if called twice.
+
+    Covers both the ``watch()`` finally path and the context-manager __exit__
+    calling close() after a stop — no double release of the exporter handle.
+    """
+    with _tmpdir() as tmpdir:
+        storage, _parser, sync, projects_dir = _make_stack(tmpdir)
+        from bagger.services.watcher import Watcher
+
+        watcher = Watcher(storage, source="claude")
+        close_calls = {"n": 0}
+        watcher._sync.close = lambda: close_calls.__setitem__("n", close_calls["n"] + 1)
+
+        watcher.close()
+        watcher.close()  # second call must be a no-op
+
+        assert close_calls["n"] == 1
+        _cleanup(storage, sync)
+
+
+def test_watcher_releases_resources_on_stop(monkeypatch):
+    """watch() releases the exporter handle in its finally block when the loop ends.
+
+    Without this, the watcher leaked the JSONL exporter file handle (and the
+    underlying sqlite connection) for its entire long-running lifetime.
+    """
+    with _tmpdir() as tmpdir:
+        storage, _parser, sync, projects_dir = _make_stack(tmpdir)
+        from bagger.services.watcher import Watcher
+
+        # Don't actually install signal handlers during the test.
+        monkeypatch.setattr("bagger.services.watcher.signal.signal", lambda *a, **k: None)
+
+        watcher = Watcher(storage, source="claude")
+        close_calls = {"n": 0}
+        watcher._sync.close = lambda: close_calls.__setitem__("n", close_calls["n"] + 1)
+
+        def _fake_poll() -> None:
+            # A SIGINT/SIGTERM handler sets _running=False; mimic that.
+            watcher._running = False
+
+        watcher._poll = _fake_poll  # type: ignore[assignment]
+        watcher.watch(interval=0)
+
+        assert close_calls["n"] == 1  # finally released the handle
+        _cleanup(storage, sync)

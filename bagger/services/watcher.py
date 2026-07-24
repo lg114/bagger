@@ -36,9 +36,10 @@ class Watcher:
         self._offsets: dict[str, int] = {}
         self._failed: set[str] = set()
         self._running = False
+        self._closed = False
 
     def watch(self, interval: float = 1.0) -> None:
-        """Start watching. Runs until Ctrl+C."""
+        """Start watching. Runs until stopped via SIGINT/SIGTERM or Ctrl+C."""
         self._running = True
 
         signal.signal(signal.SIGINT, self._on_stop)
@@ -47,16 +48,39 @@ class Watcher:
         print(f"Watching {self.parser.source_name} transcripts ...")
         print("Press Ctrl+C to stop\n")
 
-        while self._running:
-            try:
-                self._poll()
-                time.sleep(interval)
-            except KeyboardInterrupt:
-                break
-            except Exception as e:
-                logger.warning("Watch cycle error (continuing): %s", e, exc_info=True)
+        try:
+            while self._running:
+                try:
+                    self._poll()
+                    time.sleep(interval)
+                except KeyboardInterrupt:
+                    break
+                except Exception as e:
+                    logger.warning("Watch cycle error (continuing): %s", e, exc_info=True)
+        finally:
+            # Always release the exporter file handle, even when interrupted.
+            # Without this the watcher leaks the handle for its entire
+            # (long-running) lifetime.
+            self.close()
+            print("\nWatcher stopped.")
 
-        print("\nWatcher stopped.")
+    def close(self) -> None:
+        """Release sync resources (exporter file handle).
+
+        Idempotent: safe to call from both ``watch()``'s ``finally`` block and
+        the context-manager ``__exit__`` (e.g. ``with Watcher(...) as w``).
+        The storage connection is owned by the caller (CLI's ``with_storage``).
+        """
+        if self._closed:
+            return
+        self._sync.close()
+        self._closed = True
+
+    def __enter__(self) -> "Watcher":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
     def _poll(self) -> None:
         files = self.parser.discover_sessions()
