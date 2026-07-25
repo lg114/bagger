@@ -9,14 +9,15 @@ build/
 .venv/
 env/
 .bagger/
-bagger.egg-info/
 
 # Frontend
 ui/dist/
 ui/node_modules/
+ui/tsconfig.tsbuildinfo
 
 # Tauri
 ui/src-tauri/target/
+ui/src-tauri/gen/
 
 workbuddy/
 .workbuddy/
@@ -24,5 +25,3 @@ workbuddy/
 # Pre-commit (removed, keep ignored)
 .pre-commit-config.yaml
 ~/
-
-*.egg-info/

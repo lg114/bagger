@@ -42,8 +42,8 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the same three gates on
 3. `pytest tests/ -q` — all tests must pass
 
 If any step fails, the PR shows a red ✗ and **cannot be merged** (once branch
-protection is enabled). The CI gates are identical to the local pre-commit
-gate — if it passes locally, it passes in CI.
+protection is enabled). CI runs the same three checks on every push and PR —
+if they pass locally, they pass in CI.
 
 ### What the rules enforce
 

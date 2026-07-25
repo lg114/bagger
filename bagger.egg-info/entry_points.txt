@@ -1,0 +1,2 @@
+[console_scripts]
+bagger = bagger.cli.main:cli

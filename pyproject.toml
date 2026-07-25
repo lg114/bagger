@@ -43,7 +43,6 @@ target-version = "py312"
 line-length = 100
 extend-exclude = [
     "ui",          # Tauri/React frontend — not Python
-    "design",      # Static design assets
     "build",       # PyInstaller output
     "dist",        # Tauri build output
     ".workbuddy",  # Agent workspace

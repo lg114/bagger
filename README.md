@@ -219,7 +219,7 @@ ruff format .              # format
 ruff format --check .      # CI-style check (no writes)
 ```
 
-The pre-commit gate is: `ruff check . && ruff format --check . && pytest tests/ -q`.
+The quality gate (enforced in CI) is: `ruff check . && ruff format --check . && pytest tests/ -q`.
 If any of these fail, the PR is not ready.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for branching strategy, commit
