@@ -370,7 +370,7 @@ def test_stats_daily():
 
 
 def test_session_tree_endpoint_returns_forest():
-    """GET /api/sessions/{id}/tree returns nested topology (ADR-0001)."""
+    """GET /api/sessions/{id}/tree returns nested topology."""
     with tempfile.TemporaryDirectory() as tmpdir:
         td = Path(tmpdir)
         storage = _override_db(td)

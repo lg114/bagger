@@ -823,7 +823,7 @@ class SqliteStorage:
         self._conn.commit()
 
     def _apply_migration_v3(self) -> None:
-        """Add event-edge topology + session lineage columns (ADR-0001).
+        """Add event-edge topology + session lineage columns.
 
         Idempotent and safe to re-run on any database that already has
         ``events``/``sessions``. The ``event_edges`` table is *derived* from
@@ -917,7 +917,7 @@ class SqliteStorage:
         incremental watch and full re-scan. Depth is recomputed per affected
         session — cheap, since a single session is at most a few thousand events.
 
-        This is the single write point that keeps ``event_edges`` fresh (ADR-0001
+        This is the single write point that keeps ``event_edges`` fresh (
         "Freshness guarantee").
         """
         session_ids = list({e.session_id for e in events})
@@ -935,7 +935,7 @@ class SqliteStorage:
         return [_row_to_dict(r) for r in rows]
 
     def get_session_tree(self, session_id: str) -> list[dict]:
-        """Return the session as a forest of nested nodes (ADR-0001 topology).
+        """Return the session as a forest of nested nodes.
 
         Each node: ``{event_id, role, timestamp, depth, children:[...]}``. Roots
         are events whose ``parent_event_id`` is NULL (absent from ``event_edges``).
@@ -971,7 +971,7 @@ class SqliteStorage:
         return roots
 
     def reconcile_event_edges(self) -> dict:
-        """Verify ``event_edges`` integrity (ADR-0001 reconciliation guard).
+        """Verify ``event_edges`` integrity (reconciliation guard).
 
         Returns a report: edge count must equal the number of events that have
         a parent, orphan edges (event_id missing from ``events``) and dangling

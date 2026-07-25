@@ -251,7 +251,7 @@ def doctor():
                 )
                 issues_found = True
 
-            # ADR-0001 reconciliation guard — was dead code before; doctor now
+            # reconciliation guard — was dead code before; doctor now
             # actually runs it so orphan / dangling event_edges are surfaced.
             edge_report = storage.reconcile_event_edges()
             if edge_report["consistent"]:

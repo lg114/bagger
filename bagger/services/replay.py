@@ -71,7 +71,7 @@ def replay_session(
 
 
 def build_tree(storage: Storage, session_id: str) -> list[dict]:
-    """Return the session topology as a forest of nested nodes (ADR-0001).
+    """Return the session topology as a forest of nested nodes.
 
     Thin, typed entry point over ``storage.get_session_tree`` so callers (CLI,
     tests, future UI) get a ready-to-render structure without knowing the

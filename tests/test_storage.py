@@ -585,7 +585,7 @@ def test_migration_v2_adds_usage_columns():
 
 
 def test_migration_v2_to_v3_creates_and_backfills_event_edges():
-    """ADR-0001 hard-path: a legacy v2 DB upgrades to v3 with edges backfilled.
+    """Hard-path: a legacy v2 DB upgrades to v3 with edges backfilled.
 
     Simulates a pre-ADR database (no ``event_edges`` table, no session lineage
     columns, user_version=2) that already holds a parent-child event chain,

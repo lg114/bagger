@@ -278,7 +278,7 @@ def test_scan_reports_parse_errors(tmp_path: Path):
 
 
 def test_doctor_flags_inconsistent_event_edges(tmp_path: Path):
-    """``bagger doctor`` should surface orphan event_edges via the ADR-0001 guard."""
+    """``bagger doctor`` should surface orphan event_edges via the reconciliation guard."""
     _setup_env(tmp_path)
     runner = _make_runner()
     runner.invoke(cli, ["init"])

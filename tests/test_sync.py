@@ -315,7 +315,7 @@ def test_sync_file_raises_sync_error_on_parse_failure(monkeypatch):
         _cleanup(storage, sync)
 
 
-# ── Branch: ADR-0001 event_edges derivation (T5) ────────────────
+# ── Branch: event_edges derivation (T5) ────────────────
 
 
 def test_sync_file_derives_event_edges():
@@ -363,7 +363,7 @@ def test_sync_file_incremental_keeps_edges_fresh():
 
 
 def test_build_tree_returns_forest():
-    """build_tree (ADR-0001) reconstructs the session forest from event_edges."""
+    """build_tree reconstructs the session forest from event_edges."""
     with _tmpdir() as tmpdir:
         from bagger.services.replay import build_tree
 

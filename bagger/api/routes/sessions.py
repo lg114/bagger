@@ -76,7 +76,7 @@ def get_session_events(session_id: str) -> dict:
 
 @router.get("/sessions/{session_id}/tree")
 def get_session_tree(session_id: str) -> dict:
-    """Get the session topology as a nested forest (ADR-0001).
+    """Get the session topology as a nested forest.
 
     Returns the event tree (branches, compactions, resumptions) derived from
     ``event_edges``. Supports prefix matching like the events endpoint.
