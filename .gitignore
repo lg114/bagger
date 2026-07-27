@@ -1,13 +1,21 @@
+# Python
 __pycache__/
-*.pyc
-*.pyo
-.egg-info/
-.pytest_cache/
+*.py[cod]
 *.egg
+*.egg-info/
+.eggs/
 dist/
 build/
 .venv/
+venv/
 env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Project data
 .bagger/
 
 # Frontend
@@ -18,10 +26,14 @@ ui/tsconfig.tsbuildinfo
 # Tauri
 ui/src-tauri/target/
 ui/src-tauri/gen/
+# sidecar 目录：真实构建产物(几十 MB)忽略；1KB 占位符用 `git add -f` 强制保留
+ui/src-tauri/binaries/
 
+# Misc
 workbuddy/
 .workbuddy/
+.DS_Store
+Thumbs.db
 
-# Pre-commit (removed, keep ignored)
+# Pre-commit (removed, keep ignored defensively)
 .pre-commit-config.yaml
-~/
