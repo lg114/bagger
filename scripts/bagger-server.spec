@@ -16,7 +16,7 @@ SPEC_DIR = SPECPATH
 ROOT = os.path.dirname(SPEC_DIR)
 ENTRY = os.path.join(ROOT, "bagger", "sidecar_main.py")
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 
 hiddenimports = [
     # ── API surface + routes ──
@@ -69,6 +69,11 @@ datas = []
 # jieba lazy-loads its dictionary at runtime; bundle the data files or CJK
 # search silently falls back to LIKE.
 datas += collect_data_files("jieba")
+
+# Package metadata so ``importlib.metadata.version("bagger")`` resolves inside
+# the frozen binary (otherwise health/factory report "0.0.0"). Copies the
+# ``.dist-info`` into _MEIPASS, which is on sys.path at runtime.
+datas += copy_metadata("bagger")
 
 # ── C-extension runtime DLLs ──
 # On the managed-Python layout these live in <prefix>/DLLs/, and PyInstaller's

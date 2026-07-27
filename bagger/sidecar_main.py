@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import multiprocessing
 import sys
+from contextlib import suppress
 
 
 def main() -> None:
@@ -30,10 +31,8 @@ def main() -> None:
             host = args[i + 1]
             i += 2
         elif args[i] == "--port" and i + 1 < len(args):
-            try:
+            with suppress(ValueError):
                 port = int(args[i + 1])
-            except ValueError:
-                pass
             i += 2
         else:
             i += 1
