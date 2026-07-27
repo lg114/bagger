@@ -46,7 +46,7 @@ def main() -> None:
         factory=True,
         log_level="info",
         reload=False,  # never reload in production
-        workers=1,     # single-process sidecar is enough
+        workers=1,  # single-process sidecar is enough
     )
 
 
