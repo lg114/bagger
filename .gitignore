@@ -34,6 +34,10 @@ workbuddy/
 .workbuddy/
 .DS_Store
 Thumbs.db
+*.log
+.idea/
+.vscode/
+*.swp
 
 # Pre-commit (removed, keep ignored defensively)
 .pre-commit-config.yaml
