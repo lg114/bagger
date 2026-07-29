@@ -22,6 +22,8 @@ import contextlib
 import json
 import re
 import sqlite3
+import threading
+from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -478,6 +480,32 @@ class SqliteEventRepository:
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
 
+    def get_session_events_paginated(
+        self,
+        session_id: str,
+        page: int = 1,
+        per_page: int = 50,
+    ) -> dict:
+        """Paginated events for a session (ordered by timestamp ascending).
+
+        Caps ``per_page`` at 500 so a single request can't materialize an
+        unbounded number of rows into memory / over the wire at once.
+        """
+        per_page = max(1, min(per_page, 500))
+        offset = (max(1, page) - 1) * per_page
+        total = self._conn.execute(
+            "SELECT COUNT(*) FROM events WHERE session_id = ?", (session_id,)
+        ).fetchone()[0]
+        rows = self._conn.execute(
+            f"SELECT {EVENT_DETAIL_COLS} FROM events WHERE session_id = ? "
+            f"ORDER BY timestamp LIMIT ? OFFSET ?",
+            (session_id, per_page, offset),
+        ).fetchall()
+        return {
+            "data": [_row_to_dict(r) for r in rows],
+            "meta": _pagination_meta(page, per_page, total),
+        }
+
     def get_stats(self) -> dict:
         row = self._conn.execute(
             "SELECT "
@@ -764,6 +792,19 @@ class SqliteStorage:
         self._sessions: SqliteSessionRepository | None = None
         self._events: SqliteEventRepository | None = None
         self._search: SqliteSearchIndex | None = None
+        # Serialize writes. The shared connection is opened with
+        # ``check_same_thread=False`` and WAL mode keeps concurrent *reads* safe,
+        # but SQLite still serializes *writes* at the file level — concurrent
+        # write requests (e.g. ``POST /api/scan`` racing a watcher tick) would
+        # otherwise hit "database is locked". This lock makes the boundary
+        # explicit and bounded.
+        self._write_lock = threading.Lock()
+
+    @contextlib.contextmanager
+    def _write(self) -> Generator[None, None, None]:
+        """Acquire the write lock for the duration of a mutating operation."""
+        with self._write_lock:
+            yield
 
     # -- lifecycle ---------------------------------------------------
 
@@ -925,10 +966,11 @@ class SqliteStorage:
         This is the single write point that keeps ``event_edges`` fresh (
         "Freshness guarantee").
         """
-        session_ids = list({e.session_id for e in events})
-        if session_ids:
-            self._upsert_event_edges_for_sessions(session_ids)
-            self._conn.commit()
+        with self._write():
+            session_ids = list({e.session_id for e in events})
+            if session_ids:
+                self._upsert_event_edges_for_sessions(session_ids)
+                self._conn.commit()
 
     def get_event_edges(self, session_id: str) -> list[dict]:
         """Return all edges for a session (child -> parent + depth)."""
@@ -1026,7 +1068,8 @@ class SqliteStorage:
     # -- Session delegation -----------------------------------------
 
     def upsert_session(self, session: Session) -> None:
-        self._sessions.upsert_session(session)  # type: ignore[union-attr]
+        with self._write():
+            self._sessions.upsert_session(session)  # type: ignore[union-attr]
 
     def session_exists(self, session_id: str) -> bool:
         return self._sessions.session_exists(session_id)  # type: ignore[union-attr]
@@ -1058,13 +1101,25 @@ class SqliteStorage:
     # -- Event delegation -------------------------------------------
 
     def insert_event(self, event: MemoryEvent) -> None:
-        self._events.insert_event(event)  # type: ignore[union-attr]
+        with self._write():
+            self._events.insert_event(event)  # type: ignore[union-attr]
 
     def insert_events(self, events: list[MemoryEvent]) -> int:
-        return self._events.insert_events(events)  # type: ignore[union-attr]
+        with self._write():
+            return self._events.insert_events(events)  # type: ignore[union-attr]
 
     def get_session_events(self, session_id: str) -> list[dict]:
         return self._events.get_session_events(session_id)  # type: ignore[union-attr]
+
+    def get_session_events_paginated(
+        self,
+        session_id: str,
+        page: int = 1,
+        per_page: int = 50,
+    ) -> dict:
+        return self._events.get_session_events_paginated(  # type: ignore[union-attr]
+            session_id, page, per_page
+        )
 
     def get_stats(self) -> dict:
         return self._events.get_stats()  # type: ignore[union-attr]
@@ -1111,7 +1166,8 @@ class SqliteStorage:
         )
 
     def rebuild_fts_index(self) -> int:
-        return self._search.rebuild_fts_index()  # type: ignore[union-attr]
+        with self._write():
+            return self._search.rebuild_fts_index()  # type: ignore[union-attr]
 
     def fts_enabled(self) -> bool:
         """Whether the FTS5 virtual table exists (consumed by health/doctor)."""

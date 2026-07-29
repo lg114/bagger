@@ -143,6 +143,57 @@ def test_sync_file_incremental_uses_parse_incremental():
         _cleanup(storage, sync)
 
 
+# ── Parser: drop a half-written trailing line (P1) ─────────────
+
+
+def test_parse_incremental_drops_partial_trailing_line():
+    """A line still being written (file grew past what we read) is skipped.
+
+    Claude Code appends JSONL live; if we poll mid-write the tail is truncated
+    JSON. parse_incremental must drop it instead of failing to parse it (and
+    since our offset would already be at EOF, it would never be retried).
+    """
+    from bagger.parsers.claude import ClaudeParser
+
+    with _tmpdir() as tmpdir:
+        storage, _parser, sync, projects_dir = _make_stack(tmpdir)
+        path = _write_session(projects_dir, "sess-1", n_events=2)
+        offset = path.stat().st_size
+
+        # Simulate an in-flight write: a complete line + a truncated one.
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(_line(_USER_LINE, 3, 2) + "\n")
+            f.write('{"type":"user","uuid":"evt-partial","sess')  # cut off mid-JSON
+
+        parser = ClaudeParser()
+        events = parser.parse_incremental(path, offset)
+        assert len(events) == 1  # only the complete line; partial dropped
+        assert events[0].event_id == "evt-3"
+        _cleanup(storage, sync)
+
+
+# ── Parser: tolerate unknown role (P1) ────────────────────────
+
+
+def test_parse_entry_defaults_unknown_role_to_user():
+    """A role outside {user, assistant} is captured as USER, not crashed.
+
+    A single malformed entry must not abort the whole file's sync.
+    """
+    from bagger.parsers.claude import _parse_entry
+
+    raw = {
+        "type": "user",
+        "uuid": "e1",
+        "sessionId": "s1",
+        "timestamp": "2026-06-30T06:00:00.000Z",
+        "message": {"role": "system", "content": "hi"},
+    }
+    evt = _parse_entry(raw)
+    assert evt is not None
+    assert evt.role.value == "user"
+
+
 # ── Branch: skip unchanged ─────────────────────────────────────
 
 

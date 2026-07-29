@@ -205,6 +205,39 @@ def test_get_session_events():
         assert data["data"][0]["content_blocks"][0]["text"] == "First message"
 
 
+def test_get_session_events_pagination():
+    """/events supports page/per_page and caps per_page at 500 (P1)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        storage = _override_db(td)
+        storage.upsert_session(Session(session_id="sess-p", summary="Paging"))
+        storage.insert_events(
+            [_make_event(event_id=f"p{i}", session_id="sess-p", text=f"msg {i}") for i in range(5)]
+        )
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        client = TestClient(create_app())
+
+        # Page 1, per_page=2 → 2 events, total 5.
+        r1 = client.get("/api/sessions/sess-p/events?page=1&per_page=2")
+        assert r1.status_code == 200
+        j1 = r1.json()
+        assert j1["meta"]["total"] == 5
+        assert len(j1["data"]) == 2
+        assert j1["meta"]["page"] == 1
+        assert j1["meta"]["per_page"] == 2
+
+        # Page 3 picks up the last item.
+        r3 = client.get("/api/sessions/sess-p/events?page=3&per_page=2")
+        assert len(r3.json()["data"]) == 1
+
+        # per_page beyond the cap is rejected with 422 (not silently clamped).
+        big = client.get("/api/sessions/sess-p/events?per_page=9999")
+        assert big.status_code == 422
+
+
 def test_get_session_events_not_found():
     with tempfile.TemporaryDirectory() as tmpdir:
         td = Path(tmpdir)

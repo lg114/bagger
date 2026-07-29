@@ -44,10 +44,15 @@ def get_session(session_id: str) -> dict:
 
 
 @router.get("/sessions/{session_id}/events")
-def get_session_events(session_id: str) -> dict:
-    """Get all events for a session, ordered by timestamp ascending.
+def get_session_events(
+    session_id: str,
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(50, ge=1, le=500, description="Events per page"),
+) -> dict:
+    """Get events for a session, ordered by timestamp ascending, paginated.
 
-    Returns content_blocks parsed from JSON for direct rendering.
+    Returns content_blocks parsed from JSON for direct rendering. Use ``page``
+    / ``per_page`` to stream long sessions instead of loading everything at once.
     """
     with get_storage() as storage:
         # Resolve session ID (support prefix matching via SQL LIKE)
@@ -58,12 +63,11 @@ def get_session_events(session_id: str) -> dict:
                 raise HTTPException(status_code=404, detail="Session not found")
             session_id = session["id"]
 
-        total = storage.get_event_count(session_id)
-        events = storage.get_session_events(session_id)
+        result = storage.get_session_events_paginated(session_id, page=page, per_page=per_page)
 
     # Parse content_json into content_blocks for the frontend
     parsed_events = []
-    for evt in events:
+    for evt in result["data"]:
         evt = dict(evt)
         try:
             evt["content_blocks"] = json.loads(evt.pop("content_json", "[]"))
@@ -71,7 +75,7 @@ def get_session_events(session_id: str) -> dict:
             evt["content_blocks"] = []
         parsed_events.append(evt)
 
-    return {"data": parsed_events, "meta": {"total": total}}
+    return {"data": parsed_events, "meta": result["meta"]}
 
 
 @router.get("/sessions/{session_id}/tree")

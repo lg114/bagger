@@ -1,7 +1,8 @@
 """Parse Claude Code JSONL transcript files into MemoryEvent list."""
 
 import json
-from datetime import datetime
+import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bagger.models.event import (
@@ -12,6 +13,8 @@ from bagger.models.event import (
 )
 from bagger.parsers.base import Parser as _Parser
 from bagger.parsers.base import StandardUsage
+
+logger = logging.getLogger(__name__)
 
 # ── Parser implementation ──────────────────────────────────
 
@@ -95,26 +98,50 @@ def _parse_file(path: Path) -> list[MemoryEvent]:
     return events
 
 
-def _parse_new_lines(path: Path, offset: int) -> list[MemoryEvent]:
-    """Parse only new lines appended after a byte offset."""
+def _read_complete_lines(path: Path, offset: int) -> list[str]:
+    """Read lines from ``offset`` to EOF, dropping a trailing partial line.
+
+    Claude Code appends to its JSONL transcript while a session is live. If we
+    read mid-write the last line is truncated JSON and would fail to parse —
+    and worse, our byte offset (end of file) would already be past it, so it
+    would never be retried. Detecting "file grew past what we read" means the
+    final line is incomplete; drop it and let the next poll (or the full
+    re-parse on restart) pick it up once it's flushed.
+    """
     import json as _json
 
+    file_size = path.stat().st_size
     with open(path, encoding="utf-8") as f:
         f.seek(offset)
-        new_lines = f.readlines()
+        raw = f.read()
+        bytes_read = f.tell() - offset
+    # If we didn't reach EOF, the tail is a half-written line — discard it.
+    if bytes_read < (file_size - offset):
+        last_nl = raw.rfind("\n")
+        raw = raw[:last_nl] if last_nl != -1 else ""
 
-    raw_entries = []
-    for line in new_lines:
+    lines = []
+    for line in raw.splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            raw = _json.loads(line)
+            parsed = _json.loads(line)
         except _json.JSONDecodeError:
             continue
-        if raw.get("type") in ("user", "assistant"):
-            raw_entries.append(raw)
+        if parsed.get("type") in ("user", "assistant"):
+            lines.append(parsed)
+    return lines
 
+
+def _parse_new_lines(path: Path, offset: int) -> list[MemoryEvent]:
+    """Parse only new lines appended after a byte offset.
+
+    Skips a trailing partial line if the file was read mid-write (see
+    ``_read_complete_lines``), so an in-progress transcript never yields
+    truncated JSON.
+    """
+    raw_entries = _read_complete_lines(path, offset)
     events = [e for raw in raw_entries if (e := _parse_entry(raw)) is not None]
     return events
 
@@ -222,20 +249,33 @@ def _parse_entry(raw: dict) -> MemoryEvent | None:
     entry_type = raw["type"]
     msg = raw.get("message", {})
     role_str = msg.get("role", entry_type)
-    role = Role(role_str)
+
+    # Tolerate unexpected roles (e.g. "system") rather than crashing the whole
+    # file — default to USER so the event is still captured.
+    try:
+        role = Role(role_str)
+    except ValueError:
+        logger.warning("Unknown role %r in %s; defaulting to USER", role_str, raw.get("uuid"))
+        role = Role.USER
 
     content_blocks = _parse_content(role, msg.get("content", ""))
 
     usage = msg.get("usage", {}) or {}
     u = normalize_claude_usage(usage, msg.get("model"))
 
+    # Tolerate non-ISO timestamps instead of raising fromisoformat mid-file.
+    ts_raw = raw.get("timestamp")
+    try:
+        timestamp = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        logger.warning("Bad timestamp %r in %s; using now()", ts_raw, raw.get("uuid"))
+        timestamp = datetime.now(UTC)
+
     return MemoryEvent(
         event_id=raw.get("uuid", ""),
         session_id=raw.get("sessionId", ""),
         parent_event_id=raw.get("parentUuid"),
-        timestamp=datetime.fromisoformat(
-            raw.get("timestamp", "1970-01-01T00:00:00.000Z").replace("Z", "+00:00")
-        ),
+        timestamp=timestamp,
         role=role,
         content_blocks=content_blocks,
         token_input=u.token_input,
