@@ -33,7 +33,8 @@ from bagger.models.event import BlockType, MemoryEvent, Session
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL DEFAULT 'claude',
+    id TEXT NOT NULL,
     summary TEXT NOT NULL DEFAULT '',
     project_path TEXT NOT NULL DEFAULT '',
     message_count INTEGER NOT NULL DEFAULT 0,
@@ -43,12 +44,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     parent_session_id TEXT,
     resume_of TEXT,
     is_compaction INTEGER NOT NULL DEFAULT 0,
-    compaction_of TEXT
+    compaction_of TEXT,
+    PRIMARY KEY (source, id)
 );
 
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_id TEXT UNIQUE NOT NULL,
+    event_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
     parent_event_id TEXT,
     timestamp TEXT NOT NULL,
@@ -65,11 +67,10 @@ CREATE TABLE IF NOT EXISTS events (
     cost_usd REAL,
     currency TEXT NOT NULL DEFAULT 'USD',
     service_tier TEXT,
-    provider TEXT
+    provider TEXT,
+    source TEXT NOT NULL DEFAULT 'claude',
+    UNIQUE(source, event_id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_events_session
-    ON events(session_id, timestamp);
 
 CREATE TABLE IF NOT EXISTS tool_uses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,7 +78,8 @@ CREATE TABLE IF NOT EXISTS tool_uses (
     tool_name TEXT NOT NULL,
     tool_id TEXT NOT NULL DEFAULT '',
     tool_input_json TEXT NOT NULL DEFAULT '{}',
-    FOREIGN KEY (event_id) REFERENCES events(event_id)
+    source TEXT NOT NULL DEFAULT 'claude',
+    FOREIGN KEY (source, event_id) REFERENCES events(source, event_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_tool_uses_event ON tool_uses(event_id);
@@ -88,6 +90,7 @@ CREATE TABLE IF NOT EXISTS event_edges (
     parent_event_id TEXT,
     session_id TEXT NOT NULL,
     depth INTEGER NOT NULL DEFAULT 0,
+    source TEXT,
     UNIQUE(event_id)
 );
 
@@ -99,6 +102,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
     content_text,
     session_id UNINDEXED,
     event_id UNINDEXED,
+    source UNINDEXED,
     tokenize='unicode61'
 );
 """
@@ -106,7 +110,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
 # ── Column lists for row→dict mapping ──────────────────────
 
 SESSION_COLS = (
-    "id, summary, project_path, message_count, first_message_at, last_message_at, "
+    "source, id, summary, project_path, message_count, first_message_at, last_message_at, "
     "parent_session_id, resume_of, is_compaction, compaction_of"
 )
 
@@ -117,7 +121,7 @@ EVENT_COLS = (
 )
 
 EVENT_DETAIL_COLS = (
-    "event_id, session_id, parent_event_id, timestamp, role, "
+    "event_id, session_id, source, parent_event_id, timestamp, role, "
     "content_json, content_text, token_input, token_output, "
     "cwd, git_branch, model, "
     "token_cache_read, token_cache_write, cost_usd, currency, service_tier, provider"
@@ -209,6 +213,12 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     return dict(row)
 
 
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """True if ``column`` is present on ``table`` (used by migrations)."""
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(r["name"] == column for r in rows)
+
+
 def _pagination_meta(page: int, per_page: int, total: int) -> dict:
     """Build pagination metadata dict."""
     return {
@@ -225,9 +235,10 @@ _INSERT_EVENT_SQL = """INSERT INTO events
     (event_id, session_id, parent_event_id, timestamp, role,
      content_json, content_text, token_input, token_output,
      cwd, git_branch, model,
-     token_cache_read, token_cache_write, cost_usd, currency, service_tier, provider)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(event_id) DO UPDATE SET
+     token_cache_read, token_cache_write, cost_usd, currency, service_tier, provider,
+     source)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source, event_id) DO UPDATE SET
         session_id=excluded.session_id,
         parent_event_id=excluded.parent_event_id,
         timestamp=excluded.timestamp,
@@ -244,7 +255,8 @@ _INSERT_EVENT_SQL = """INSERT INTO events
         cost_usd=excluded.cost_usd,
         currency=excluded.currency,
         service_tier=excluded.service_tier,
-        provider=excluded.provider"""
+        provider=excluded.provider,
+        source=excluded.source"""
 
 
 # ===================================================================
@@ -260,11 +272,11 @@ class SqliteSessionRepository:
 
     def upsert_session(self, session: Session) -> None:
         self._conn.execute(
-            """INSERT INTO sessions (id, summary, project_path, message_count,
+            """INSERT INTO sessions (source, id, summary, project_path, message_count,
                first_message_at, last_message_at, last_synced_at,
                parent_session_id, resume_of, is_compaction, compaction_of)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(id) DO UPDATE SET
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(source, id) DO UPDATE SET
                summary=excluded.summary,
                project_path=excluded.project_path,
                message_count=excluded.message_count,
@@ -276,6 +288,7 @@ class SqliteSessionRepository:
                is_compaction=excluded.is_compaction,
                compaction_of=excluded.compaction_of""",
             (
+                session.source,
                 session.session_id,
                 session.summary,
                 session.project_path,
@@ -296,24 +309,41 @@ class SqliteSessionRepository:
         # commits at the end to bundle the events + edges + session into one
         # transaction for batch imports.
 
-    def session_exists(self, session_id: str) -> bool:
-        return (
-            self._conn.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone()
-            is not None
-        )
+    def session_exists(self, session_id: str, source: str | None = None) -> bool:
+        if source is not None:
+            row = self._conn.execute(
+                "SELECT 1 FROM sessions WHERE source = ? AND id = ?", (source, session_id)
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT 1 FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        return row is not None
 
-    def get_session(self, session_id: str) -> dict | None:
-        row = self._conn.execute(
-            f"SELECT {SESSION_COLS} FROM sessions WHERE id = ?",
-            (session_id,),
-        ).fetchone()
+    def get_session(self, session_id: str, source: str | None = None) -> dict | None:
+        if source is not None:
+            row = self._conn.execute(
+                f"SELECT {SESSION_COLS} FROM sessions WHERE source = ? AND id = ?",
+                (source, session_id),
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                f"SELECT {SESSION_COLS} FROM sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
         return _row_to_dict(row) if row else None
 
-    def find_session_by_prefix(self, prefix: str) -> dict | None:
-        rows = self._conn.execute(
-            f"SELECT {SESSION_COLS} FROM sessions WHERE id LIKE ?",
-            (f"{prefix}%",),
-        ).fetchall()
+    def find_session_by_prefix(self, prefix: str, source: str | None = None) -> dict | None:
+        if source is not None:
+            rows = self._conn.execute(
+                f"SELECT {SESSION_COLS} FROM sessions WHERE source = ? AND id LIKE ?",
+                (source, f"{prefix}%"),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                f"SELECT {SESSION_COLS} FROM sessions WHERE id LIKE ?",
+                (f"{prefix}%",),
+            ).fetchall()
         if len(rows) == 1:
             return _row_to_dict(rows[0])
         return None
@@ -347,6 +377,7 @@ class SqliteSessionRepository:
         sort: str = "last_message_at",
         order: str = "desc",
         project: str | None = None,
+        source: str | None = None,
     ) -> dict:
         offset = (page - 1) * per_page
         allowed_sort = {"last_message_at", "message_count", "first_message_at", "id"}
@@ -354,6 +385,12 @@ class SqliteSessionRepository:
         direction = "DESC" if order.lower() == "desc" else "ASC"
 
         where, where_params = self._project_filter(project)
+        if source is not None:
+            if where:
+                where += " AND source = ?"
+            else:
+                where = " WHERE source = ?"
+            where_params = [*where_params, source]
 
         total = self._conn.execute(
             f"SELECT COUNT(*) FROM sessions{where}", where_params
@@ -369,10 +406,16 @@ class SqliteSessionRepository:
             "meta": _pagination_meta(page, per_page, total),
         }
 
-    def get_event_count(self, session_id: str) -> int:
-        row = self._conn.execute(
-            "SELECT COUNT(*) FROM events WHERE session_id = ?", (session_id,)
-        ).fetchone()
+    def get_event_count(self, session_id: str, source: str | None = None) -> int:
+        if source is not None:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM events WHERE session_id = ? AND source = ?",
+                (session_id, source),
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM events WHERE session_id = ?", (session_id,)
+            ).fetchone()
         return row[0] if row else 0
 
 
@@ -413,6 +456,7 @@ class SqliteEventRepository:
             event.currency,
             event.service_tier,
             event.provider,
+            event.source,
         )
 
     def _insert_tool_uses(self, event: MemoryEvent) -> None:
@@ -426,15 +470,19 @@ class SqliteEventRepository:
                 b.tool_name or "unknown",
                 b.tool_id or "",
                 json.dumps(b.tool_input or {}, ensure_ascii=False),
+                event.source,
             )
             for b in event.content_blocks
             if b.block_type == BlockType.TOOL_USE
         ]
         if rows:
-            self._conn.execute("DELETE FROM tool_uses WHERE event_id = ?", (event.event_id,))
+            self._conn.execute(
+                "DELETE FROM tool_uses WHERE event_id = ? AND source = ?",
+                (event.event_id, event.source),
+            )
             self._conn.executemany(
-                "INSERT INTO tool_uses(event_id, tool_name, tool_id, tool_input_json) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO tool_uses(event_id, tool_name, tool_id, tool_input_json, source) "
+                "VALUES (?, ?, ?, ?, ?)",
                 rows,
             )
 
@@ -448,8 +496,9 @@ class SqliteEventRepository:
         fts_text = _tokenize_for_fts(raw_text)
         self._conn.execute("DELETE FROM events_fts WHERE event_id = ?", (event.event_id,))
         self._conn.execute(
-            "INSERT INTO events_fts(content_text, session_id, event_id) VALUES (?, ?, ?)",
-            (fts_text, event.session_id, event.event_id),
+            "INSERT INTO events_fts(content_text, session_id, event_id, source) "
+            "VALUES (?, ?, ?, ?)",
+            (fts_text, event.session_id, event.event_id, event.source),
         )
 
     # -- public API -----------------------------------------------
@@ -473,11 +522,18 @@ class SqliteEventRepository:
         after = self._conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         return after - before
 
-    def get_session_events(self, session_id: str) -> list[dict]:
-        rows = self._conn.execute(
-            f"SELECT {EVENT_DETAIL_COLS} FROM events WHERE session_id = ? ORDER BY timestamp",
-            (session_id,),
-        ).fetchall()
+    def get_session_events(self, session_id: str, source: str | None = None) -> list[dict]:
+        if source is not None:
+            rows = self._conn.execute(
+                f"SELECT {EVENT_DETAIL_COLS} FROM events "
+                f"WHERE session_id = ? AND source = ? ORDER BY timestamp",
+                (session_id, source),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                f"SELECT {EVENT_DETAIL_COLS} FROM events WHERE session_id = ? ORDER BY timestamp",
+                (session_id,),
+            ).fetchall()
         return [_row_to_dict(r) for r in rows]
 
     def get_session_events_paginated(
@@ -485,6 +541,7 @@ class SqliteEventRepository:
         session_id: str,
         page: int = 1,
         per_page: int = 50,
+        source: str | None = None,
     ) -> dict:
         """Paginated events for a session (ordered by timestamp ascending).
 
@@ -493,14 +550,25 @@ class SqliteEventRepository:
         """
         per_page = max(1, min(per_page, 500))
         offset = (max(1, page) - 1) * per_page
-        total = self._conn.execute(
-            "SELECT COUNT(*) FROM events WHERE session_id = ?", (session_id,)
-        ).fetchone()[0]
-        rows = self._conn.execute(
-            f"SELECT {EVENT_DETAIL_COLS} FROM events WHERE session_id = ? "
-            f"ORDER BY timestamp LIMIT ? OFFSET ?",
-            (session_id, per_page, offset),
-        ).fetchall()
+        if source is not None:
+            total = self._conn.execute(
+                "SELECT COUNT(*) FROM events WHERE session_id = ? AND source = ?",
+                (session_id, source),
+            ).fetchone()[0]
+            rows = self._conn.execute(
+                f"SELECT {EVENT_DETAIL_COLS} FROM events "
+                f"WHERE session_id = ? AND source = ? ORDER BY timestamp LIMIT ? OFFSET ?",
+                (session_id, source, per_page, offset),
+            ).fetchall()
+        else:
+            total = self._conn.execute(
+                "SELECT COUNT(*) FROM events WHERE session_id = ?", (session_id,)
+            ).fetchone()[0]
+            rows = self._conn.execute(
+                f"SELECT {EVENT_DETAIL_COLS} FROM events WHERE session_id = ? "
+                f"ORDER BY timestamp LIMIT ? OFFSET ?",
+                (session_id, per_page, offset),
+            ).fetchall()
         return {
             "data": [_row_to_dict(r) for r in rows],
             "meta": _pagination_meta(page, per_page, total),
@@ -539,6 +607,14 @@ class SqliteEventRepository:
             "GROUP BY provider ORDER BY tokens DESC LIMIT 10"
         ).fetchall()
 
+        per_source = self._conn.execute(
+            "SELECT source, "
+            "COUNT(*) as events, "
+            "COALESCE(SUM(token_input + token_output), 0) as tokens "
+            "FROM events WHERE source IS NOT NULL "
+            "GROUP BY source ORDER BY events DESC"
+        ).fetchall()
+
         return {
             "total_sessions": total_sessions,
             "total_events": row["total_events"],
@@ -549,6 +625,7 @@ class SqliteEventRepository:
             "cache_hit_rate": cache_hit_rate,
             "per_model": [_row_to_dict(r) for r in per_model],
             "per_provider": [_row_to_dict(r) for r in per_provider],
+            "per_source": [_row_to_dict(r) for r in per_source],
         }
 
     def get_daily_stats(self, days: int = 30) -> list[dict]:
@@ -620,6 +697,7 @@ class SqliteSearchIndex:
         query: str,
         session_id: str | None = None,
         limit: int = 20,
+        source: str | None = None,
     ) -> list[dict]:
         """FTS5 with BM25 ranking; CJK queries are pre-tokenized before MATCH.
 
@@ -628,8 +706,10 @@ class SqliteSearchIndex:
         """
         if self._fts_enabled():
             tokenized = self._tokenized_fts_query(query)
-            return self.search_fts(tokenized, session_id=session_id, limit=limit)["data"]
-        return self._search_like(query, session_id=session_id, limit=limit)
+            return self.search_fts(tokenized, session_id=session_id, limit=limit, source=source)[
+                "data"
+            ]
+        return self._search_like(query, session_id=session_id, limit=limit, source=source)
 
     def search_paginated(
         self,
@@ -637,13 +717,16 @@ class SqliteSearchIndex:
         session_id: str | None = None,
         page: int = 1,
         per_page: int = 20,
+        source: str | None = None,
     ) -> dict:
         """FTS5 with pre-tokenization; LIKE fallback. Paginated for API."""
         if self._fts_enabled():
             tokenized = self._tokenized_fts_query(query)
-            return self.search_fts(tokenized, session_id=session_id, page=page, limit=per_page)
+            return self.search_fts(
+                tokenized, session_id=session_id, page=page, limit=per_page, source=source
+            )
         return self._search_like_paginated(
-            query, session_id=session_id, page=page, per_page=per_page
+            query, session_id=session_id, page=page, per_page=per_page, source=source
         )
 
     # -- FTS5 -----------------------------------------------------
@@ -665,6 +748,7 @@ class SqliteSearchIndex:
         session_id: str | None = None,
         limit: int = 20,
         page: int = 1,
+        source: str | None = None,
     ) -> dict:
         """FTS5 full-text search with BM25 ranking and snippet generation."""
         safe_query = _escape_fts5_query(query)
@@ -675,6 +759,9 @@ class SqliteSearchIndex:
         if session_id:
             count_sql += " AND session_id = ?"
             count_params.append(session_id)
+        if source:
+            count_sql += " AND source = ?"
+            count_params.append(source)
         total = self._conn.execute(count_sql, count_params).fetchone()[0]
 
         sql = (
@@ -683,13 +770,16 @@ class SqliteSearchIndex:
             f"bm25(events_fts, 0.0, 10.0, 5.0) as rank "
             f"FROM events_fts fts "
             f"JOIN events e ON e.event_id = fts.event_id "
-            f"LEFT JOIN sessions s ON s.id = e.session_id "
+            f"LEFT JOIN sessions s ON s.source = e.source AND s.id = e.session_id "
             f"WHERE events_fts MATCH ?"
         )
         params: list = [safe_query]
         if session_id:
             sql += " AND fts.session_id = ?"
             params.append(session_id)
+        if source:
+            sql += " AND fts.source = ?"
+            params.append(source)
         sql += " ORDER BY rank LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
@@ -703,14 +793,31 @@ class SqliteSearchIndex:
         self._conn.execute("DROP TABLE IF EXISTS events_fts")
         self._conn.execute("DROP TRIGGER IF EXISTS events_ai")
         self._conn.executescript(FTS_SCHEMA)
+        # Ensure the (legacy) FTS table carries the source column if it was
+        # recreated from an older schema that lacked it.
+        with contextlib.suppress(sqlite3.OperationalError):
+            self._conn.execute("ALTER TABLE events_fts ADD COLUMN source UNINDEXED")
 
-        rows = self._conn.execute(
-            "SELECT content_text, session_id, event_id FROM events"
-        ).fetchall()
-        self._conn.executemany(
-            "INSERT INTO events_fts(content_text, session_id, event_id) VALUES (?, ?, ?)",
-            [(_tokenize_for_fts(r[0]), r[1], r[2]) for r in rows],
-        )
+        events_has_source = _column_exists(self._conn, "events", "source")
+        if events_has_source:
+            rows = self._conn.execute(
+                "SELECT content_text, session_id, event_id, source FROM events"
+            ).fetchall()
+            sql = (
+                "INSERT INTO events_fts(content_text, session_id, event_id, source) "
+                "VALUES (?, ?, ?, ?)"
+            )
+            values = [(_tokenize_for_fts(r[0]), r[1], r[2], r[3]) for r in rows]
+        else:
+            # Pre-v4 DB: events table has no source column yet. Rebuild without it;
+            # v4 migration backfills events_fts.source afterwards.
+            rows = self._conn.execute(
+                "SELECT content_text, session_id, event_id FROM events"
+            ).fetchall()
+            sql = "INSERT INTO events_fts(content_text, session_id, event_id) VALUES (?, ?, ?)"
+            values = [(_tokenize_for_fts(r[0]), r[1], r[2]) for r in rows]
+
+        self._conn.executemany(sql, values)
         self._conn.commit()
         return len(rows)
 
@@ -721,17 +828,21 @@ class SqliteSearchIndex:
         query: str,
         session_id: str | None = None,
         limit: int = 20,
+        source: str | None = None,
     ) -> list[dict]:
         pattern = f"%{query}%"
         sql = (
             f"SELECT {EVENT_COLS} FROM events e "
-            f"LEFT JOIN sessions s ON s.id = e.session_id "
+            f"LEFT JOIN sessions s ON s.source = e.source AND s.id = e.session_id "
             f"WHERE e.content_text LIKE ?"
         )
         params: list = [pattern]
         if session_id:
             sql += " AND e.session_id = ?"
             params.append(session_id)
+        if source:
+            sql += " AND e.source = ?"
+            params.append(source)
         sql += " ORDER BY e.timestamp DESC LIMIT ?"
         params.append(limit)
         return [_row_to_dict(r) for r in self._conn.execute(sql, params).fetchall()]
@@ -742,6 +853,7 @@ class SqliteSearchIndex:
         session_id: str | None = None,
         page: int = 1,
         per_page: int = 20,
+        source: str | None = None,
     ) -> dict:
         pattern = f"%{query}%"
         offset = (page - 1) * per_page
@@ -751,17 +863,23 @@ class SqliteSearchIndex:
         if session_id:
             count_sql += " AND e.session_id = ?"
             count_params.append(session_id)
+        if source:
+            count_sql += " AND e.source = ?"
+            count_params.append(source)
         total = self._conn.execute(count_sql, count_params).fetchone()[0]
 
         sql = (
             f"SELECT {EVENT_COLS} FROM events e "
-            f"LEFT JOIN sessions s ON s.id = e.session_id "
+            f"LEFT JOIN sessions s ON s.source = e.source AND s.id = e.session_id "
             f"WHERE e.content_text LIKE ?"
         )
         params: list = [pattern]
         if session_id:
             sql += " AND e.session_id = ?"
             params.append(session_id)
+        if source:
+            sql += " AND e.source = ?"
+            params.append(source)
         sql += " ORDER BY e.timestamp DESC LIMIT ? OFFSET ?"
         params.extend([per_page, offset])
 
@@ -848,6 +966,8 @@ class SqliteStorage:
             self._apply_migration_v3()
             self._conn.execute("PRAGMA user_version = 3")
             self._conn.commit()
+        if version < 4:
+            self._apply_migration_v4()
 
     def _apply_migration_v2(self) -> None:
         """Add usage/provider columns to legacy (v1) databases.
@@ -883,6 +1003,7 @@ class SqliteStorage:
                 parent_event_id TEXT,
                 session_id TEXT NOT NULL,
                 depth INTEGER NOT NULL DEFAULT 0,
+                source TEXT,
                 UNIQUE(event_id)
             )
             """
@@ -904,6 +1025,189 @@ class SqliteStorage:
         self._backfill_event_edges()
         self._conn.commit()
 
+    def _column_exists(self, table: str, column: str) -> bool:
+        """True if ``column`` is present on ``table`` (used by migrations)."""
+        rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        return any(r["name"] == column for r in rows)
+
+    def _apply_migration_v4(self) -> None:
+        """Introduce multi-source identity (design doc (a)).
+
+        Rebuilds ``sessions`` (composite PK ``(source, id)``) and ``events``
+        (composite UNIQUE ``(source, event_id)``) — SQLite cannot ALTER a
+        PRIMARY KEY or DROP a UNIQUE constraint, so both tables are recreated.
+        Legacy rows are backfilled with ``source='claude'``. ``event_edges`` /
+        ``events_fts`` gain a ``source`` column (default 'claude') so joins and
+        per-source filtering are correct.
+
+        Crash-safe: all steps run inside one implicit transaction and
+        ``user_version`` is set to 4 within the same commit, so a mid-migration
+        crash rolls back and a re-run starts clean. ``PRAGMA foreign_keys=OFF``
+        is issued *before* any DML (it is a no-op inside a transaction) so the
+        ``DROP`` of ``events`` (referenced by ``tool_uses.event_id``) is
+        allowed; it is re-enabled in ``finally``.
+
+        Idempotent: a fresh (already-v4-shaped) database already carries the
+        ``source`` column, so the table rebuilds are skipped and the migration
+        only backfills the derived columns — safe to run on every connect().
+        """
+        c = self._conn
+        c.execute("PRAGMA foreign_keys=OFF")  # must precede any DML; allows DROP of `events`
+        try:
+            # 1) sessions — rebuild with composite PK (cannot ALTER a PRIMARY KEY).
+            #    Skip when the column already exists (fresh v4 DB).
+            if not _column_exists(c, "sessions", "source"):
+                c.execute("DROP TABLE IF EXISTS sessions_new")
+                c.execute(
+                    """
+                    CREATE TABLE sessions_new (
+                        source TEXT NOT NULL DEFAULT 'claude',
+                        id TEXT NOT NULL,
+                        summary TEXT NOT NULL DEFAULT '',
+                        project_path TEXT NOT NULL DEFAULT '',
+                        message_count INTEGER NOT NULL DEFAULT 0,
+                        first_message_at TEXT,
+                        last_message_at TEXT,
+                        last_synced_at TEXT,
+                        parent_session_id TEXT,
+                        resume_of TEXT,
+                        is_compaction INTEGER NOT NULL DEFAULT 0,
+                        compaction_of TEXT,
+                        PRIMARY KEY (source, id)
+                    )
+                    """
+                )
+                # SELECT 'claude', * mirrors sessions_new's (source, id, ...) order
+                # automatically — adding a column to SCHEMA later won't silently drop it.
+                c.execute("INSERT INTO sessions_new SELECT 'claude', * FROM sessions")
+                c.execute("DROP TABLE sessions")
+                c.execute("ALTER TABLE sessions_new RENAME TO sessions")
+
+            # 2) events — rebuild with composite UNIQUE(source, event_id).
+            #    (ON CONFLICT(event_id) alone would let a 2nd tool's event silently
+            #    overwrite the 1st tool's row -> cross-source corruption)
+            if not _column_exists(c, "events", "source"):
+                c.execute("DROP TABLE IF EXISTS events_new")
+                c.execute(
+                    """
+                    CREATE TABLE events_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        event_id TEXT NOT NULL,
+                        session_id TEXT NOT NULL,
+                        parent_event_id TEXT,
+                        timestamp TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        content_json TEXT NOT NULL,
+                        content_text TEXT NOT NULL DEFAULT '',
+                        token_input INTEGER NOT NULL DEFAULT 0,
+                        token_output INTEGER NOT NULL DEFAULT 0,
+                        cwd TEXT,
+                        git_branch TEXT,
+                        model TEXT,
+                        token_cache_read INTEGER NOT NULL DEFAULT 0,
+                        token_cache_write INTEGER NOT NULL DEFAULT 0,
+                        cost_usd REAL,
+                        currency TEXT NOT NULL DEFAULT 'USD',
+                        service_tier TEXT,
+                        provider TEXT,
+                        source TEXT NOT NULL DEFAULT 'claude',
+                        UNIQUE(source, event_id)
+                    )
+                    """
+                )
+                # old events has no `source` column, so SELECT *, 'claude' appends it last.
+                c.execute("INSERT INTO events_new SELECT *, 'claude' FROM events")
+                c.execute("DROP TABLE events")
+                c.execute("ALTER TABLE events_new RENAME TO events")
+
+            # Source now exists on events (rebuilt above, or already present on a
+            # fresh DB) — safe to (re)create the composite index for either path.
+            c.execute(
+                "CREATE INDEX IF NOT EXISTS idx_events_source_session "
+                "ON events(source, session_id, timestamp)"
+            )
+
+            # 3) event_edges — add source, backfill from sessions, reindex.
+            with contextlib.suppress(sqlite3.OperationalError):
+                c.execute("ALTER TABLE event_edges ADD COLUMN source TEXT")
+            c.execute(
+                "UPDATE event_edges SET source = COALESCE("
+                "(SELECT s.source FROM sessions s WHERE s.id = event_edges.session_id), 'claude') "
+                "WHERE source IS NULL"
+            )
+            c.execute(
+                "CREATE INDEX IF NOT EXISTS idx_event_edges_source_session "
+                "ON event_edges(source, session_id)"
+            )
+
+            # 4) events_fts — FTS5 *virtual* tables cannot be ALTERed at all
+            #    (``virtual tables may not be altered``), so a plain
+            #    ``ADD COLUMN source`` would silently no-op under ``suppress``
+            #    and leave the table without ``source``. Rebuild it with the new
+            #    column and backfill ``source`` from sessions instead. Skipped on
+            #    fresh DBs where FTS_SCHEMA already includes ``source``.
+            if not _column_exists(c, "events_fts", "source"):
+                c.execute("DROP TABLE IF EXISTS events_fts_new")
+                c.execute(
+                    """
+                    CREATE VIRTUAL TABLE events_fts_new USING fts5(
+                        content_text,
+                        session_id UNINDEXED,
+                        event_id UNINDEXED,
+                        source UNINDEXED,
+                        tokenize='unicode61'
+                    )
+                    """
+                )
+                c.execute(
+                    "INSERT INTO events_fts_new(rowid, content_text, session_id, event_id, source) "
+                    "SELECT f.rowid, f.content_text, f.session_id, f.event_id, "
+                    "COALESCE((SELECT s.source FROM sessions s WHERE s.id = f.session_id), "
+                    "'claude') "
+                    "FROM events_fts f"
+                )
+                c.execute("DROP TABLE events_fts")
+                c.execute("ALTER TABLE events_fts_new RENAME TO events_fts")
+
+            # 5) tool_uses — the FK ``event_id -> events(event_id)`` is invalid once
+            #    events.event_id is no longer a single-column unique key (it is now
+            #    part of UNIQUE(source, event_id)). Rebuild tool_uses to carry
+            #    ``source`` and reference the composite key. Skip on fresh DBs.
+            if not _column_exists(c, "tool_uses", "source"):
+                c.execute("DROP TABLE IF EXISTS tool_uses_new")
+                c.execute(
+                    """
+                    CREATE TABLE tool_uses_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        event_id TEXT NOT NULL,
+                        tool_name TEXT NOT NULL,
+                        tool_id TEXT NOT NULL DEFAULT '',
+                        tool_input_json TEXT NOT NULL DEFAULT '{}',
+                        source TEXT NOT NULL DEFAULT 'claude',
+                        FOREIGN KEY (source, event_id) REFERENCES events(source, event_id)
+                    )
+                    """
+                )
+                c.execute(
+                    "INSERT INTO tool_uses_new "
+                    "(id, event_id, tool_name, tool_id, tool_input_json, source) "
+                    "SELECT t.id, t.event_id, t.tool_name, t.tool_id, t.tool_input_json, "
+                    "COALESCE((SELECT e.source FROM events e WHERE e.event_id = t.event_id), "
+                    "'claude') FROM tool_uses t"
+                )
+                c.execute("DROP TABLE tool_uses")
+                c.execute("ALTER TABLE tool_uses_new RENAME TO tool_uses")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_tool_uses_event ON tool_uses(event_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_tool_uses_name ON tool_uses(tool_name)")
+
+            c.execute("PRAGMA user_version = 4")
+            c.commit()
+        except Exception:
+            c.rollback()
+            raise
+        finally:
+            c.execute("PRAGMA foreign_keys=ON")
+
     def _upsert_event_edges_for_sessions(self, session_ids: list[str] | None = None) -> None:
         """Recompute ``event_edges`` for the given sessions (None = whole DB).
 
@@ -911,16 +1215,27 @@ class SqliteStorage:
         = 1). A cycle guard prevents infinite loops on malformed input. Edges
         are upserted (``ON CONFLICT(event_id) DO UPDATE``) so this is safe to
         re-run on any database.
+
+        Tolerates a pre-v4 ``events`` table that lacks the ``source`` column:
+        when ``source`` is absent the edge is stamped with the default
+        ``'claude'`` (the only tool that existed before multi-source support).
+        This keeps the v3 migration (which backfills edges) safe to run on a
+        legacy DB *before* the v4 migration adds ``source`` to ``events``.
         """
+        events_has_source = _column_exists(self._conn, "events", "source")
+        if events_has_source:
+            base_cols = "event_id, parent_event_id, session_id, source"
+        else:
+            base_cols = "event_id, parent_event_id, session_id"
+
         if session_ids is None:
             rows = self._conn.execute(
-                "SELECT event_id, parent_event_id, session_id "
-                "FROM events WHERE parent_event_id IS NOT NULL"
+                f"SELECT {base_cols} FROM events WHERE parent_event_id IS NOT NULL"
             ).fetchall()
         else:
             placeholders = ",".join("?" for _ in session_ids)
             rows = self._conn.execute(
-                f"SELECT event_id, parent_event_id, session_id FROM events "
+                f"SELECT {base_cols} FROM events "
                 f"WHERE parent_event_id IS NOT NULL AND session_id IN ({placeholders})",
                 session_ids,
             ).fetchall()
@@ -936,18 +1251,37 @@ class SqliteStorage:
                 cur = parent_of.get(cur)
             return d
 
-        edges = [
-            (r["event_id"], r["parent_event_id"], r["session_id"], depth(r["event_id"]))
-            for r in rows
-        ]
+        if events_has_source:
+            edges = [
+                (
+                    r["event_id"],
+                    r["parent_event_id"],
+                    r["session_id"],
+                    depth(r["event_id"]),
+                    r["source"],
+                )
+                for r in rows
+            ]
+        else:
+            edges = [
+                (
+                    r["event_id"],
+                    r["parent_event_id"],
+                    r["session_id"],
+                    depth(r["event_id"]),
+                    "claude",
+                )
+                for r in rows
+            ]
         if edges:
             self._conn.executemany(
-                """INSERT INTO event_edges (event_id, parent_event_id, session_id, depth)
-                   VALUES (?, ?, ?, ?)
+                """INSERT INTO event_edges (event_id, parent_event_id, session_id, depth, source)
+                   VALUES (?, ?, ?, ?, ?)
                    ON CONFLICT(event_id) DO UPDATE SET
                        parent_event_id=excluded.parent_event_id,
                        session_id=excluded.session_id,
-                       depth=excluded.depth""",
+                       depth=excluded.depth,
+                       source=excluded.source""",
                 edges,
             )
 
@@ -972,25 +1306,41 @@ class SqliteStorage:
                 self._upsert_event_edges_for_sessions(session_ids)
                 self._conn.commit()
 
-    def get_event_edges(self, session_id: str) -> list[dict]:
+    def get_event_edges(self, session_id: str, source: str | None = None) -> list[dict]:
         """Return all edges for a session (child -> parent + depth)."""
-        rows = self._conn.execute(
-            "SELECT event_id, parent_event_id, session_id, depth "
-            "FROM event_edges WHERE session_id = ? ORDER BY depth, event_id",
-            (session_id,),
-        ).fetchall()
+        if source is not None:
+            rows = self._conn.execute(
+                "SELECT event_id, parent_event_id, session_id, depth "
+                "FROM event_edges WHERE session_id = ? AND source = ? "
+                "ORDER BY depth, event_id",
+                (session_id, source),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT event_id, parent_event_id, session_id, depth "
+                "FROM event_edges WHERE session_id = ? ORDER BY depth, event_id",
+                (session_id,),
+            ).fetchall()
         return [_row_to_dict(r) for r in rows]
 
-    def get_session_tree(self, session_id: str) -> list[dict]:
+    def get_session_tree(self, session_id: str, source: str | None = None) -> list[dict]:
         """Return the session as a forest of nested nodes.
 
         Each node: ``{event_id, role, timestamp, depth, children:[...]}``. Roots
         are events whose ``parent_event_id`` is NULL (absent from ``event_edges``).
         """
-        rows = self._conn.execute(
-            "SELECT event_id, role, timestamp, parent_event_id FROM events WHERE session_id = ?",
-            (session_id,),
-        ).fetchall()
+        if source is not None:
+            rows = self._conn.execute(
+                "SELECT event_id, role, timestamp, parent_event_id "
+                "FROM events WHERE session_id = ? AND source = ?",
+                (session_id, source),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT event_id, role, timestamp, parent_event_id FROM events "
+                "WHERE session_id = ?",
+                (session_id,),
+            ).fetchall()
         nodes: dict[str, dict] = {}
         for r in rows:
             nodes[r["event_id"]] = {
@@ -1008,10 +1358,16 @@ class SqliteStorage:
                 nodes[pid]["children"].append(node)
             else:
                 roots.append(node)
-        edge_rows = self._conn.execute(
-            "SELECT event_id, depth FROM event_edges WHERE session_id = ?",
-            (session_id,),
-        ).fetchall()
+        if source is not None:
+            edge_rows = self._conn.execute(
+                "SELECT event_id, depth FROM event_edges WHERE session_id = ? AND source = ?",
+                (session_id, source),
+            ).fetchall()
+        else:
+            edge_rows = self._conn.execute(
+                "SELECT event_id, depth FROM event_edges WHERE session_id = ?",
+                (session_id,),
+            ).fetchall()
         for er in edge_rows:
             if er["event_id"] in nodes:
                 nodes[er["event_id"]]["depth"] = er["depth"]
@@ -1030,13 +1386,13 @@ class SqliteStorage:
         ).fetchone()[0]
         orphan_rows = self._conn.execute(
             "SELECT e.event_id FROM event_edges e "
-            "LEFT JOIN events ev ON e.event_id = ev.event_id "
+            "LEFT JOIN events ev ON e.source = ev.source AND e.event_id = ev.event_id "
             "WHERE ev.event_id IS NULL"
         ).fetchall()
         orphans = [r["event_id"] for r in orphan_rows]
         dangling = self._conn.execute(
             "SELECT COUNT(*) FROM event_edges e "
-            "LEFT JOIN events p ON e.parent_event_id = p.event_id "
+            "LEFT JOIN events p ON e.source = p.source AND e.parent_event_id = p.event_id "
             "WHERE e.parent_event_id IS NOT NULL AND p.event_id IS NULL"
         ).fetchone()[0]
         return {
@@ -1071,14 +1427,14 @@ class SqliteStorage:
         with self._write():
             self._sessions.upsert_session(session)  # type: ignore[union-attr]
 
-    def session_exists(self, session_id: str) -> bool:
-        return self._sessions.session_exists(session_id)  # type: ignore[union-attr]
+    def session_exists(self, session_id: str, source: str | None = None) -> bool:
+        return self._sessions.session_exists(session_id, source)  # type: ignore[union-attr]
 
-    def get_session(self, session_id: str) -> dict | None:
-        return self._sessions.get_session(session_id)  # type: ignore[union-attr]
+    def get_session(self, session_id: str, source: str | None = None) -> dict | None:
+        return self._sessions.get_session(session_id, source)  # type: ignore[union-attr]
 
-    def find_session_by_prefix(self, prefix: str) -> dict | None:
-        return self._sessions.find_session_by_prefix(prefix)  # type: ignore[union-attr]
+    def find_session_by_prefix(self, prefix: str, source: str | None = None) -> dict | None:
+        return self._sessions.find_session_by_prefix(prefix, source)  # type: ignore[union-attr]
 
     def list_sessions(self, limit: int = 50) -> list[dict]:
         return self._sessions.list_sessions(limit)  # type: ignore[union-attr]
@@ -1090,13 +1446,14 @@ class SqliteStorage:
         sort: str = "last_message_at",
         order: str = "desc",
         project: str | None = None,
+        source: str | None = None,
     ) -> dict:
         return self._sessions.list_sessions_paginated(  # type: ignore[union-attr]
-            page, per_page, sort, order, project
+            page, per_page, sort, order, project, source
         )
 
-    def get_event_count(self, session_id: str) -> int:
-        return self._sessions.get_event_count(session_id)  # type: ignore[union-attr]
+    def get_event_count(self, session_id: str, source: str | None = None) -> int:
+        return self._sessions.get_event_count(session_id, source)  # type: ignore[union-attr]
 
     # -- Event delegation -------------------------------------------
 
@@ -1108,17 +1465,18 @@ class SqliteStorage:
         with self._write():
             return self._events.insert_events(events)  # type: ignore[union-attr]
 
-    def get_session_events(self, session_id: str) -> list[dict]:
-        return self._events.get_session_events(session_id)  # type: ignore[union-attr]
+    def get_session_events(self, session_id: str, source: str | None = None) -> list[dict]:
+        return self._events.get_session_events(session_id, source)  # type: ignore[union-attr]
 
     def get_session_events_paginated(
         self,
         session_id: str,
         page: int = 1,
         per_page: int = 50,
+        source: str | None = None,
     ) -> dict:
         return self._events.get_session_events_paginated(  # type: ignore[union-attr]
-            session_id, page, per_page
+            session_id, page, per_page, source
         )
 
     def get_stats(self) -> dict:
@@ -1140,8 +1498,11 @@ class SqliteStorage:
         query: str,
         session_id: str | None = None,
         limit: int = 20,
+        source: str | None = None,
     ) -> list[dict]:
-        return self._search.search(query, session_id=session_id, limit=limit)  # type: ignore[union-attr]
+        return self._search.search(  # type: ignore[union-attr]
+            query, session_id=session_id, limit=limit, source=source
+        )
 
     def search_paginated(
         self,
@@ -1149,9 +1510,10 @@ class SqliteStorage:
         session_id: str | None = None,
         page: int = 1,
         per_page: int = 20,
+        source: str | None = None,
     ) -> dict:
         return self._search.search_paginated(  # type: ignore[union-attr]
-            query, session_id=session_id, page=page, per_page=per_page
+            query, session_id=session_id, page=page, per_page=per_page, source=source
         )
 
     def search_fts(
@@ -1160,9 +1522,10 @@ class SqliteStorage:
         session_id: str | None = None,
         limit: int = 20,
         page: int = 1,
+        source: str | None = None,
     ) -> dict:
         return self._search.search_fts(  # type: ignore[union-attr]
-            query, session_id=session_id, limit=limit, page=page
+            query, session_id=session_id, limit=limit, page=page, source=source
         )
 
     def rebuild_fts_index(self) -> int:

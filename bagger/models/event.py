@@ -33,6 +33,7 @@ class MemoryEvent(BaseModel):
 
     event_id: str = Field(pattern=r"\S")  # at least one non-whitespace char
     session_id: str = Field(pattern=r"\S")
+    source: str = "claude"  # tool of origin, mirrors Parser.source_name
     parent_event_id: str | None = None
     timestamp: datetime
     role: Role
@@ -51,8 +52,9 @@ class MemoryEvent(BaseModel):
 
 
 class Session(BaseModel):
-    """Metadata about a single Claude Code session."""
+    """Metadata about a single coding-agent session (any tool)."""
 
+    source: str = "claude"  # tool of origin, mirrors Parser.source_name
     session_id: str
     summary: str
     project_path: str = ""

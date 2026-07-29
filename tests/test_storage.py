@@ -42,7 +42,7 @@ def _make_event(
 
 
 def test_insert_and_search():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -59,7 +59,7 @@ def test_insert_and_search():
 
 
 def test_insert_ignore_duplicates():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -76,7 +76,7 @@ def test_insert_event_upserts_existing_row():
     """Re-inserting the same event_id with new field values updates the row
     (upsert, not ignore), so a re-scan after a parser upgrade backfills newly
     added columns like token_cache_read instead of being skipped."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -96,7 +96,7 @@ def test_insert_event_upserts_existing_row():
 
 
 def test_session_upsert():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -120,7 +120,7 @@ def test_session_upsert():
 
 
 def test_stats():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -139,7 +139,7 @@ def test_stats():
 
 def test_search_chinese():
     """CJK queries use FTS5 via jieba pre-tokenization (no LIKE fallback needed)."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -164,7 +164,7 @@ def test_search_chinese():
 
 
 def test_fts_search_returns_snippets():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -186,7 +186,7 @@ def test_fts_search_returns_snippets():
 
 def test_fts_search_falls_back_to_like():
     """search() auto-detects FTS and uses it; falls back to LIKE otherwise."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -208,7 +208,7 @@ def test_fts_search_falls_back_to_like():
 
 
 def test_search_fts_pagination():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -235,7 +235,7 @@ def test_search_fts_pagination():
 
 
 def test_rebuild_fts_index():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -259,7 +259,7 @@ def test_rebuild_fts_index():
 
 
 def test_fts_search_with_session_filter():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -282,7 +282,7 @@ def test_fts_search_with_session_filter():
 
 def test_fts_chinese_search():
     """CJK queries use FTS5 with jieba pre-tokenization (BM25 + snippets)."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -311,7 +311,7 @@ def test_fts_chinese_search():
 
 def test_fts_ascii_search():
     """Pure ASCII queries use FTS5 with BM25 ranking and snippets."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -360,7 +360,7 @@ def _make_tool_event(
 
 def test_tool_uses_inserted_on_event_write():
     """Inserting an event with TOOL_USE blocks writes to tool_uses table."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -383,7 +383,7 @@ def test_tool_uses_inserted_on_event_write():
 
 def test_get_tool_usage_stats_aggregates():
     """get_tool_usage_stats() correctly aggregates from tool_uses table."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -408,7 +408,7 @@ def test_get_tool_usage_stats_aggregates():
 
 def test_tool_uses_no_tool_events():
     """Events with no TOOL_USE blocks leave tool_uses table empty."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -425,7 +425,7 @@ def test_tool_uses_no_tool_events():
 
 def test_tool_uses_idempotent():
     """Re-inserting the same event does not duplicate tool_uses rows (OR IGNORE)."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -446,7 +446,7 @@ def test_tool_uses_idempotent():
 
 def test_get_stats_tool_uses_count():
     """get_stats() tool_uses field counts from tool_uses table."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -463,7 +463,7 @@ def test_get_stats_tool_uses_count():
 
 def test_get_stats_includes_cache_rate_and_breakdown():
     """get_stats() exposes cache_hit_rate, per_model, and per_provider."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -499,7 +499,7 @@ def test_get_stats_includes_cache_rate_and_breakdown():
 
 def test_get_stats_cache_rate_none_when_no_token_data():
     """cache_hit_rate is None only when there is no token data at all."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -518,7 +518,7 @@ def test_get_stats_cache_rate_none_when_no_token_data():
 
 def test_get_stats_cache_rate_zero_when_no_cache_hit():
     """With input tokens but no cache hit, rate is 0.0 (not None)."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -536,7 +536,7 @@ def test_migration_v2_adds_usage_columns():
     """A legacy (v1) database gets the new columns via ALTER on connect()."""
     import sqlite3
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "legacy.db"
         # Simulate a pre-v2 database (events table without new columns)
         conn = sqlite3.connect(str(db_path))
@@ -595,7 +595,7 @@ def test_migration_v2_to_v3_creates_and_backfills_event_edges():
     ``event_edges``, backfills it from ``events.parent_event_id`` (with correct
     depths), adds the lineage columns, and is idempotent on re-run.
     """
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "legacy.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -617,11 +617,12 @@ def test_migration_v2_to_v3_creates_and_backfills_event_edges():
         storage.conn.commit()
         storage.close()
 
-        # Re-open: connect() should upgrade v2 -> v3 and backfill edges.
+        # Re-open: connect() should upgrade v2 -> v3 (edges) and v4 (source),
+        # backfilling both along the way.
         storage = SqliteStorage(db_path)
         storage.connect()
 
-        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 4
 
         rows = storage.conn.execute(
             "SELECT event_id, parent_event_id, depth FROM event_edges ORDER BY depth, event_id"
@@ -646,7 +647,7 @@ def test_migration_v2_to_v3_creates_and_backfills_event_edges():
 
 def test_get_session_tree_returns_forest():
     """get_session_tree returns nested nodes with correct depth/children."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "db.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -673,7 +674,7 @@ def test_get_session_tree_returns_forest():
 
 def test_reconcile_event_edges_detects_inconsistency():
     """reconcile_event_edges flags orphan edges and dangling parents."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "db.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -718,7 +719,7 @@ def test_memory_event_rejects_empty_identifiers():
     """
     import pydantic
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         storage = SqliteStorage(db_path)
         storage.connect()
@@ -732,5 +733,168 @@ def test_memory_event_rejects_empty_identifiers():
         # Non-empty still works end-to-end.
         storage.insert_event(_make_event())
         assert storage.get_event_count("sess-1") == 1
+
+        storage.close()
+
+
+def test_migration_v4_introduces_source_identity():
+    """connect() upgrades a legacy (v3) claude DB to v4 with source wired in.
+
+    Builds a v3-shaped database (no ``source`` column anywhere), seeds some
+    claude rows, then lets connect() run the v4 migration and asserts
+    user_version=4, every legacy row backfilled with source='claude', and the
+    composite (source, id) / (source, event_id) keys are in place.
+    """
+    import sqlite3
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        db_path = Path(tmpdir) / "legacy.db"
+        # Simulate a pre-v4 database (no source column on any table).
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(
+            """
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                summary TEXT NOT NULL DEFAULT '',
+                project_path TEXT NOT NULL DEFAULT '',
+                message_count INTEGER NOT NULL DEFAULT 0,
+                first_message_at TEXT, last_message_at TEXT, last_synced_at TEXT,
+                parent_session_id TEXT, resume_of TEXT,
+                is_compaction INTEGER NOT NULL DEFAULT 0, compaction_of TEXT
+            );
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT UNIQUE NOT NULL,
+                session_id TEXT NOT NULL,
+                parent_event_id TEXT,
+                timestamp TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content_json TEXT NOT NULL,
+                content_text TEXT NOT NULL DEFAULT '',
+                token_input INTEGER NOT NULL DEFAULT 0,
+                token_output INTEGER NOT NULL DEFAULT 0,
+                cwd TEXT, git_branch TEXT, model TEXT,
+                token_cache_read INTEGER NOT NULL DEFAULT 0,
+                token_cache_write INTEGER NOT NULL DEFAULT 0,
+                cost_usd REAL,
+                currency TEXT NOT NULL DEFAULT 'USD',
+                service_tier TEXT,
+                provider TEXT
+            );
+            CREATE TABLE event_edges (
+                event_id TEXT PRIMARY KEY,
+                parent_event_id TEXT,
+                session_id TEXT NOT NULL,
+                depth INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(event_id)
+            );
+            CREATE TABLE tool_uses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                tool_id TEXT NOT NULL DEFAULT '',
+                tool_input_json TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY (event_id) REFERENCES events(event_id)
+            );
+            CREATE VIRTUAL TABLE events_fts USING fts5(
+                content_text, session_id UNINDEXED, event_id UNINDEXED,
+                tokenize='unicode61'
+            );
+            """
+        )
+        # Seed claude-shaped rows (no source column exists yet).
+        conn.execute(
+            "INSERT INTO sessions (id, summary, message_count) VALUES ('sess-1', 'demo', 2)"
+        )
+        conn.execute(
+            "INSERT INTO events (event_id, session_id, timestamp, role, content_json, "
+            "content_text) VALUES ('e-1', 'sess-1', '2026-01-01T00:00:00+00:00', 'user', '{}', "
+            "'hello world')"
+        )
+        conn.execute(
+            "INSERT INTO event_edges (event_id, parent_event_id, session_id, depth) "
+            "VALUES ('e-1', NULL, 'sess-1', 0)"
+        )
+        conn.execute(
+            "INSERT INTO events_fts (content_text, session_id, event_id) "
+            "VALUES ('hello world', 'sess-1', 'e-1')"
+        )
+        conn.execute("PRAGMA user_version = 3")
+        conn.commit()
+        conn.close()
+
+        # Re-open: connect() should apply v4 migration and backfill source.
+        storage = SqliteStorage(db_path)
+        storage.connect()
+        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 4
+
+        # Every session/event/edge/fts row carries source='claude'.
+        for table in ("sessions", "events", "event_edges", "events_fts"):
+            vals = [
+                r[0]
+                for r in storage.conn.execute(f"SELECT DISTINCT source FROM {table}").fetchall()
+            ]
+            assert vals == ["claude"], f"{table} source backfill wrong: {vals}"
+
+        # Composite PK is present on sessions (pk flag set on source + id).
+        pk_cols = [
+            r["name"]
+            for r in storage.conn.execute("PRAGMA table_info(sessions)").fetchall()
+            if r["pk"] > 0
+        ]
+        assert "source" in pk_cols and "id" in pk_cols
+
+        # And the events table enforces composite UNIQUE(source, event_id).
+        assert storage.get_event_count("sess-1", "claude") == 1
+
+        storage.close()
+
+
+def test_source_isolation_prevents_cross_source_overwrite():
+    """Same session/event id from two tools coexist; no silent overwrite."""
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        db_path = Path(tmpdir) / "multi.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        # Two sessions sharing an id but different source.
+        storage.conn.execute(
+            "INSERT INTO sessions (source, id, summary, message_count) "
+            "VALUES ('claude', 'same-id', 'from claude', 1)"
+        )
+        storage.conn.execute(
+            "INSERT INTO sessions (source, id, summary, message_count) "
+            "VALUES ('chatgpt', 'same-id', 'from chatgpt', 1)"
+        )
+        # Two events sharing an event_id but different source.
+        storage.conn.execute(
+            "INSERT INTO events (event_id, session_id, timestamp, role, "
+            "content_json, content_text, source) VALUES "
+            "('same-evt', 'same-id', '2026-01-01T00:00:00+00:00', 'user', '{}', 'claude text', 'claude')"
+        )
+        storage.conn.execute(
+            "INSERT INTO events (event_id, session_id, timestamp, role, "
+            "content_json, content_text, source) VALUES "
+            "('same-evt', 'same-id', '2026-01-01T00:00:00+00:00', 'user', '{}', 'chatgpt text', 'chatgpt')"
+        )
+        storage.conn.commit()
+
+        # get_session without source degrades to legacy behaviour (first match);
+        # ambiguity is resolved via find_session_by_prefix, which returns None
+        # when more than one source matches the id.
+        assert storage.find_session_by_prefix("same-id") is None
+        assert storage.find_session_by_prefix("same-id", "claude")["summary"] == "from claude"
+        assert storage.find_session_by_prefix("same-id", "chatgpt")["summary"] == "from chatgpt"
+        # With source, each resolves to its own row.
+        claude_sess = storage.get_session("same-id", "claude")
+        chatgpt_sess = storage.get_session("same-id", "chatgpt")
+        assert claude_sess["summary"] == "from claude"
+        assert chatgpt_sess["summary"] == "from chatgpt"
+
+        # Per-source event counts are isolated.
+        assert storage.get_event_count("same-id", "claude") == 1
+        assert storage.get_event_count("same-id", "chatgpt") == 1
+        # Without source, counts both (legacy-clause behaviour).
+        assert storage.get_event_count("same-id") == 2
 
         storage.close()

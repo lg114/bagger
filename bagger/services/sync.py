@@ -40,11 +40,17 @@ class SyncError(Exception):
 def upsert_session_from_events(
     storage: SessionRepository,
     parser: Parser,
+    source: str,
     session_id: str,
     filepath: Path,
     events: list[MemoryEvent],
 ) -> None:
-    """Upsert session metadata derived from a list of parsed events."""
+    """Upsert session metadata derived from a list of parsed events.
+
+    ``source`` is the originating tool (``parser.source_name``) and is stamped
+    onto the ``Session`` so sessions from different tools stay isolated under
+    the composite ``(source, id)`` primary key.
+    """
     summary = parser.extract_summary(filepath)
     first_ts = events[0].timestamp
     last_ts = events[-1].timestamp
@@ -52,10 +58,11 @@ def upsert_session_from_events(
 
     storage.upsert_session(
         Session(
+            source=source,
             session_id=session_id,
             summary=summary,
             project_path=project_path,
-            message_count=storage.get_event_count(session_id),
+            message_count=storage.get_event_count(session_id, source),
             first_message_at=first_ts,
             last_message_at=last_ts,
         )
@@ -158,6 +165,12 @@ class SyncService:
                 advanced_offset=False,
             )
 
+        # Stamp every event with the originating tool so multi-tool data stays
+        # isolated under the composite (source, event_id) unique constraint.
+        source = self.parser.source_name
+        for ev in events:
+            ev.source = source
+
         new_count = self.storage.insert_events(events)
         # keep event_edges in lock-step with events — same file
         # processing unit, both incremental watch and full re-scan flow here.
@@ -165,7 +178,9 @@ class SyncService:
         self._export_events(events)
 
         if upsert_always or new_count > 0:
-            upsert_session_from_events(self.storage, self.parser, session_id, filepath, events)
+            upsert_session_from_events(
+                self.storage, self.parser, source, session_id, filepath, events
+            )
 
         # Single commit per file: events (insert_events already committed),
         # event edges (upsert_event_edges already committed), and the session
