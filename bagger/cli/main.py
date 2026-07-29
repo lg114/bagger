@@ -72,14 +72,20 @@ def init():
 
 @cli.command()
 @click.option("--full", is_flag=True, help="Full re-scan (ignore incremental state)")
+@click.option("--source", default=None, help="Limit to one source (default: all registered)")
 @require_db()
 @with_storage
-def scan(storage, full):
-    """Scan ~/.claude/projects/ and import all sessions."""
+def scan(storage, full, source):
+    """Scan all registered AI tool transcript sources and import sessions.
+
+    Omit --source to sync every registered parser (multi-tool support); pass
+    --source claude (etc.) to limit to a single tool.
+    """
     from bagger.services.scanner import scan_all
 
-    click.echo("Scanning ~/.claude/projects/ ...")
-    stats = scan_all(storage, full=full)
+    scope = source or "all registered sources"
+    click.echo(f"Scanning {scope} ...")
+    stats = scan_all(storage, full=full, source=source)
     click.echo(f"  {stats['sessions']} sessions, {stats['events']} events imported")
     if stats["skipped"]:
         click.echo(f"  {stats['skipped']} sessions skipped (already synced)")
@@ -97,16 +103,21 @@ def scan(storage, full):
 
 @cli.command()
 @click.option("--interval", default=1.0, help="Polling interval in seconds")
+@click.option("--source", default=None, help="Limit to one source (default: all registered)")
 @require_db()
 @with_storage
-def watch(storage, interval):
-    """Watch ~/.claude/projects/ and sync new events in real time."""
+def watch(storage, interval, source):
+    """Watch all registered AI tool transcript sources and sync new events live.
+
+    Omit --source to watch every registered parser (multi-tool support); pass
+    --source claude (etc.) to limit to a single tool.
+    """
     from bagger.services.scanner import scan_all
     from bagger.services.watcher import Watcher
 
     # Quick scan to catch up, then watch
-    scan_all(storage, full=False)
-    with Watcher(storage, source="claude") as watcher:
+    scan_all(storage, full=False, source=source)
+    with Watcher(storage, source=source) as watcher:
         watcher.watch(interval=interval)
 
 

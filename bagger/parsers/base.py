@@ -97,6 +97,15 @@ class ParserRegistry:
         return sorted(cls._parsers)
 
     @classmethod
+    def all_parsers(cls) -> list["Parser"]:
+        """Return every registered parser instance.
+
+        Used by the scanner/watcher to drive *all* sources (multi-tool
+        support, §5.5) instead of a single hard-coded one.
+        """
+        return list(cls._parsers.values())
+
+    @classmethod
     def discover_all(cls) -> dict[str, list[Path]]:
         """Run discover on every registered parser."""
         result: dict[str, list[Path]] = {}

@@ -47,8 +47,21 @@ describe("useSessions", () => {
 
     renderHook(() => useSessions(3, "first_message_at"), { wrapper });
 
+    await waitFor(() => {
+      const call = mockGetSessions.mock.calls[0];
+      expect(call[0]).toBe(3);
+      expect(call[1]).toBe(50);
+      expect(call[2]).toBe("first_message_at");
+    });
+  });
+
+  it("passes source param for multi-tool filtering", async () => {
+    mockGetSessions.mockResolvedValue({ data: [], meta: { total: 0 } });
+
+    renderHook(() => useSessions(1, "last_message_at", undefined, "chatgpt"), { wrapper });
+
     await waitFor(() =>
-      expect(mockGetSessions).toHaveBeenCalledWith(3, 50, "first_message_at"),
+      expect(mockGetSessions).toHaveBeenCalledWith(1, 50, "last_message_at", "desc", undefined, "chatgpt"),
     );
   });
 });

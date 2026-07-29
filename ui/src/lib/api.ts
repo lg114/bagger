@@ -9,6 +9,7 @@ export interface Session {
   message_count: number;
   first_message_at: string;
   last_message_at: string;
+  source?: string;
 }
 
 export interface ContentBlock {
@@ -112,6 +113,7 @@ export function getSessions(
   sort = "last_message_at",
   order = "desc",
   project?: string,
+  source?: string,
 ): Promise<PaginatedResponse<Session>> {
   return fetchApi<PaginatedResponse<Session>>("/sessions", {
     page,
@@ -119,6 +121,7 @@ export function getSessions(
     sort,
     order,
     project,
+    source,
   });
 }
 

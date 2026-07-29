@@ -16,16 +16,19 @@ def list_sessions(
     sort: str = Query("last_message_at", description="Sort field"),
     order: str = Query("desc", description="Sort order (asc/desc)"),
     project: str | None = Query(None, description="Filter by exact project_path"),
+    source: str | None = Query(None, description="Filter by source (e.g. claude, chatgpt)"),
 ) -> dict:
     """Paginated list of all sessions with configurable sorting.
 
     When ``project`` is provided (e.g. from the Projects page "View all"
     link), the result and its total count are scoped to that project so the
-    Conversations page header matches the project's session count.
+    Conversations page header matches the project's session count. When
+    ``source`` is provided, only sessions from that AI tool are returned
+    (multi-tool support, §5.5) — letting the frontend facet by source.
     """
     with get_storage() as storage:
         result = storage.list_sessions_paginated(
-            page=page, per_page=per_page, sort=sort, order=order, project=project
+            page=page, per_page=per_page, sort=sort, order=order, project=project, source=source
         )
     return result
 

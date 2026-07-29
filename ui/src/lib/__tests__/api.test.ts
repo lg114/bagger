@@ -70,6 +70,22 @@ describe("getSessions", () => {
     expect(url).toContain("sort=first_message_at");
     expect(url).toContain("order=asc");
   });
+
+  it("passes source param for multi-tool filtering", async () => {
+    mockApiResponse({ data: [], meta: { page: 1, per_page: 50, total: 0, pages: 0 } });
+
+    await getSessions(1, 50, "last_message_at", "desc", undefined, "chatgpt");
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("source=chatgpt");
+  });
+
+  it("omits source param when not provided", async () => {
+    mockApiResponse({ data: [], meta: { page: 1, per_page: 50, total: 0, pages: 0 } });
+
+    await getSessions();
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).not.toContain("source=");
+  });
 });
 
 // ── getSession ───────────────────────────────────────────

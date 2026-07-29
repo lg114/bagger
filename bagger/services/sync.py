@@ -134,7 +134,16 @@ class SyncService:
         """
         session_id = filepath.stem
         file_size = filepath.stat().st_size
-        last_offset = offsets.get(session_id, 0)
+        source = self.parser.source_name
+        offset_key = f"{source}:{session_id}"
+        # Backward-compat: legacy state files keyed offsets by the bare
+        # ``session_id``. New writes always use the composite
+        # ``"source:session_id"`` key so two tools whose transcript files share
+        # the same stem stay on independent offsets.
+        last_offset = offsets.get(offset_key)
+        if last_offset is None and session_id in offsets:
+            last_offset = offsets[session_id]
+        last_offset = last_offset or 0
         is_first_sight = last_offset == 0
 
         # Skip unchanged files (scanner suppresses this check in full mode;
@@ -167,7 +176,6 @@ class SyncService:
 
         # Stamp every event with the originating tool so multi-tool data stays
         # isolated under the composite (source, event_id) unique constraint.
-        source = self.parser.source_name
         for ev in events:
             ev.source = source
 
@@ -189,7 +197,7 @@ class SyncService:
         # and lets a full scan scale instead of fsyncing per session.
         self.storage.conn.commit()
 
-        offsets[session_id] = file_size
+        offsets[offset_key] = file_size
         return SyncResult(
             new_count=new_count,
             skipped=False,

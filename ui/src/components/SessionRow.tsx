@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Folder, MessageSquare } from "lucide-react";
 import { formatDateShort } from "@/lib/utils";
 import type { Session } from "@/lib/api";
+import { SourceBadge } from "./SourceBadge";
 
 /**
  * Editorial hairline session row — the single shared row used by both the
@@ -18,9 +19,12 @@ export function SessionRow({ session }: { session: Session }) {
     >
       <div className="flex items-center justify-between gap-4 px-4 py-4">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-foreground truncate">
-            {session.summary || "Untitled Session"}
-          </p>
+          <div className="flex items-center gap-2 min-w-0">
+            <SourceBadge source={session.source} className="shrink-0" />
+            <p className="text-sm font-medium text-foreground truncate">
+              {session.summary || "Untitled Session"}
+            </p>
+          </div>
           {session.project_path && (
             <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground font-mono truncate">
               <Folder className="w-3 h-3 shrink-0 opacity-40" />

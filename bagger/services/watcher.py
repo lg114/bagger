@@ -51,18 +51,32 @@ class Watcher:
     def __init__(
         self,
         storage: Storage,
-        source: str = "claude",
+        source: str | None = None,
         state_path: Path | None = None,
         save_interval: float = 5.0,
     ):
         self.storage = storage
-        self.parser = ParserRegistry.get(source)
-        self._sync = SyncService(storage, self.parser)
+        # §5.5: drive every registered parser by default. ``source`` limits the
+        # watcher to a single tool. ``self._syncs`` maps source_name -> SyncService
+        # so each tool gets its own per-file pipeline. For the single-source and
+        # no-source cases we also expose ``self.parser`` / ``self._sync`` pointing
+        # at the (first) parser/service, keeping the historical attributes and
+        # the existing tests that poke them directly.
+        if source is not None:
+            parser = ParserRegistry.get(source)
+            self._sources = [parser]
+        else:
+            self._sources = ParserRegistry.all_parsers()
+        self._syncs = {p.source_name: SyncService(storage, p) for p in self._sources}
+        # Convenience aliases (single-source shape); point at the first entry.
+        self.parser = self._sources[0] if self._sources else None
+        self._sync = self._syncs[self.parser.source_name] if self.parser else None
+
         self._state_path = state_path or settings.state_path
         # Resume from persisted offsets; live updates happen in ``_poll``.
         self._state = _load_state(self._state_path)
         self._offsets: dict[str, int] = self._state.sessions
-        self._failed: set[str] = set()
+        self._failed: set[tuple[str, str]] = set()
         self._running = False
         self._closed = False
         self._last_save = 0.0
@@ -75,7 +89,8 @@ class Watcher:
         signal.signal(signal.SIGINT, self._on_stop)
         signal.signal(signal.SIGTERM, self._on_stop)
 
-        print(f"Watching {self.parser.source_name} transcripts ...")
+        names = ", ".join(p.source_name for p in self._sources) or "(no parsers registered)"
+        print(f"Watching {names} transcripts ...")
         print("Press Ctrl+C to stop\n")
 
         try:
@@ -97,7 +112,7 @@ class Watcher:
             print("\nWatcher stopped.")
 
     def close(self) -> None:
-        """Release sync resources (exporter file handle).
+        """Release sync resources (exporter file handles).
 
         Idempotent: safe to call from both ``watch()``'s ``finally`` block and
         the context-manager ``__exit__`` (e.g. ``with Watcher(...) as w``).
@@ -105,7 +120,8 @@ class Watcher:
         """
         if self._closed:
             return
-        self._sync.close()
+        for sync in self._syncs.values():
+            sync.close()
         self._closed = True
 
     def __enter__(self) -> "Watcher":
@@ -115,32 +131,33 @@ class Watcher:
         self.close()
 
     def _poll(self) -> None:
-        files = self.parser.discover_sessions()
+        for source_name, sync in self._syncs.items():
+            parser = sync.parser
+            files = parser.discover_sessions()
 
-        for filepath in files:
-            session_id = filepath.stem
-            if session_id in self._failed:
-                continue  # already logged a parse error this run; avoid spam
-            try:
-                result = self._sync.sync_file(filepath, self._offsets, upsert_always=False)
-            except SyncError as exc:
-                self._failed.add(session_id)
-                logger.error(
-                    "Parse failed for %s — skipping for the rest of this run. "
-                    "Fix the file and restart the watcher to retry.",
-                    exc.filepath,
-                )
-                continue
-            if result.skipped:
-                continue
+            for filepath in files:
+                session_id = filepath.stem
+                if (source_name, session_id) in self._failed:
+                    continue  # already logged a parse error this run; avoid spam
+                try:
+                    result = sync.sync_file(filepath, self._offsets, upsert_always=False)
+                except SyncError as exc:
+                    self._failed.add((source_name, session_id))
+                    logger.error(
+                        "Parse failed for %s — skipping for the rest of this run. "
+                        "Fix the file and restart the watcher to retry.",
+                        exc.filepath,
+                    )
+                    continue
+                if result.skipped:
+                    continue
 
-            # Only report when new events were inserted (watcher prints).
-            if result.new_count > 0:
-                if result.is_first_sight:
-                    summary = self.parser.extract_summary(filepath)
-                    session_id = filepath.stem
-                    print(f'  [new] session {session_id[:8]} "{summary}"')
-                print(f"    +{result.new_count} events synced")
+                # Only report when new events were inserted (watcher prints).
+                if result.new_count > 0:
+                    if result.is_first_sight:
+                        summary = parser.extract_summary(filepath)
+                        print(f'  [new] session {session_id[:8]} "{summary}"')
+                    print(f"    +{result.new_count} events synced")
 
     # -- offset persistence --------------------------------------
 

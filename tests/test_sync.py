@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from bagger.parsers.base import Parser
 from bagger.parsers.claude import ClaudeParser
 from bagger.services.sync import SyncError, SyncService
 from bagger.storage.sqlite import SqliteStorage
@@ -125,7 +126,7 @@ def test_sync_file_incremental_uses_parse_incremental():
 
         # First sync: full parse, offset advances to file_size.
         sync.sync_file(path, offsets)
-        assert offsets["sess-1"] == path.stat().st_size
+        assert offsets["claude:sess-1"] == path.stat().st_size
 
         # Append two more events.
         with open(path, "a", encoding="utf-8") as f:
@@ -206,7 +207,7 @@ def test_sync_file_skips_unchanged():
 
         # First sync consumes everything.
         sync.sync_file(path, offsets)
-        size_after_first = offsets["sess-1"]
+        size_after_first = offsets["claude:sess-1"]
 
         # Second sync with no file change → skipped.
         result = sync.sync_file(path, offsets)
@@ -215,7 +216,7 @@ def test_sync_file_skips_unchanged():
         assert result.skipped is True
         assert result.new_count == 0
         assert result.advanced_offset is False
-        assert offsets["sess-1"] == size_after_first  # unchanged
+        assert offsets["claude:sess-1"] == size_after_first  # unchanged
         assert storage.get_event_count("sess-1") == 2  # not re-inserted
         _cleanup(storage, sync)
 
@@ -292,7 +293,7 @@ def test_sync_file_advances_offset_to_file_size():
 
         assert result is not None
         assert result.advanced_offset is True
-        assert offsets["sess-1"] == path.stat().st_size
+        assert offsets["claude:sess-1"] == path.stat().st_size
         _cleanup(storage, sync)
 
 
@@ -455,17 +456,19 @@ def test_watcher_skips_failed_file_after_first_error():
 
         # Keep the watcher hermetic: feed it exactly our temp session and a sync
         # that always fails, without mutating the global ParserRegistry.
+        # After the §5.5 refactor _poll drives discovery via each source's own
+        # SyncService, so override that parser (not the top-level alias).
         class _FakeParser:
             source_name = "claude"
 
             def discover_sessions(self):
                 return [path]
 
-        watcher.parser = _FakeParser()  # type: ignore[assignment]
+        watcher._sync.parser = _FakeParser()  # type: ignore[assignment]
         watcher._sync.sync_file = _fake_sync_file  # type: ignore[assignment]
 
         watcher._poll()  # first poll: raises once, recorded, logged
-        assert session_id in watcher._failed
+        assert ("claude", session_id) in watcher._failed
         assert sync_calls["n"] == 1
 
         watcher._poll()  # second poll: file in _failed -> not called again
@@ -585,4 +588,148 @@ def test_watcher_releases_resources_on_stop(monkeypatch):
         watcher.watch(interval=0)
 
         assert close_calls["n"] == 1  # finally released the handle
+        _cleanup(storage, sync)
+
+
+# ── §5.5 multi-parser scheduling (drive every registered source) ──
+
+
+class _ChatGptLikeParser(Parser):
+    """A second source that reuses Claude's on-disk format but reports a
+    different ``source_name`` — enough to exercise multi-parser scheduling
+    without writing a whole new parser implementation.
+    """
+
+    source_name = "chatgpt"
+
+    def __init__(self, projects_dir: Path):
+        self._delegate = ClaudeParser(projects_dir=projects_dir)
+
+    def discover_sessions(self):
+        return self._delegate.discover_sessions()
+
+    def parse(self, path):
+        return self._delegate.parse(path)
+
+    def parse_incremental(self, path, offset):
+        return self._delegate.parse_incremental(path, offset)
+
+    def extract_summary(self, path):
+        return self._delegate.extract_summary(path)
+
+    def normalize_usage(self, raw_usage, raw_model=None):
+        return self._delegate.normalize_usage(raw_usage, raw_model)
+
+
+def _with_both_parsers(projects_dir: Path, cg_dir: Path):
+    """Register claude (at ``projects_dir``) + a chatgpt parser (at ``cg_dir``).
+
+    Returns a context manager-ish helper; call within a try/finally that
+    restores ``ParserRegistry._parsers`` to ``saved``.
+    """
+    from bagger.parsers import ParserRegistry
+
+    saved = dict(ParserRegistry._parsers)
+    ParserRegistry._parsers.clear()
+    ParserRegistry.register(ClaudeParser(projects_dir=projects_dir))
+    ParserRegistry.register(_ChatGptLikeParser(cg_dir))
+    return saved
+
+
+def test_scan_all_drives_all_registered_parsers():
+    """scan_all(source=None) must drive every registered parser, not just one.
+
+    §5.5: a second source ('chatgpt') is registered; scan_all should import
+    sessions from BOTH sources, stamping each with its own source column and
+    writing composite (source:session_id) offset keys.
+    """
+    from bagger.parsers import ParserRegistry
+    from bagger.services.scanner import scan_all
+
+    with _tmpdir() as tmpdir:
+        storage, _parser, sync, projects_dir = _make_stack(tmpdir)
+        cg_dir = Path(tmpdir) / "cg_projects"
+        _write_session(projects_dir, "sess-1", n_events=2)
+        _write_session(cg_dir, "cg-sess", n_events=2)
+
+        saved = _with_both_parsers(projects_dir, cg_dir)
+        state_path = Path(tmpdir) / "state.json"
+        try:
+            stats = scan_all(
+                storage,
+                state_path=state_path,
+                jsonl_path=Path(tmpdir) / "events.jsonl",
+            )
+        finally:
+            ParserRegistry._parsers.clear()
+            ParserRegistry._parsers.update(saved)
+
+        assert stats["sessions"] >= 2
+        # Both sources landed, each with its own source column.
+        assert storage.get_session("sess-1", source="claude") is not None
+        assert storage.get_session("cg-sess", source="chatgpt") is not None
+        # Offsets are keyed by composite source:session_id.
+        saved_state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert "claude:sess-1" in saved_state["sessions"]
+        assert "chatgpt:cg-sess" in saved_state["sessions"]
+        _cleanup(storage, sync)
+
+
+def test_watcher_iterates_all_registered_parsers():
+    """Watcher(source=None) must drive every registered parser, not just one."""
+    from bagger.parsers import ParserRegistry
+    from bagger.services.watcher import Watcher
+
+    with _tmpdir() as tmpdir:
+        storage, _parser, sync, projects_dir = _make_stack(tmpdir)
+        cg_dir = Path(tmpdir) / "cg_projects"
+        _write_session(projects_dir, "sess-1", n_events=2)
+        _write_session(cg_dir, "cg-sess", n_events=2)
+
+        saved = _with_both_parsers(projects_dir, cg_dir)
+        try:
+            watcher = Watcher(storage, state_path=Path(tmpdir) / "state.json")
+            watcher._poll()
+        finally:
+            ParserRegistry._parsers.clear()
+            ParserRegistry._parsers.update(saved)
+
+        assert storage.get_session("sess-1", source="claude") is not None
+        assert storage.get_session("cg-sess", source="chatgpt") is not None
+        _cleanup(storage, sync)
+
+
+def test_offset_keys_are_source_scoped():
+    """Two sources sharing a filename stem keep independent offsets (§5.5)."""
+    from bagger.parsers import ParserRegistry
+    from bagger.services.scanner import scan_all
+
+    with _tmpdir() as tmpdir:
+        storage, _parser, sync, projects_dir = _make_stack(tmpdir)
+        cg_dir = Path(tmpdir) / "cg_projects"
+        # Same stem "shared" in BOTH source directories.
+        _write_session(projects_dir, "shared", n_events=1)
+        _write_session(cg_dir, "shared", n_events=1)
+
+        saved = _with_both_parsers(projects_dir, cg_dir)
+        state_path = Path(tmpdir) / "state.json"
+        try:
+            scan_all(
+                storage,
+                state_path=state_path,
+                jsonl_path=Path(tmpdir) / "events.jsonl",
+            )
+        finally:
+            ParserRegistry._parsers.clear()
+            ParserRegistry._parsers.update(saved)
+
+        saved_state = json.loads(state_path.read_text(encoding="utf-8"))
+        sess = saved_state["sessions"]
+        assert "claude:shared" in sess
+        assert "chatgpt:shared" in sess
+        # Each advanced to its own file size — independent, not colliding.
+        claude_size = (projects_dir / "projhash" / "shared.jsonl").stat().st_size
+        cg_size = (cg_dir / "projhash" / "shared.jsonl").stat().st_size
+        assert sess["claude:shared"] == claude_size
+        assert sess["chatgpt:shared"] == cg_size
         _cleanup(storage, sync)

@@ -25,16 +25,21 @@ logger = logging.getLogger(__name__)
 def scan_all(
     storage: Storage,
     *,
-    source: str = "claude",
+    source: str | None = None,
     full: bool = False,
     state_path: Path | None = None,
     jsonl_path: Path | None = None,
 ) -> dict:
-    """Scan all sessions from a registered parser source and import events.
+    """Scan all sessions from registered parser source(s) and import events.
+
+    Multi-tool support (§5.5): when ``source`` is ``None`` (the default), every
+    registered parser is driven in turn so a newly added AI tool is picked up
+    automatically — no scanner changes needed. Pass a specific ``source`` to
+    limit the scan to one tool (e.g. ``"claude"``).
 
     Args:
         storage: Connected storage instance (satisfies SessionRepository + EventRepository).
-        source: Parser source name (default "claude").
+        source: Parser source name, or ``None`` to scan *all* registered sources.
         full: If True, reprocess all files from scratch.
         state_path: Path to watch state JSON file for incremental mode.
         jsonl_path: Path for JSONL exporter backup.
@@ -43,32 +48,34 @@ def scan_all(
         Stats dict with counts, including an ``errors`` key for files that
         failed to parse (no longer swallowed silently).
     """
-    parser = ParserRegistry.get(source)
     state_path = state_path or settings.state_path
     jsonl_path = jsonl_path or settings.jsonl_path
 
-    sync = SyncService(storage, parser, jsonl_path=jsonl_path)
-    state = _load_state(state_path) if not full else WatchState()
-    files = parser.discover_sessions()
+    # §5.5: drive every registered parser (or just one when source is given).
+    parsers = [ParserRegistry.get(source)] if source else ParserRegistry.all_parsers()
 
+    state = _load_state(state_path) if not full else WatchState()
     stats = {"sessions": 0, "events": 0, "skipped": 0, "errors": 0}
 
-    for filepath in files:
-        try:
-            result = sync.sync_file(filepath, state.sessions, full=full, upsert_always=True)
-        except SyncError as exc:
-            stats["errors"] += 1
-            logger.error("Skipping %s during scan: %s", exc.filepath, exc.error)
-            continue
-        if result.skipped:
-            stats["skipped"] += 1
-            continue
-        if result.new_count > 0:
-            stats["sessions"] += 1
-            stats["events"] += result.new_count
+    for parser in parsers:
+        sync = SyncService(storage, parser, jsonl_path=jsonl_path)
+        files = parser.discover_sessions()
+        for filepath in files:
+            try:
+                result = sync.sync_file(filepath, state.sessions, full=full, upsert_always=True)
+            except SyncError as exc:
+                stats["errors"] += 1
+                logger.error("Skipping %s during scan: %s", exc.filepath, exc.error)
+                continue
+            if result.skipped:
+                stats["skipped"] += 1
+                continue
+            if result.new_count > 0:
+                stats["sessions"] += 1
+                stats["events"] += result.new_count
+        sync.close()
 
     _save_state(state, state_path)
-    sync.close()
     return stats
 
 

@@ -2,6 +2,7 @@ import { useSearchParams } from "react-router-dom";
 import { MessageSquare, AlertCircle, X } from "lucide-react";
 import { useSessions } from "@/hooks/useSessions";
 import { SessionRow, SessionRowSkeleton } from "@/components/SessionRow";
+import { sourceDotColor } from "@/components/SourceBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 
@@ -17,13 +18,20 @@ export default function SessionsPage() {
   const page = parseInt(searchParams.get("page") || "1", 10);
   const sort = (searchParams.get("sort") || "last_message_at") as SortKey;
   const project = searchParams.get("project");
+  const source = searchParams.get("source");
 
-  // Server-side project filtering: the backend scopes both the returned rows
-  // AND meta.total to the project, so the count header matches the Projects page.
-  const { data, isLoading, error } = useSessions(page, sort, project ?? undefined);
+  // Server-side filtering: the backend scopes both the returned rows AND
+  // meta.total to the project/source, so the count header matches.
+  const { data, isLoading, error } = useSessions(page, sort, project ?? undefined, source ?? undefined);
 
   const sessions = data?.data ?? [];
   const meta = data?.meta;
+
+  // Distinct sources present on the current page, plus the active source so it
+  // stays selectable even when a page holds only one source.
+  const sourceOptions = Array.from(
+    new Set([...sessions.map((s) => s.source).filter(Boolean), ...(source ? [source] : [])] as string[]),
+  ).sort();
 
   const goToPage = (p: number) => {
     const params = new URLSearchParams(searchParams);
@@ -34,6 +42,14 @@ export default function SessionsPage() {
   const setSort = (key: SortKey) => {
     const params = new URLSearchParams(searchParams);
     params.set("sort", key);
+    params.set("page", "1");
+    setSearchParams(params);
+  };
+
+  const setSource = (value: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (value) params.set("source", value);
+    else params.delete("source");
     params.set("page", "1");
     setSearchParams(params);
   };
@@ -77,6 +93,19 @@ export default function SessionsPage() {
               </button>
             </div>
           )}
+          {source && (
+            <div className="flex items-center gap-1.5 text-sm mt-1">
+              <span className="text-xs uppercase tracking-wide text-muted-foreground">source</span>
+              <span className="font-medium text-foreground">{source}</span>
+              <button
+                onClick={() => setSource("")}
+                className="text-muted-foreground hover:text-foreground transition-colors duration-200"
+                title="Clear filter"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -97,6 +126,30 @@ export default function SessionsPage() {
             </button>
           ))}
         </div>
+        {sourceOptions.length > 0 && (
+          <div className="flex items-center gap-1 bg-muted rounded-element p-0.5">
+            <button
+              onClick={() => setSource("")}
+              className={`px-3 py-1.5 rounded text-xs font-mono transition-all duration-200 ${
+                !source ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              All
+            </button>
+            {sourceOptions.map((s) => (
+              <button
+                key={s}
+                onClick={() => setSource(s)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all duration-200 ${
+                  source === s ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: sourceDotColor(s) }} />
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex-1" />
       </div>
 
@@ -116,7 +169,13 @@ export default function SessionsPage() {
       ) : sessions.length === 0 ? (
         <EmptyState
           icon={MessageSquare}
-          title={project ? `No sessions in ${project === "no-project" ? "unknown project" : basename(project)}` : "No sessions found"}
+          title={
+            project
+              ? `No sessions in ${project === "no-project" ? "unknown project" : basename(project)}`
+              : source
+                ? `No ${source} sessions`
+                : "No sessions found"
+          }
           description={
             <span>
               Run{" "}

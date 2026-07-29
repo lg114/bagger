@@ -130,6 +130,39 @@ def test_list_sessions_paginated():
         assert data["meta"]["pages"] == 2
 
 
+def test_list_sessions_filters_by_source():
+    """?source= scopes the list and its total to one AI tool (§5.5 / (b))."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        storage = _override_db(td)
+        storage.upsert_session(Session(session_id="c1", summary="Claude", source="claude"))
+        storage.upsert_session(Session(session_id="g1", summary="ChatGPT", source="chatgpt"))
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+        client = TestClient(app)
+
+        # No filter -> both sources.
+        all_resp = client.get("/api/sessions")
+        assert all_resp.status_code == 200
+        assert all_resp.json()["meta"]["total"] == 2
+
+        # source=chatgpt -> only the chatgpt session (and total reflects it).
+        resp = client.get("/api/sessions?source=chatgpt")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["meta"]["total"] == 1
+        assert data["data"][0]["id"] == "g1"
+        assert data["data"][0]["source"] == "chatgpt"
+
+        # source=claude -> only the claude session.
+        resp = client.get("/api/sessions?source=claude")
+        assert resp.json()["meta"]["total"] == 1
+        assert resp.json()["data"][0]["id"] == "c1"
+
+
 def test_get_session_not_found():
     with tempfile.TemporaryDirectory() as tmpdir:
         td = Path(tmpdir)
