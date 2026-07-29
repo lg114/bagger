@@ -95,8 +95,8 @@ If you find yourself importing `storage` from `models`, or `services` from
 - Every new feature or bug fix comes with a test.
 - Tests live in `tests/` and mirror the package layout (`test_storage.py`,
   `test_parsers.py`, `test_api.py`, ...).
-- Use the existing fixtures in `tests/conftest.py` for temp DBs and sample
-  transcripts — don't roll your own.
+- Sample transcripts live in `tests/fixtures/` — reuse them instead of
+  inventing new test data.
 - API tests use FastAPI's `TestClient` (httpx-backed). No live server needed.
 - Run `pytest tests/ -q` before pushing. If you break a test, fix it; do not
   skip it without a written reason in the PR description.
