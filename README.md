@@ -5,7 +5,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
-[![Tests](https://img.shields.io/badge/tests-47%20passing-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-83%20passing-brightgreen.svg)](#development)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
 
 bagger reads the JSONL transcripts that Claude Code writes to `~/.claude/projects/` and turns them into a queryable SQLite database with FTS5 full-text search and session replay. Think of it as your AI coding memory layer — with a visual memory browser on top.
@@ -55,7 +55,7 @@ bagger ships as a native desktop app with tray support:
 - **Tray**: Left-click to show, right-click menu (Show / Quit)
 - **Backend**: Two modes — **dev** (host Python + hot reload) or **production** (bundled sidecar exe)
 - **Single instance**: Named mutex prevents duplicate windows on restart
-- **UI**: React + Tailwind dark theme, Fira Sans + Fira Code
+- **UI**: React + Tailwind, dark editorial theme (Fraunces / Hanken Grotesk / JetBrains Mono)
 
 ### Dev setup
 
@@ -118,6 +118,19 @@ The resulting `.msi` installer is fully self-contained — no Python installatio
 | `POST /api/scan` | Trigger incremental scan of new sessions |
 | `POST /api/scan/full` | Trigger full re-scan of all sessions |
 
+## Configuration
+
+Everything works with zero config. To override defaults, create `~/.bagger/config.toml` — only the keys you change need to be present:
+
+```toml
+bagger_dir = "D:/data/bagger"        # move the database elsewhere
+parser_source = "claude"              # default source for scan / watch
+
+# CORS whitelist for the REST API (loopback-only by default — the API can
+# trigger real file scans, so don't open this up casually)
+cors_origins = ["http://127.0.0.1:8723", "http://localhost:8723"]
+```
+
 ## Architecture
 
 ```
@@ -148,11 +161,11 @@ The resulting `.msi` installer is fully self-contained — no Python installatio
      (Click)   (FastAPI)  (React + Rust)
 ```
 
-### Search: FTS5 + LIKE hybrid
+### Search: CJK-aware FTS5
 
-- **English/ASCII queries** → SQLite FTS5 with BM25 ranking and `<mark>` snippet highlighting
-- **Chinese/CJK queries** → LIKE fallback (FTS5 unicode61 can't segment CJK)
-- English search is fast and ranked; Chinese search is exhaustive but guarantees no misses
+- All queries go through SQLite FTS5 with BM25 ranking and `<mark>` snippet highlighting
+- **Chinese/CJK text** is pre-tokenized with **jieba** at index and query time, so unicode61 can segment it — Chinese search is ranked and fast, same as English
+- If jieba is unavailable (minimal install), CJK queries gracefully fall back to LIKE scans — exhaustive, never misses
 
 ## Project structure
 
@@ -166,10 +179,13 @@ bagger/
 │   ├── parsers/           # Parser protocol (base.py) + Claude Code implementation (claude.py)
 │   ├── storage/           # Storage protocol (base.py) + SQLite/FTS5 implementation (sqlite.py)
 │   ├── services/          # Business logic (sync, scanner, watcher, search, replay)
-│   └── exporters/         # Export abstractions (base, jsonl)
-├── tests/                 # pytest suite (47 tests)
+│   ├── exporters/         # Export abstractions (base, jsonl)
+│   ├── config.py          # Settings — single config entry point (~/.bagger/config.toml)
+│   └── sidecar_main.py    # PyInstaller entry for the Tauri sidecar
+├── tests/                 # pytest suite (83 tests) + fixtures/
 ├── scripts/               # Build helpers (PyInstaller sidecar bundling)
 └── ui/                    # Tauri + React desktop frontend
+    └── src-tauri/         # Rust shell, tray, sidecar lifecycle
 ```
 
 Dependency flow is strictly downward: `cli`/`api` → `services` → `parsers`/`storage` → `models`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full layering rules.
@@ -180,8 +196,10 @@ Dependency flow is strictly downward: `cli`/`api` → `services` → `parsers`/`
 |--------------|--------------------------------------------------------|
 | CLI          | Click                                                  |
 | Data models  | Pydantic v2                                            |
-| Parser       | Parser Protocol + stdlib `json` (streaming JSONL)        |
-| Storage      | Storage Protocol + SQLite + FTS5 (stdlib `sqlite3`)      |
+| Parsers      | Parser Protocol + stdlib `json` (streaming JSONL)      |
+| Storage      | Storage Protocol + SQLite + FTS5 (stdlib `sqlite3`)    |
+| CJK search   | jieba pre-tokenization + FTS5 BM25                     |
+| Config       | pydantic + `~/.bagger/config.toml` (tomllib)           |
 | REST API     | FastAPI + Uvicorn                                      |
 | Desktop      | Tauri (Rust) + React + Tailwind                        |
 | Lint/format  | ruff (replaces flake8 + isort + black)                 |
@@ -204,7 +222,7 @@ From each Claude Code transcript, bagger extracts:
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -q            # 47 tests
+pytest tests/ -q            # 83 tests
 ```
 
 ### Code quality
@@ -239,10 +257,11 @@ Contributions are welcome. Before opening a PR, please read
 ## Roadmap
 
 - [x] CI pipeline (GitHub Actions: ruff + pytest on every PR)
-- [ ] Pre-commit hook for ruff
+- [x] CJK-aware FTS search (jieba pre-tokenization + FTS5 BM25)
+- [x] Config file (`~/.bagger/config.toml`) for non-default paths
+- [x] Desktop app production build (PyInstaller sidecar + Tauri .msi)
 - [ ] More exporters (Zvec, Markdown)
-- [ ] CJK-aware FTS tokenizer for ranked Chinese search
-- [ ] Config file (`~/.bagger/config.toml`) for non-default paths
+- [ ] Support for more AI coding agents (parser registry is ready)
 
 ## License
 
