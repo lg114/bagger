@@ -33,6 +33,19 @@ class Settings(BaseModel):
     parser_source: str = "claude"
     """Default AI tool source for scan / watch commands."""
 
+    source_alias: dict[str, str] = Field(default_factory=dict)
+    """Map a model name (or lowercased substring) to a provider label.
+
+    Provider detection from the model name is only a heuristic — a proxy that
+    spoofs the model name (e.g. a MiMo backend served as ``claude-*``) would be
+    mislabeled. Register an explicit override here to fix it::
+
+        source_alias = {"claude-foo-proxy": "anthropic"}
+
+    Checked before the keyword heuristic in
+    ``bagger.parsers.claude._resolve_provider``.
+    """
+
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://127.0.0.1:8723",

@@ -129,6 +129,66 @@ def test_resolve_provider_heuristics():
     assert _resolve_provider("something-unknown") is None
 
 
+def test_resolve_provider_source_alias_overrides_heuristic(monkeypatch):
+    """config.source_alias wins over the keyword heuristic (P2).
+
+    A proxy that spoofs the model name (e.g. MiMo served as ``claude-*``)
+    would otherwise be mislabeled as ``anthropic``.
+
+    ``Settings`` is frozen, so we swap the module-level singleton with a
+    fresh instance rather than mutating attributes — ``_resolve_provider``
+    re-imports ``settings`` at call time and will pick up the patch.
+    """
+    import bagger.config as config
+    from bagger.config import Settings
+
+    monkeypatch.setattr(config, "settings", Settings(source_alias={"claude-mimo-proxy": "xiaomi"}))
+
+    assert _resolve_provider("claude-mimo-proxy-2025") == "xiaomi"
+    # Unknown models without an alias still fall through to None.
+    assert _resolve_provider("mystery-model") is None
+
+
+def test_discover_sessions_scandir_and_exclusions():
+    """discover_sessions finds .jsonl via scandir, excludes agent*/warmup,
+    and returns most-recently-modified first (P2)."""
+    import os
+    import time
+
+    from bagger.parsers.claude import ClaudeParser
+
+    with tempfile.TemporaryDirectory() as tmp:
+        proj = Path(tmp) / "projects"
+        (proj / "a").mkdir(parents=True)
+        (proj / "b").mkdir(parents=True)
+
+        old = proj / "a" / "old.jsonl"
+        new = proj / "b" / "new.jsonl"
+        agent = proj / "a" / "agent-session.jsonl"
+        warmup = proj / "b" / "warmup-cache.jsonl"
+        for p in (old, new, agent, warmup):
+            p.write_text(
+                '{"type":"user","uuid":"x","sessionId":"x","message":{"role":"user","content":"hi"}}\n',
+                encoding="utf-8",
+            )
+
+        # Make `new` newer than `old` so ordering is observable.
+        older = time.time() - 100
+        os.utime(old, (older, older))
+        os.utime(new, (time.time(), time.time()))
+
+        parser = ClaudeParser(projects_dir=proj)
+        files = parser.discover_sessions()
+
+        names = [p.name for p in files]
+        assert "old.jsonl" in names
+        assert "new.jsonl" in names
+        assert "agent-session.jsonl" not in names
+        assert "warmup-cache.jsonl" not in names
+        # Newest first.
+        assert files[0].name == "new.jsonl"
+
+
 def test_parse_entry_stores_usage_and_provider():
     raw = {
         "type": "assistant",

@@ -33,22 +33,35 @@ class ClaudeParser(_Parser):
         return self.SOURCE_NAME
 
     def discover_sessions(self) -> list[Path]:
-        """Yield all valid JSONL files, excluding agent-* and warmup."""
+        """Yield all valid JSONL files, excluding agent-* and warmup.
+
+        Uses ``os.scandir`` for a single recursive traversal (vs ``os.walk``,
+        which yields a tuple per directory and forces a second iteration over
+        filenames) and derives mtime from each ``DirEntry`` without a separate
+        ``Path.stat()`` call — cheaper for the per-poll watcher cycle.
+        """
         if not self.PROJECTS_DIR.exists():
             return []
 
         files: list[Path] = []
-        for root, _, filenames in _walk(self.PROJECTS_DIR):
-            for name in filenames:
-                if (
-                    name.endswith(".jsonl")
-                    and not name.startswith("agent-")
-                    and "warmup" not in name.lower()
-                ):
-                    files.append(Path(root) / name)
+        mtimes: list[float] = []
+        for entry in _scandir(self.PROJECTS_DIR):
+            if (
+                entry.name.endswith(".jsonl")
+                and not entry.name.startswith("agent-")
+                and "warmup" not in entry.name.lower()
+            ):
+                try:
+                    mtime = entry.stat().st_mtime
+                except OSError:
+                    continue
+                files.append(Path(entry.path))
+                mtimes.append(mtime)
 
-        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        return files
+        # Sort by mtime descending (most recently active sessions first),
+        # keeping file/mtime in lock-step.
+        order = sorted(range(len(files)), key=lambda i: mtimes[i], reverse=True)
+        return [files[i] for i in order]
 
     def parse(self, path: Path) -> list[MemoryEvent]:
         return _parse_file(path)
@@ -66,11 +79,26 @@ class ClaudeParser(_Parser):
 # ── Module-level functions (backward compat, delegated by ClaudeParser) ──
 
 
-def _walk(projects_dir: Path):
-    """os.walk wrapper (avoids direct os import in public API)."""
+def _scandir(projects_dir: Path):
+    """Recursively yield ``os.DirEntry`` for every file under ``projects_dir``.
+
+    ``os.scandir`` gives one traversal (vs ``os.walk``'s per-directory yield)
+    and exposes ``DirEntry.stat()`` without a second stat call.
+    """
     import os
 
-    yield from os.walk(projects_dir)
+    stack = [projects_dir]
+    while stack:
+        base = stack.pop()
+        try:
+            with os.scandir(base) as it:
+                for entry in it:
+                    if entry.is_dir(follow_symlinks=False):
+                        stack.append(entry.path)
+                    elif entry.is_file(follow_symlinks=False):
+                        yield entry
+        except (OSError, PermissionError):
+            continue
 
 
 def _parse_file(path: Path) -> list[MemoryEvent]:
@@ -217,14 +245,24 @@ def normalize_claude_usage(raw_usage: dict, raw_model: str | None = None) -> Sta
 def _resolve_provider(model: str | None) -> str | None:
     """Best-effort backend detection from the model name.
 
-    Heuristic only: a non-Anthropic backend reached through a proxy that
-    spoofs the model name (e.g. MiMo served as ``claude-*``) will be mislabeled.
-    A future config-based ``source_alias`` mapping resolves that — out of scope
-    for the price-free subset.
+    An explicit ``source_alias`` mapping in ``~/.bagger/config.toml`` is
+    consulted first (so a proxy that spoofs the model name — e.g. a MiMo
+    backend served as ``claude-*`` — can be labeled correctly). If no alias
+    matches, a keyword heuristic runs as a fallback.
     """
     if not model:
         return None
     m = model.lower()
+
+    # 1) Explicit config override (prefix or substring match).
+    from bagger.config import settings
+
+    for key, provider in settings.source_alias.items():
+        k = key.lower()
+        if m == k or k in m:
+            return provider
+
+    # 2) Keyword heuristic fallback.
     if m.startswith("claude") or "anthropic" in m:
         return "anthropic"
     if "xiaomi" in m or m.startswith("mimo"):

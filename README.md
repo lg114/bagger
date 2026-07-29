@@ -5,7 +5,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
-[![Tests](https://img.shields.io/badge/tests-83%20passing-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-91%20passing-brightgreen.svg)](#development)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
 
 bagger reads the JSONL transcripts that Claude Code writes to `~/.claude/projects/` and turns them into a queryable SQLite database with FTS5 full-text search and session replay. Think of it as your AI coding memory layer — with a visual memory browser on top.
@@ -110,7 +110,7 @@ The resulting `.msi` installer is fully self-contained — no Python installatio
 | `GET /api/health` | Database status, event/session counts, FTS state |
 | `GET /api/sessions?page=1&per_page=50` | Paginated session list |
 | `GET /api/sessions/{id}` | Session metadata |
-| `GET /api/sessions/{id}/events` | All events for a session (content_blocks parsed) |
+| `GET /api/sessions/{id}/events?page=1&per_page=50` | Paginated events for a session (content_blocks parsed; `per_page` clamped to 1–500) |
 | `GET /api/search?q=...&page=1` | FTS5 full-text search with snippet highlighting |
 | `GET /api/stats` | Aggregate stats (events, roles, tokens) |
 | `GET /api/stats/daily?days=30` | Daily event/token time series |
@@ -129,6 +129,11 @@ parser_source = "claude"              # default source for scan / watch
 # CORS whitelist for the REST API (loopback-only by default — the API can
 # trigger real file scans, so don't open this up casually)
 cors_origins = ["http://127.0.0.1:8723", "http://localhost:8723"]
+
+# Provider alias: override backend detection when a proxy spoofs the model
+# name. e.g. a MiMo backend served as "claude-*" would otherwise be
+# mislabeled as anthropic — register an explicit override to fix it:
+source_alias = { "claude-mimo-proxy" = "xiaomi" }
 ```
 
 ## Architecture
@@ -182,7 +187,7 @@ bagger/
 │   ├── exporters/         # Export abstractions (base, jsonl)
 │   ├── config.py          # Settings — single config entry point (~/.bagger/config.toml)
 │   └── sidecar_main.py    # PyInstaller entry for the Tauri sidecar
-├── tests/                 # pytest suite (83 tests) + fixtures/
+├── tests/                 # pytest suite (91 tests) + fixtures/
 ├── scripts/               # Build helpers (PyInstaller sidecar bundling)
 └── ui/                    # Tauri + React desktop frontend
     └── src-tauri/         # Rust shell, tray, sidecar lifecycle
@@ -222,7 +227,7 @@ From each Claude Code transcript, bagger extracts:
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -q            # 83 tests
+pytest tests/ -q            # 91 tests
 ```
 
 ### Code quality
@@ -260,6 +265,7 @@ Contributions are welcome. Before opening a PR, please read
 - [x] CJK-aware FTS search (jieba pre-tokenization + FTS5 BM25)
 - [x] Config file (`~/.bagger/config.toml`) for non-default paths
 - [x] Desktop app production build (PyInstaller sidecar + Tauri .msi)
+- [x] Robust incremental parsing & watcher state persistence (survives restart, tolerant of partial writes)
 - [ ] More exporters (Zvec, Markdown)
 - [ ] Support for more AI coding agents (parser registry is ready)
 
