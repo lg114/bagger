@@ -5,8 +5,8 @@ Auto-registers ClaudeParser on import so scanner/watcher can discover it.
 
 import logging
 
-from bagger.parser.base import Parser, ParserRegistry
-from bagger.parser.claude import ClaudeParser
+from bagger.parsers.base import Parser, ParserRegistry
+from bagger.parsers.claude import ClaudeParser
 
 logger = logging.getLogger(__name__)
 

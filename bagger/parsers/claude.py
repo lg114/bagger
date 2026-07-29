@@ -10,8 +10,8 @@ from bagger.models.event import (
     MemoryEvent,
     Role,
 )
-from bagger.parser.base import Parser as _Parser
-from bagger.parser.base import StandardUsage
+from bagger.parsers.base import Parser as _Parser
+from bagger.parsers.base import StandardUsage
 
 # ── Parser implementation ──────────────────────────────────
 

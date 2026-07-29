@@ -7,8 +7,8 @@ from click.testing import CliRunner
 
 from bagger.cli.main import cli
 from bagger.config import Settings
-from bagger.parser import ParserRegistry
-from bagger.parser.claude import ClaudeParser
+from bagger.parsers import ParserRegistry
+from bagger.parsers.claude import ClaudeParser
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -255,7 +255,7 @@ def test_commands_fail_before_init(tmp_path: Path):
 def test_scan_reports_parse_errors(tmp_path: Path):
     """``bagger scan`` should surface a parse failure instead of swallowing it."""
     _setup_env(tmp_path)
-    from bagger.parser import ParserRegistry
+    from bagger.parsers import ParserRegistry
 
     parser = ParserRegistry.get("claude")
     orig_parse = parser.parse

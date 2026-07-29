@@ -17,7 +17,7 @@ from pathlib import Path
 from bagger.config import settings
 from bagger.exporters.jsonl import JsonlExporter
 from bagger.models.event import MemoryEvent, Session
-from bagger.parser.base import Parser
+from bagger.parsers.base import Parser
 from bagger.storage.base import SessionRepository, Storage
 
 logger = logging.getLogger(__name__)

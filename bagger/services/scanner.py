@@ -15,7 +15,7 @@ from pathlib import Path
 
 from bagger.config import settings
 from bagger.models.event import WatchState
-from bagger.parser import ParserRegistry
+from bagger.parsers import ParserRegistry
 from bagger.services.sync import SyncError, SyncService
 from bagger.storage.base import Storage
 

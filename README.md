@@ -136,7 +136,7 @@ The resulting `.msi` installer is fully self-contained — no Python installatio
           ┌─────────┼─────────┐
           ▼                   ▼
     Parser Protocol     Storage Protocol
-    (parser/base.py)   (storage/base.py)
+    (parsers/base.py)   (storage/base.py)
           │                   │
           └─────────┬─────────┘
                     ▼
@@ -163,7 +163,7 @@ bagger/
 │   ├── api/               # FastAPI app + routes (health, sessions, search, stats, sync)
 │   │   └── routes/        # Route modules (health, sessions, search, stats, sync)
 │   ├── models/            # Pydantic data models (MemoryEvent, Session, WatchState)
-│   ├── parser/            # Parser protocol (base.py) + Claude Code implementation (claude.py)
+│   ├── parsers/           # Parser protocol (base.py) + Claude Code implementation (claude.py)
 │   ├── storage/           # Storage protocol (base.py) + SQLite/FTS5 implementation (sqlite.py)
 │   ├── services/          # Business logic (sync, scanner, watcher, search, replay)
 │   └── exporters/         # Export abstractions (base, jsonl)
@@ -172,7 +172,7 @@ bagger/
 └── ui/                    # Tauri + React desktop frontend
 ```
 
-Dependency flow is strictly downward: `cli`/`api` → `services` → `parser`/`storage` → `models`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full layering rules.
+Dependency flow is strictly downward: `cli`/`api` → `services` → `parsers`/`storage` → `models`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full layering rules.
 
 ## Tech stack
 

@@ -10,7 +10,7 @@ import logging
 import signal
 import time
 
-from bagger.parser import ParserRegistry
+from bagger.parsers import ParserRegistry
 from bagger.services.sync import SyncError, SyncService
 from bagger.storage.base import Storage
 

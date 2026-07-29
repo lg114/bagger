@@ -65,14 +65,13 @@ bagger/
 │   ├── cli/               # Click commands (init, scan, watch, search, ...)
 │   ├── api/               # FastAPI app + routes (health, sessions, search, stats, sync)
 │   ├── models/            # Pydantic data models (MemoryEvent, Session, WatchState)
-│   ├── parser/            # Claude Code JSONL → MemoryEvent
+│   ├── parsers/           # Claude Code JSONL → MemoryEvent
 │   ├── storage/           # SQLite + FTS5 storage layer
 │   ├── services/          # Business logic (scanner, watcher, search, replay)
 │   └── exporters/         # Export abstractions (base, jsonl)
 ├── tests/                 # pytest suite
 ├── scripts/               # Build helpers (PyInstaller sidecar bundling)
-├── ui/                    # Tauri + React desktop frontend
-└── design/                # Design specs and assets
+└── ui/                    # Tauri + React desktop frontend
 ```
 
 ### Layering rules
@@ -80,22 +79,22 @@ bagger/
 Dependencies flow **downward only**. Do not introduce upward imports:
 
 ```
-cli / api  →  services  →  parser / storage  →  models
+cli / api  →  services  →  parsers / storage  →  models
 ```
 
 - `models/` depends on nothing but pydantic.
-- `parser/` and `storage/` depend on `models/`.
-- `services/` depends on `parser/`, `storage/`, `models/`.
+- `parsers/` and `storage/` depend on `models/`.
+- `services/` depends on `parsers/`, `storage/`, `models/`.
 - `cli/` and `api/` depend on `services/` and below.
 
 If you find yourself importing `storage` from `models`, or `services` from
-`parser`, stop — the layering is wrong.
+`parsers`, stop — the layering is wrong.
 
 ## Testing
 
 - Every new feature or bug fix comes with a test.
 - Tests live in `tests/` and mirror the package layout (`test_storage.py`,
-  `test_parser.py`, `test_api.py`, ...).
+  `test_parsers.py`, `test_api.py`, ...).
 - Use the existing fixtures in `tests/conftest.py` for temp DBs and sample
   transcripts — don't roll your own.
 - API tests use FastAPI's `TestClient` (httpx-backed). No live server needed.

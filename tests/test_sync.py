@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from bagger.parser.claude import ClaudeParser
+from bagger.parsers.claude import ClaudeParser
 from bagger.services.sync import SyncError, SyncService
 from bagger.storage.sqlite import SqliteStorage
 

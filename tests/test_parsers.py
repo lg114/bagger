@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 from bagger.models.event import BlockType, Role
-from bagger.parser.claude import (
+from bagger.parsers.claude import (
     _resolve_provider,
     extract_summary,
     normalize_claude_usage,

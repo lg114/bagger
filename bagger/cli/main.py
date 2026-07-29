@@ -215,7 +215,7 @@ def doctor():
     click.echo("  " + "─" * 30)
 
     # Check Claude projects dir
-    from bagger.parser import ParserRegistry
+    from bagger.parsers import ParserRegistry
 
     claude_files = ParserRegistry.get("claude").discover_sessions()
     if claude_files:
