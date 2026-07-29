@@ -423,6 +423,68 @@ def test_watcher_skips_failed_file_after_first_error():
         _cleanup(storage, sync)
 
 
+# ── Watcher: offset persistence (P0 resume-after-restart) ──────
+
+
+def test_watcher_persists_and_resumes_offsets(tmp_path):
+    """Watcher writes offsets to state.json and resumes from it on restart.
+
+    Without persistence a crash/restart forces a full re-parse of every file
+    from byte 0. This guards the P0 fix: offsets survive process exit.
+    """
+    from bagger.services.watcher import Watcher
+
+    with _tmpdir() as tmpdir:
+        storage, _parser, sync, projects_dir = _make_stack(tmpdir)
+        path = _write_session(projects_dir, "sess-1", n_events=1)
+        state_path = tmp_path / "state.json"
+
+        # First watcher syncs once, then persists.
+        w1 = Watcher(storage, source="claude", state_path=state_path)
+        w1._offsets["sess-1"] = path.stat().st_size
+        w1._persist_offsets()
+        w1.close()
+
+        assert state_path.exists()
+        import json as _json
+
+        saved = _json.loads(state_path.read_text(encoding="utf-8"))
+        assert saved["sessions"]["sess-1"] == path.stat().st_size
+
+        # A fresh watcher with the same state path should resume from disk.
+        w2 = Watcher(storage, source="claude", state_path=state_path)
+        assert w2._offsets.get("sess-1") == path.stat().st_size
+        w2.close()
+
+        _cleanup(storage, sync)
+
+
+# ── Parser: skip entries without uuid / sessionId (P0) ────────
+
+
+def test_parse_entry_skips_empty_identifiers():
+    """_parse_entry returns None when uuid or sessionId is missing/empty.
+
+    These are used as storage keys and the DB rejects empty identifiers
+    (UNIQUE NOT NULL). Skipping silently keeps a single malformed line from
+    aborting the whole file's sync.
+    """
+    from bagger.parsers.claude import _parse_entry
+
+    assert _parse_entry({"type": "user", "uuid": "", "sessionId": "s1"}) is None
+    assert _parse_entry({"type": "user", "uuid": "e1", "sessionId": ""}) is None
+    assert _parse_entry({"type": "user"}) is None
+    # A well-formed entry still parses.
+    good = {
+        "type": "user",
+        "uuid": "e1",
+        "sessionId": "s1",
+        "timestamp": "2026-06-30T06:00:00.000Z",
+        "message": {"role": "user", "content": "hi"},
+    }
+    assert _parse_entry(good) is not None
+
+
 # ── Watcher: resource release (leak fix) ───────────────────────
 
 

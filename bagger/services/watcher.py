@@ -6,15 +6,34 @@ module is the polling driver: it discovers session files and delegates
 each file to ``SyncService``.
 """
 
+import json
 import logging
 import signal
 import time
+from pathlib import Path
 
+from bagger.config import settings
+from bagger.models.event import WatchState
 from bagger.parsers import ParserRegistry
 from bagger.services.sync import SyncError, SyncService
 from bagger.storage.base import Storage
 
 logger = logging.getLogger(__name__)
+
+
+def _load_state(path: Path) -> WatchState:
+    if not path.exists():
+        return WatchState()
+    try:
+        return WatchState(**json.loads(path.read_text(encoding="utf-8")))
+    except Exception:
+        logger.warning("Could not read watch state %s; starting fresh", path, exc_info=True)
+        return WatchState()
+
+
+def _save_state(state: WatchState, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(state.model_dump_json(indent=2), encoding="utf-8")
 
 
 class Watcher:
@@ -23,20 +42,31 @@ class Watcher:
     Each poll cycle discovers session files via ``ParserRegistry`` and
     delegates per-file syncing to ``SyncService``.  Adding a new AI tool
     source only requires registering a new Parser — no watcher changes.
+
+    Offsets are persisted to ``state.json`` (mirroring the scanner) so a
+    crash or restart resumes incrementally instead of re-parsing every file
+    from byte 0.
     """
 
     def __init__(
         self,
         storage: Storage,
         source: str = "claude",
+        state_path: Path | None = None,
+        save_interval: float = 5.0,
     ):
         self.storage = storage
         self.parser = ParserRegistry.get(source)
         self._sync = SyncService(storage, self.parser)
-        self._offsets: dict[str, int] = {}
+        self._state_path = state_path or settings.state_path
+        # Resume from persisted offsets; live updates happen in ``_poll``.
+        self._state = _load_state(self._state_path)
+        self._offsets: dict[str, int] = self._state.sessions
         self._failed: set[str] = set()
         self._running = False
         self._closed = False
+        self._last_save = 0.0
+        self._save_interval = save_interval
 
     def watch(self, interval: float = 1.0) -> None:
         """Start watching. Runs until stopped via SIGINT/SIGTERM or Ctrl+C."""
@@ -52,6 +82,7 @@ class Watcher:
             while self._running:
                 try:
                     self._poll()
+                    self._maybe_persist_offsets()
                     time.sleep(interval)
                 except KeyboardInterrupt:
                     break
@@ -61,6 +92,7 @@ class Watcher:
             # Always release the exporter file handle, even when interrupted.
             # Without this the watcher leaks the handle for its entire
             # (long-running) lifetime.
+            self._persist_offsets()
             self.close()
             print("\nWatcher stopped.")
 
@@ -109,6 +141,23 @@ class Watcher:
                     session_id = filepath.stem
                     print(f'  [new] session {session_id[:8]} "{summary}"')
                 print(f"    +{result.new_count} events synced")
+
+    # -- offset persistence --------------------------------------
+
+    def _maybe_persist_offsets(self) -> None:
+        """Persist offsets at most every ``save_interval`` seconds."""
+        now = time.monotonic()
+        if now - self._last_save >= self._save_interval:
+            self._persist_offsets()
+            self._last_save = now
+
+    def _persist_offsets(self) -> None:
+        """Atomically save current offsets to ``state.json``."""
+        self._state.sessions = self._offsets
+        try:
+            _save_state(self._state, self._state_path)
+        except OSError:
+            logger.warning("Failed to persist watch state %s", self._state_path, exc_info=True)
 
     def _on_stop(self, signum, frame):
         self._running = False

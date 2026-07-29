@@ -288,6 +288,11 @@ class SqliteSessionRepository:
             ),
         )
         self._conn.commit()
+        # Single-point write: commit immediately so direct callers
+        # (CLI, tests, one-off upserts) see their session persisted without
+        # having to remember to commit. ``SyncService.sync_file`` additionally
+        # commits at the end to bundle the events + edges + session into one
+        # transaction for batch imports.
 
     def session_exists(self, session_id: str) -> bool:
         return (
@@ -466,7 +471,7 @@ class SqliteEventRepository:
         after = self._conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         return after - before
 
-    def get_session_events(self, session_id: str, context: int = 0) -> list[dict]:
+    def get_session_events(self, session_id: str) -> list[dict]:
         rows = self._conn.execute(
             f"SELECT {EVENT_DETAIL_COLS} FROM events WHERE session_id = ? ORDER BY timestamp",
             (session_id,),
@@ -1058,8 +1063,8 @@ class SqliteStorage:
     def insert_events(self, events: list[MemoryEvent]) -> int:
         return self._events.insert_events(events)  # type: ignore[union-attr]
 
-    def get_session_events(self, session_id: str, context: int = 0) -> list[dict]:
-        return self._events.get_session_events(session_id, context)  # type: ignore[union-attr]
+    def get_session_events(self, session_id: str) -> list[dict]:
+        return self._events.get_session_events(session_id)  # type: ignore[union-attr]
 
     def get_stats(self) -> dict:
         return self._events.get_stats()  # type: ignore[union-attr]

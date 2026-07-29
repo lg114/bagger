@@ -210,7 +210,15 @@ def _resolve_provider(model: str | None) -> str | None:
 
 
 def _parse_entry(raw: dict) -> MemoryEvent | None:
-    """Parse a single JSONL entry into a MemoryEvent."""
+    """Parse a single JSONL entry into a MemoryEvent.
+
+    Returns ``None`` for entries without a usable ``uuid`` / ``sessionId`` —
+    bagger keys events and sessions on these, and the storage layer rejects
+    empty identifiers (UNIQUE NOT NULL). Skipping here keeps a single malformed
+    line from aborting the whole file's sync.
+    """
+    if not raw.get("uuid") or not raw.get("sessionId"):
+        return None
     entry_type = raw["type"]
     msg = raw.get("message", {})
     role_str = msg.get("role", entry_type)

@@ -167,6 +167,13 @@ class SyncService:
         if upsert_always or new_count > 0:
             upsert_session_from_events(self.storage, self.parser, session_id, filepath, events)
 
+        # Single commit per file: events (insert_events already committed),
+        # event edges (upsert_event_edges already committed), and the session
+        # metadata upsert above. Keeping this here — rather than committing
+        # inside each repo method — bounds writes to one transaction per file
+        # and lets a full scan scale instead of fsyncing per session.
+        self.storage.conn.commit()
+
         offsets[session_id] = file_size
         return SyncResult(
             new_count=new_count,

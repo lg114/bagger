@@ -31,8 +31,8 @@ class ContentBlock(BaseModel):
 class MemoryEvent(BaseModel):
     """A normalized conversation event from any AI coding tool."""
 
-    event_id: str
-    session_id: str
+    event_id: str = Field(pattern=r"\S")  # at least one non-whitespace char
+    session_id: str = Field(pattern=r"\S")
     parent_event_id: str | None = None
     timestamp: datetime
     role: Role

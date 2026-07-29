@@ -5,6 +5,8 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from bagger.models.event import (
     BlockType,
     ContentBlock,
@@ -703,5 +705,32 @@ def test_reconcile_event_edges_detects_inconsistency():
         report = storage.reconcile_event_edges()
         assert report["consistent"] is False
         assert report["dangling_parent_count"] >= 1
+
+        storage.close()
+
+
+def test_memory_event_rejects_empty_identifiers():
+    """MemoryEvent requires non-empty event_id and session_id (P0 guard).
+
+    Empty keys would hit the storage layer's UNIQUE NOT NULL constraint and
+    abort a batch insert; rejecting at the model boundary fails fast and
+    close to the source.
+    """
+    import pydantic
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        for bad in ("", "   "):
+            with pytest.raises(pydantic.ValidationError):
+                _make_event(event_id=bad)
+            with pytest.raises(pydantic.ValidationError):
+                _make_event(session_id=bad)
+
+        # Non-empty still works end-to-end.
+        storage.insert_event(_make_event())
+        assert storage.get_event_count("sess-1") == 1
 
         storage.close()
