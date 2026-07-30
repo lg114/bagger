@@ -32,6 +32,10 @@ class ClaudeParser(_Parser):
     def source_name(self) -> str:
         return self.SOURCE_NAME
 
+    def watch_root(self) -> Path:
+        """Watch the projects dir recursively for new/changed transcripts."""
+        return self.PROJECTS_DIR
+
     def discover_sessions(self) -> list[Path]:
         """Yield all valid JSONL files, excluding agent-* and warmup.
 

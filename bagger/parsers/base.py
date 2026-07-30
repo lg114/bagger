@@ -34,10 +34,28 @@ class Parser(ABC):
     """
 
     @property
+    @property
     @abstractmethod
     def source_name(self) -> str:
         """Unique identifier, e.g. 'claude', 'cursor'."""
         ...
+
+    def watch_root(self) -> "Path | None":
+        """Base directory to watch for transcript changes, or ``None`` if the
+        source cannot be watched incrementally (e.g. discovery spans many
+        unrelated roots).
+
+        The watcher (``bagger.services.watcher``) uses this to install a
+        filesystem observer on the correct directory instead of re-scanning
+        every poll cycle. Concrete parsers that know their single base dir
+        (Claude Code's ``~/.claude/projects``) override this; parsers whose
+        discovery is ad-hoc return ``None`` and the watcher falls back to a
+        periodic full re-scan.
+
+        This is a concrete method (not abstract) so existing parsers keep
+        working without changes.
+        """
+        return None
 
     @abstractmethod
     def discover_sessions(self) -> list[Path]:

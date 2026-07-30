@@ -102,23 +102,25 @@ def scan(storage, full, source):
 
 
 @cli.command()
-@click.option("--interval", default=1.0, help="Polling interval in seconds")
+@click.option("--debounce", default=0.5, help="Coalesce bursts within this many seconds")
+@click.option(
+    "--rescan", default=60, help="Periodic re-scan safety-net, seconds (0=off; default 60)"
+)
 @click.option("--source", default=None, help="Limit to one source (default: all registered)")
 @require_db()
 @with_storage
-def watch(storage, interval, source):
+def watch(storage, debounce, rescan, source):
     """Watch all registered AI tool transcript sources and sync new events live.
 
-    Omit --source to watch every registered parser (multi-tool support); pass
-    --source claude (etc.) to limit to a single tool.
+    Uses a filesystem observer (watchdog) so transcripts are synced the moment
+    they change on disk — no per-second directory scan. Omit --source to watch
+    every registered parser (multi-tool support); pass --source claude (etc.) to
+    limit to a single tool.
     """
-    from bagger.services.scanner import scan_all
     from bagger.services.watcher import Watcher
 
-    # Quick scan to catch up, then watch
-    scan_all(storage, full=False, source=source)
     with Watcher(storage, source=source) as watcher:
-        watcher.watch(interval=interval)
+        watcher.watch(debounce=debounce, rescan_interval=rescan)
 
 
 # ── search ──────────────────────────────────────────────────

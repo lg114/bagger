@@ -733,3 +733,175 @@ def test_offset_keys_are_source_scoped():
         assert sess["claude:shared"] == claude_size
         assert sess["chatgpt:shared"] == cg_size
         _cleanup(storage, sync)
+
+
+# ── Watcher: event-driven (watchdog) ────────────────────────
+
+
+def test_watcher_handler_filters_non_transcript_files():
+    """Handler only enqueues .jsonl transcripts, ignoring agent-/warmup/non-jsonl."""
+    import queue
+
+    from bagger.services.watcher import _JsonlWatchHandler
+
+    handler = _JsonlWatchHandler(parser=None, wake_queue=queue.Queue(), debounce=0.5)
+
+    def ev(name, is_dir=False):
+        return type("E", (), {"is_directory": is_dir, "src_path": name})()
+
+    handler.on_created(ev("session-1.jsonl"))
+    handler.on_modified(ev("notes.txt"))  # ignored: not .jsonl
+    handler.on_modified(ev("agent-session.jsonl"))  # ignored: agent- prefix
+    handler.on_modified(ev("warmup-abc.jsonl"))  # ignored: warmup
+    handler.on_created(ev("dir", is_dir=True))  # ignored: directory
+
+    # Only the one real transcript path remains pending.
+    assert [p.name for p in handler._pending] == ["session-1.jsonl"]
+
+
+def test_watcher_debounce_coalesces_rapid_bursts(monkeypatch):
+    """Ten events within the debounce window collapse to a single sync."""
+    from bagger.services.watcher import Watcher, _JsonlWatchHandler
+
+    with _tmpdir() as tmpdir:
+        storage, _parser, sync, projects_dir = _make_stack(tmpdir)
+        watcher = Watcher(storage, source="claude")
+        path = projects_dir / "projhash" / "sess-1.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_line(_USER_LINE, 1, None) + "\n", encoding="utf-8")
+
+        # Freeze time BEFORE the burst so stored timestamps are deterministic.
+        clock = {"t": 1000.0}
+        monkeypatch.setattr("bagger.services.watcher.time.monotonic", lambda: clock["t"])
+
+        handler = _JsonlWatchHandler(watcher._syncs["claude"].parser, watcher._wake, debounce=1.0)
+        watcher._handlers = [handler]
+
+        # Simulate a live session writing the file 10 times in a burst.
+        def ev():
+            return type("E", (), {"is_directory": False, "src_path": str(path)})()
+
+        for _ in range(10):
+            handler.on_modified(ev())
+        assert len(handler._pending) == 1  # coalesced to one path
+
+        # Still inside the debounce window: nothing is due yet.
+        assert watcher._drain_pending() == 0
+
+        # Advance past the debounce window: exactly one sync for the burst.
+        clock["t"] += 2.0
+        assert watcher._drain_pending() == 1
+
+        watcher.close()
+        _cleanup(storage, sync)
+
+
+def _wait_until(predicate, timeout: float = 20.0, step: float = 0.1) -> None:
+    """Spin until ``predicate()`` is truthy or ``timeout`` elapses."""
+    import time as _time
+
+    deadline = _time.time() + timeout
+    while _time.time() < deadline:
+        if predicate():
+            return
+        _time.sleep(step)
+    raise AssertionError(f"condition not met within {timeout}s")
+
+
+def test_watcher_event_driven_syncs_new_and_appended_file():
+    """A new file + an append are picked up via filesystem events (no polling)."""
+    pytest.importorskip("watchdog")
+    import threading
+
+    from bagger.parsers import ParserRegistry
+    from bagger.parsers.claude import ClaudeParser
+    from bagger.services.watcher import Watcher
+    from bagger.storage.sqlite import SqliteStorage
+
+    with _tmpdir() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+        projects_dir = Path(tmpdir) / "projects"
+        projects_dir.mkdir()
+
+        saved = dict(ParserRegistry._parsers)
+        ParserRegistry._parsers.clear()
+        ParserRegistry.register(ClaudeParser(projects_dir=projects_dir))
+
+        watcher = None
+        thread = None
+        try:
+            # state_path kept in the temp dir so the watcher doesn't touch the
+            # real ~/.bagger. (The JSONL exporter uses the default settings path,
+            # matching the other watcher tests in this file.)
+            watcher = Watcher(storage, source="claude", state_path=Path(tmpdir) / "state.json")
+            thread = threading.Thread(target=watcher.watch, kwargs={"interval": 0.1}, daemon=True)
+            thread.start()
+            import time as _time
+
+            _time.sleep(2.0)  # let the observer spin up
+
+            # 1) A brand-new transcript file should be synced via a 'created' event.
+            path = _write_session(projects_dir, "sess-1", n_events=2)
+            _wait_until(lambda: storage.get_event_count("sess-1") >= 2, timeout=20)
+            assert storage.get_event_count("sess-1") == 2
+
+            # 2) Appending more lines should sync incrementally via 'modified' events.
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(_line(_USER_LINE, 3, 2) + "\n")
+                f.write(_line(_ASSISTANT_LINE, 4, 3) + "\n")
+            _wait_until(lambda: storage.get_event_count("sess-1") >= 4, timeout=20)
+            assert storage.get_event_count("sess-1") == 4
+        finally:
+            if watcher is not None:
+                watcher._running = False
+            if thread is not None:
+                thread.join(timeout=5)
+            ParserRegistry._parsers.clear()
+            ParserRegistry._parsers.update(saved)
+            if watcher is not None:
+                watcher.close()
+            storage.close()
+            gc.collect()
+
+
+def test_watcher_exits_when_watchdog_missing(monkeypatch):
+    """Without watchdog, `watch` must fail loudly (SystemExit), not silently poll.
+
+    Regression guard for the hardening: a missing core dependency used to degrade
+    silently to the periodic re-scan (up to 300s staleness) with only a logged
+    error. Now it must refuse to run so the user notices the broken install.
+    """
+    import bagger.services.watcher as wmod
+
+    monkeypatch.setattr(wmod, "Observer", None)
+
+    from bagger.parsers import ParserRegistry
+    from bagger.parsers.claude import ClaudeParser
+    from bagger.services.watcher import Watcher
+    from bagger.storage.sqlite import SqliteStorage
+
+    with _tmpdir() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+        projects_dir = Path(tmpdir) / "projects"
+        projects_dir.mkdir()
+
+        saved = dict(ParserRegistry._parsers)
+        ParserRegistry._parsers.clear()
+        ParserRegistry.register(ClaudeParser(projects_dir=projects_dir))
+        try:
+            # watch() raises before entering the event loop, so calling it
+            # directly (main thread) is sufficient to observe the hard fail.
+            with (
+                pytest.raises(SystemExit),
+                Watcher(storage, source="claude", state_path=Path(tmpdir) / "state.json") as w,
+            ):
+                w.watch(interval=0.1)
+        finally:
+            ParserRegistry._parsers.clear()
+            ParserRegistry._parsers.update(saved)
+            storage.close()
+            gc.collect()
