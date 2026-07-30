@@ -95,6 +95,12 @@ CREATE TABLE IF NOT EXISTS event_edges (
 );
 
 CREATE INDEX IF NOT EXISTS idx_event_edges_session ON event_edges(session_id);
+
+-- Covering index for time-series aggregates (get_daily_stats): the GROUP BY is on
+-- substr(timestamp,1,10) and the SUMs read token_input/token_output, so a single
+-- index-only scan serves the dashboard query with no table lookups or temp sort.
+CREATE INDEX IF NOT EXISTS idx_events_date
+    ON events(substr(timestamp, 1, 10), token_input, token_output);
 """
 
 FTS_SCHEMA = """
@@ -1006,6 +1012,12 @@ class SqliteStorage:
             self._conn.execute("PRAGMA journal_mode=DELETE")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.execute("PRAGMA busy_timeout=5000")
+        # NORMAL under WAL is the recommended safe+fast combo: fsync is skipped on
+        # each write (WAL checkpoint still guarantees durability against app crashes;
+        # only a power/OS crash could lose the last <1s of committed writes). This
+        # roughly halves write latency, which matters because the watcher appends
+        # events continuously.
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(SCHEMA)
         # Drop legacy FTS auto-insert trigger — we now insert tokenized text
         # manually so that CJK queries benefit from FTS5 indexing.

@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Query
 
 from bagger.api.dependencies import get_storage
+from bagger.storage.cache import ttl_get
 
 router = APIRouter()
 
@@ -11,7 +12,9 @@ router = APIRouter()
 def get_stats() -> dict:
     """Aggregate statistics: event counts, role distribution, token totals."""
     with get_storage() as storage:
-        s = storage.get_stats()
+        # 5s TTL: six full-table aggregates, safe to serve slightly stale. Keyed by
+        # db path so multiple databases never share a cached result.
+        s = ttl_get(f"stats:get_stats:{storage.db_path}", 5.0, storage.get_stats)
     return {
         "total_sessions": s["total_sessions"],
         "total_events": s["total_events"],
@@ -31,7 +34,9 @@ def get_daily_stats(
 ) -> dict:
     """Daily event and token counts for charting."""
     with get_storage() as storage:
-        rows = storage.get_daily_stats(days=days)
+        rows = ttl_get(
+            f"stats:daily:{days}:{storage.db_path}", 5.0, lambda: storage.get_daily_stats(days=days)
+        )
     return {"data": rows, "meta": {"days": days}}
 
 
@@ -41,5 +46,9 @@ def get_tool_usage(
 ) -> dict:
     """Most frequently used tools."""
     with get_storage() as storage:
-        rows = storage.get_tool_usage_stats(limit=limit)
+        rows = ttl_get(
+            f"stats:tools:{limit}:{storage.db_path}",
+            5.0,
+            lambda: storage.get_tool_usage_stats(limit=limit),
+        )
     return {"data": rows, "meta": {"limit": limit}}
