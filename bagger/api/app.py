@@ -5,26 +5,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from bagger import __version__
-from bagger.api.dependencies import set_shared_storage
 from bagger.api.routes import health, search, sessions, stats, sync
-from bagger.storage import create_storage
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Open a single shared DB connection for the app's lifetime.
+    """Application lifespan.
 
-    One connection is created at startup and reused by every request handler
-    (see :func:`bagger.api.dependencies.get_storage`), removing the
-    per-request connect/close overhead. It is closed on shutdown.
+    The API opens a fresh SQLite connection per request (see
+    :func:`bagger.api.dependencies.get_storage`), so no app-lifetime connection
+    is required. This hook is kept for future startup/shutdown instrumentation.
     """
-    storage = create_storage()
-    set_shared_storage(storage)
-    try:
-        yield
-    finally:
-        set_shared_storage(None)
-        storage.close()
+    yield
 
 
 def create_app() -> FastAPI:

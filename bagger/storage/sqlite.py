@@ -489,12 +489,17 @@ class SqliteEventRepository:
     def _insert_fts(self, event: MemoryEvent) -> None:
         """Insert tokenized text into the FTS5 index for this event.
 
-        Uses delete-before-insert per event_id for idempotency (same pattern
-        as ``_insert_tool_uses``).
+        Uses delete-before-insert keyed on the composite ``(event_id, source)``
+        for idempotency (same pattern as ``_insert_tool_uses``). Keying on
+        ``source`` too prevents a re-scan from deleting a different tool's FTS
+        row when two tools share an event uuid.
         """
         raw_text = _extract_text(event)
         fts_text = _tokenize_for_fts(raw_text)
-        self._conn.execute("DELETE FROM events_fts WHERE event_id = ?", (event.event_id,))
+        self._conn.execute(
+            "DELETE FROM events_fts WHERE event_id = ? AND source = ?",
+            (event.event_id, event.source),
+        )
         self._conn.execute(
             "INSERT INTO events_fts(content_text, session_id, event_id, source) "
             "VALUES (?, ?, ?, ?)",
@@ -510,14 +515,62 @@ class SqliteEventRepository:
         self._conn.commit()
 
     def insert_events(self, events: list[MemoryEvent]) -> int:
-        """Batch insert events. Returns count of new events inserted."""
+        """Batch insert events + their tool_uses / FTS rows in a few statements.
+
+        Previously each event ran its own DELETE+INSERT for ``tool_uses`` and
+        ``events_fts`` (4N round-trips for N events). We now collect all rows
+        and issue a single ``executemany`` per table, then commit once — roughly
+        4N → 3 statements for a large import. The deletes key on the composite
+        ``(event_id, source)`` so two tools sharing a uuid stay isolated.
+        Returns the count of new events inserted.
+        """
         params = [self._event_params(e) for e in events]
         before = self._conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         self._conn.executemany(_INSERT_EVENT_SQL, params)
-        self._conn.commit()
+
+        tu_rows: list[tuple] = []
+        fts_rows: list[tuple] = []
         for e in events:
-            self._insert_tool_uses(e)
-            self._insert_fts(e)
+            for b in e.content_blocks:
+                if b.block_type == BlockType.TOOL_USE:
+                    tu_rows.append(
+                        (
+                            e.event_id,
+                            b.tool_name or "unknown",
+                            b.tool_id or "",
+                            json.dumps(b.tool_input or {}, ensure_ascii=False),
+                            e.source,
+                        )
+                    )
+            fts_rows.append(
+                (
+                    _tokenize_for_fts(_extract_text(e)),
+                    e.session_id,
+                    e.event_id,
+                    e.source,
+                )
+            )
+
+        if tu_rows:
+            self._conn.executemany(
+                "DELETE FROM tool_uses WHERE event_id = ? AND source = ?",
+                [(r[0], r[4]) for r in tu_rows],
+            )
+            self._conn.executemany(
+                "INSERT INTO tool_uses(event_id, tool_name, tool_id, tool_input_json, source) "
+                "VALUES (?, ?, ?, ?, ?)",
+                tu_rows,
+            )
+        if fts_rows:
+            self._conn.executemany(
+                "DELETE FROM events_fts WHERE event_id = ? AND source = ?",
+                [(r[2], r[3]) for r in fts_rows],
+            )
+            self._conn.executemany(
+                "INSERT INTO events_fts(content_text, session_id, event_id, source) "
+                "VALUES (?, ?, ?, ?)",
+                fts_rows,
+            )
         self._conn.commit()
         after = self._conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         return after - before
@@ -764,12 +817,21 @@ class SqliteSearchIndex:
             count_params.append(source)
         total = self._conn.execute(count_sql, count_params).fetchone()[0]
 
+        # NOTE: the JOIN must match on (source, event_id), not just event_id.
+        # Under multi-source, two different tools can emit the same event uuid;
+        # joining on event_id alone would cross-wire rows between sources and can
+        # surface a different tool's event for a given search hit.
+        #
+        # bm25(events_fts) uses equal per-column weights so ranking reflects
+        # content_text matches (the only indexed, searchable column). The prior
+        # bm25(events_fts, 0.0, 10.0, 5.0) set the content_text (column 0) weight
+        # to 0.0, so results were effectively ordered by rowid — i.e. no relevance.
         sql = (
             f"SELECT {EVENT_COLS}, "
             f"snippet(events_fts, 0, '<mark>', '</mark>', '...', 32) as snippet, "
-            f"bm25(events_fts, 0.0, 10.0, 5.0) as rank "
+            f"bm25(events_fts) as rank "
             f"FROM events_fts fts "
-            f"JOIN events e ON e.event_id = fts.event_id "
+            f"JOIN events e ON e.source = fts.source AND e.event_id = fts.event_id "
             f"LEFT JOIN sessions s ON s.source = e.source AND s.id = e.session_id "
             f"WHERE events_fts MATCH ?"
         )
@@ -929,10 +991,13 @@ class SqliteStorage:
     def connect(self) -> None:
         """Open the SQLite database, apply schema, and wire repositories."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        # check_same_thread=False: the API shares this single connection across
-        # FastAPI's worker threads (sync endpoints run in a threadpool). WAL mode
-        # (set below) keeps concurrent reads safe; writes serialize at the file
-        # level. The CLI is single-threaded, so this has no effect there.
+        # check_same_thread=False + busy_timeout=5000: SQLite connections are not
+        # safe to share across threads, so the API opens a *fresh* connection per
+        # request (see bagger.api.dependencies.get_storage) rather than reusing
+        # one. Under WAL + busy_timeout, separate connections safely allow
+        # concurrent readers and a single writer on the same database file, and
+        # busy_timeout retries instead of raising "database is locked". The CLI is
+        # single-threaded, so this has no effect there.
         self._conn = sqlite3.connect(str(self.db_path.resolve()), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         try:
@@ -940,6 +1005,7 @@ class SqliteStorage:
         except sqlite3.OperationalError:
             self._conn.execute("PRAGMA journal_mode=DELETE")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.executescript(SCHEMA)
         # Drop legacy FTS auto-insert trigger — we now insert tokenized text
         # manually so that CJK queries benefit from FTS5 indexing.

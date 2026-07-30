@@ -496,12 +496,14 @@ def test_cors_is_locked_not_wildcard():
         assert "access-control-allow-origin" not in bad.headers
 
 
-def test_lifespan_shares_one_storage_instance():
-    """The app lifespan opens a single Storage reused across requests.
+def test_lifespan_per_request_storage_isolated():
+    """Each request gets its own Storage connection (not a shared singleton).
 
-    Verifies the per-request reconnect fix: two ``get_storage()`` calls inside
-    the running app yield the SAME instance (so handlers don't open/close the
-    DB on every request).
+    SQLite connections are not safe to share across threads, and FastAPI runs
+    sync endpoints in a threadpool. We open a fresh connection per request so
+    concurrent requests never touch the same connection object. Lock this in:
+    two ``get_storage()`` calls yield DISTINCT, connected instances, and real
+    requests still succeed.
     """
     from fastapi.testclient import TestClient
 
@@ -513,10 +515,14 @@ def test_lifespan_shares_one_storage_instance():
         config.settings = Settings(bagger_dir=td)
 
         app = create_app()
-        with TestClient(app) as client:  # triggers lifespan -> shared storage
+        with TestClient(app) as client:  # triggers lifespan
             with get_storage() as s1, get_storage() as s2:
-                assert s1 is s2
+                # Distinct instances — never the same connection object.
+                assert s1 is not s2
+                # Both are usable / connected.
+                assert s1.get_stats()["total_events"] == 0
+                assert s2.get_stats()["total_events"] == 0
 
-            # A real request also hits the same shared instance.
+            # A real request still works end-to-end.
             resp = client.get("/api/health")
             assert resp.status_code == 200
