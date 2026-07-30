@@ -1,5 +1,6 @@
 """Repository protocols — services depend on these, not on concrete storage."""
 
+from contextlib import AbstractContextManager
 from typing import Protocol, runtime_checkable
 
 from bagger.models.event import MemoryEvent, Session
@@ -89,4 +90,26 @@ class Storage(SessionRepository, EventRepository, SearchIndex, Protocol):
 
     def close(self) -> None:
         """Close the underlying connection. Safe to call multiple times."""
+        ...
+
+    def bulk_write(self, commit_every: int = 50) -> AbstractContextManager[None]:
+        """Context manager that batches commits across many writes.
+
+        While active, repo-level commits are deferred and flushed only every
+        ``commit_every`` write units (caller invokes ``flush()`` between units,
+        e.g. once per file) plus once on exit. Turns hundreds of per-file
+        transactions (a large import) into a handful.
+
+        Implementations may ignore nested bulk contexts — the outermost controls
+        cadence.
+        """
+        ...
+
+    def flush(self) -> None:
+        """Commit point for the caller after each write unit (e.g. one file).
+
+        Outside a ``bulk_write`` context this commits immediately (per-file
+        durability for incremental watchers). Inside bulk mode it commits only
+        every ``commit_every`` units, deferring the rest.
+        """
         ...

@@ -190,12 +190,12 @@ class SyncService:
                 self.storage, self.parser, source, session_id, filepath, events
             )
 
-        # Single commit per file: events (insert_events already committed),
-        # event edges (upsert_event_edges already committed), and the session
-        # metadata upsert above. Keeping this here — rather than committing
-        # inside each repo method — bounds writes to one transaction per file
-        # and lets a full scan scale instead of fsyncing per session.
-        self.storage.conn.commit()
+        # Commit point for this file. Outside a ``bulk_write`` context (the
+        # incremental watcher) this commits immediately, preserving per-file
+        # durability. Inside a bulk context (full re-scan) it is batched — the
+        # deferred repo commits accumulate and ``flush()`` only fsyncs every N
+        # files, collapsing hundreds of per-file transactions into a handful.
+        self.storage.flush()
 
         offsets[offset_key] = file_size
         return SyncResult(

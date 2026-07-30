@@ -29,6 +29,7 @@ def scan_all(
     full: bool = False,
     state_path: Path | None = None,
     jsonl_path: Path | None = None,
+    commit_every: int = 50,
 ) -> dict:
     """Scan all sessions from registered parser source(s) and import events.
 
@@ -43,6 +44,9 @@ def scan_all(
         full: If True, reprocess all files from scratch.
         state_path: Path to watch state JSON file for incremental mode.
         jsonl_path: Path for JSONL exporter backup.
+        commit_every: Batch size for the bulk transaction — commits at most once
+            per this many files (see ``Storage.bulk_write``). Larger = faster for
+            huge imports, at the cost of coarser crash-recovery granularity.
 
     Returns:
         Stats dict with counts, including an ``errors`` key for files that
@@ -57,23 +61,28 @@ def scan_all(
     state = _load_state(state_path) if not full else WatchState()
     stats = {"sessions": 0, "events": 0, "skipped": 0, "errors": 0}
 
-    for parser in parsers:
-        sync = SyncService(storage, parser, jsonl_path=jsonl_path)
-        files = parser.discover_sessions()
-        for filepath in files:
-            try:
-                result = sync.sync_file(filepath, state.sessions, full=full, upsert_always=True)
-            except SyncError as exc:
-                stats["errors"] += 1
-                logger.error("Skipping %s during scan: %s", exc.filepath, exc.error)
-                continue
-            if result.skipped:
-                stats["skipped"] += 1
-                continue
-            if result.new_count > 0:
-                stats["sessions"] += 1
-                stats["events"] += result.new_count
-        sync.close()
+    # Batch the whole scan into a few transactions instead of one-per-file:
+    # ``bulk_write`` defers repo commits and ``sync_file`` calls ``flush()`` after
+    # each file, so we only fsync every ``commit_every`` files (plus a final flush
+    # on exit). The incremental watcher does NOT use this and commits per file.
+    with storage.bulk_write(commit_every=commit_every):
+        for parser in parsers:
+            sync = SyncService(storage, parser, jsonl_path=jsonl_path)
+            files = parser.discover_sessions()
+            for filepath in files:
+                try:
+                    result = sync.sync_file(filepath, state.sessions, full=full, upsert_always=True)
+                except SyncError as exc:
+                    stats["errors"] += 1
+                    logger.error("Skipping %s during scan: %s", exc.filepath, exc.error)
+                    continue
+                if result.skipped:
+                    stats["skipped"] += 1
+                    continue
+                if result.new_count > 0:
+                    stats["sessions"] += 1
+                    stats["events"] += result.new_count
+            sync.close()
 
     _save_state(state, state_path)
     return stats

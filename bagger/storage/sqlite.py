@@ -281,8 +281,9 @@ _INSERT_EVENT_SQL = """INSERT INTO events
 class SqliteSessionRepository:
     """Session CRUD backed by a shared SQLite connection."""
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection, commit_fn):
         self._conn = conn
+        self._commit = commit_fn
 
     def upsert_session(self, session: Session) -> None:
         self._conn.execute(
@@ -316,12 +317,11 @@ class SqliteSessionRepository:
                 session.compaction_of,
             ),
         )
-        self._conn.commit()
+        self._commit()
         # Single-point write: commit immediately so direct callers
         # (CLI, tests, one-off upserts) see their session persisted without
-        # having to remember to commit. ``SyncService.sync_file`` additionally
-        # commits at the end to bundle the events + edges + session into one
-        # transaction for batch imports.
+        # having to remember to commit. During a ``bulk_write`` context the
+        # commit is deferred and flushed in batches by the caller's ``flush()``.
 
     def session_exists(self, session_id: str, source: str | None = None) -> bool:
         if source is not None:
@@ -439,8 +439,9 @@ class SqliteSessionRepository:
 class SqliteEventRepository:
     """Event storage + stats backed by a shared SQLite connection."""
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection, commit_fn):
         self._conn = conn
+        self._commit = commit_fn
 
     # -- helpers --------------------------------------------------
 
@@ -526,7 +527,7 @@ class SqliteEventRepository:
         self._conn.execute(_INSERT_EVENT_SQL, self._event_params(event))
         self._insert_tool_uses(event)
         self._insert_fts(event)
-        self._conn.commit()
+        self._commit()
 
     def insert_events(self, events: list[MemoryEvent]) -> int:
         """Batch insert events + their tool_uses / FTS rows in a few statements.
@@ -585,7 +586,7 @@ class SqliteEventRepository:
                 "VALUES (?, ?, ?, ?)",
                 fts_rows,
             )
-        self._conn.commit()
+        self._commit()
         after = self._conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         return after - before
 
@@ -994,11 +995,73 @@ class SqliteStorage:
         # explicit and bounded.
         self._write_lock = threading.Lock()
 
+        # Bulk-write transaction batching (see ``bulk_write`` / ``flush``).
+        # While ``_bulk_active`` is True, repo-level commits are deferred (no-op)
+        # and the caller flushes every ``_bulk_every`` write units via ``flush()``.
+        self._bulk_active = False
+        self._bulk_every = 0
+        self._bulk_count = 0
+
     @contextlib.contextmanager
     def _write(self) -> Generator[None, None, None]:
         """Acquire the write lock for the duration of a mutating operation."""
         with self._write_lock:
             yield
+
+    # -- bulk transaction batching -----------------------------------
+
+    @contextlib.contextmanager
+    def bulk_write(self, commit_every: int = 50) -> Generator[None, None, None]:
+        """Batch commits across many writes (e.g. a full re-scan).
+
+        While active, repo-level ``commit()`` calls are deferred (no-op) and the
+        accumulated work is flushed only every ``commit_every`` write units by
+        the caller's per-unit ``flush()`` — plus one final flush on exit. This
+        collapses hundreds of per-file transactions (a large import) into a
+        handful, since under WAL + ``synchronous=NORMAL`` each commit still
+        carries fixed overhead.
+
+        Nested bulk contexts are ignored: the outermost controls cadence.
+        """
+        if self._bulk_active:
+            yield
+            return
+        self._bulk_active = True
+        self._bulk_every = max(1, commit_every)
+        self._bulk_count = 0
+        try:
+            yield
+            self._conn.commit()  # final flush of any remaining writes
+        finally:
+            self._bulk_active = False
+            self._bulk_count = 0
+
+    def _maybe_commit(self) -> None:
+        """Commit gate for repo write methods.
+
+        Commits immediately outside a ``bulk_write`` context (current behavior,
+        preserving per-file durability for the incremental watcher). Inside bulk
+        mode the caller's per-unit ``flush()`` owns the transaction, so this is a
+        no-op and writes accumulate into one batched transaction.
+        """
+        if self._bulk_active:
+            return
+        self._conn.commit()
+
+    def flush(self) -> None:
+        """Commit point for the caller after each write unit (e.g. one file).
+
+        Outside bulk mode this commits immediately. Inside bulk mode it commits
+        only every ``commit_every`` units, deferring the rest; the ``bulk_write``
+        context manager issues a final flush on exit so no work is left pending.
+        """
+        if not self._bulk_active:
+            self._conn.commit()
+            return
+        self._bulk_count += 1
+        if self._bulk_count >= self._bulk_every:
+            self._conn.commit()
+            self._bulk_count = 0
 
     # -- lifecycle ---------------------------------------------------
 
@@ -1033,8 +1096,8 @@ class SqliteStorage:
         self._conn.executescript(FTS_SCHEMA)
         self._conn.commit()
 
-        self._sessions = SqliteSessionRepository(self._conn)
-        self._events = SqliteEventRepository(self._conn)
+        self._sessions = SqliteSessionRepository(self._conn, self._maybe_commit)
+        self._events = SqliteEventRepository(self._conn, self._maybe_commit)
         self._search = SqliteSearchIndex(self._conn)
 
         # Migrate: old FTS data was inserted raw (not tokenized) via the
@@ -1390,7 +1453,7 @@ class SqliteStorage:
             session_ids = list({e.session_id for e in events})
             if session_ids:
                 self._upsert_event_edges_for_sessions(session_ids)
-                self._conn.commit()
+                self._maybe_commit()
 
     def get_event_edges(self, session_id: str, source: str | None = None) -> list[dict]:
         """Return all edges for a session (child -> parent + depth)."""
