@@ -334,6 +334,19 @@ def _parse_entry(raw: dict) -> MemoryEvent | None:
     )
 
 
+# Cap tool_result payloads so a single huge command/file dump can't bloat the
+# SQLite row (and its FTS index). 32KB is generous for display/replay while
+# keeping the DB bounded on large sessions. ASCII marker appended when cut.
+TOOL_RESULT_MAX_CHARS = 32 * 1024
+
+
+def _truncate_tool_result(text: str) -> str:
+    """Truncate a tool_result payload to ``TOOL_RESULT_MAX_CHARS`` with a marker."""
+    if len(text) <= TOOL_RESULT_MAX_CHARS:
+        return text
+    return text[:TOOL_RESULT_MAX_CHARS] + "\n...[tool_result truncated]"
+
+
 def _parse_content(role: Role, content: str | list) -> list[ContentBlock]:
     """Parse message content into ContentBlock list."""
     blocks: list[ContentBlock] = []
@@ -374,6 +387,7 @@ def _parse_content(role: Role, content: str | list) -> list[ContentBlock]:
                 text = " ".join(b.get("text", "") for b in output if isinstance(b, dict))
             else:
                 text = str(output)
+            text = _truncate_tool_result(text)
             blocks.append(
                 ContentBlock(
                     block_type=BlockType.TOOL_RESULT,

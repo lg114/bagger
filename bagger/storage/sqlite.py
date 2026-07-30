@@ -202,8 +202,12 @@ def _tokenize_for_fts(text: str) -> str:
     Without this, ``unicode61`` treats Chinese text as one unbroken token,
     making FTS5 useless for CJK queries (falling back to LIKE full-table scans).
 
-    Uses ``HMM=False`` to avoid over-segmentation (HMM sometimes splits common
-    words like "会话" into single characters "会"+"话", which breaks FTS matching).
+    In addition to jieba word tokens we also emit every individual CJK character
+    as a token. CJK has no whitespace word boundaries, so a bare single-hanzi
+    query (e.g. "数") would otherwise never match a multi-character word
+    ("数据库") that contains it — adding char tokens gives single-character
+    prefix recall. ASCII and punctuation are already handled by unicode61's
+    default tokenization, so they are not duplicated here.
 
     Returns the input unchanged when jieba is unavailable or the text is pure ASCII.
     """
@@ -211,7 +215,11 @@ def _tokenize_for_fts(text: str) -> str:
         return text
     import jieba
 
-    return " ".join(jieba.cut(text, HMM=False))
+    tokens = list(jieba.cut(text, HMM=False))
+    # Append each CJK character so a single-char query can recall any word that
+    # contains it. _CJK_RE matches one CJK/Hiragana/Katakana/Hangul codepoint.
+    tokens.extend(ch for ch in text if _CJK_RE.match(ch))
+    return " ".join(tokens)
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
