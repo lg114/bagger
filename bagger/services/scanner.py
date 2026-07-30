@@ -9,7 +9,6 @@ module is the batch driver: it loads/persists ``WatchState``, iterates
 files, and delegates each file to ``SyncService``.
 """
 
-import json
 import logging
 from pathlib import Path
 
@@ -17,6 +16,7 @@ from bagger.config import settings
 from bagger.models.event import WatchState
 from bagger.parsers import ParserRegistry
 from bagger.services.sync import SyncError, SyncService
+from bagger.services.watch_state_io import load_watch_state, save_watch_state
 from bagger.storage.base import Storage
 
 logger = logging.getLogger(__name__)
@@ -89,15 +89,8 @@ def scan_all(
 
 
 def _load_state(path: Path) -> WatchState:
-    if not path.exists():
-        return WatchState()
-    try:
-        return WatchState(**json.loads(path.read_text(encoding="utf-8")))
-    except Exception:
-        logger.warning("Could not read watch state %s; starting fresh", path, exc_info=True)
-        return WatchState()
+    return load_watch_state(path)
 
 
 def _save_state(state: WatchState, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+    save_watch_state(state, path)

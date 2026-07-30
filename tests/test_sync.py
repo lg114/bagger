@@ -15,6 +15,7 @@ import pytest
 from bagger.parsers.base import Parser
 from bagger.parsers.claude import ClaudeParser
 from bagger.services.sync import SyncError, SyncService
+from bagger.services.watch_state_io import load_watch_state
 from bagger.storage.sqlite import SqliteStorage
 
 # A minimal valid user-message line. Tests build files by concatenating these.
@@ -499,11 +500,10 @@ def test_watcher_persists_and_resumes_offsets(tmp_path):
         w1._persist_offsets()
         w1.close()
 
-        assert state_path.exists()
-        import json as _json
-
-        saved = _json.loads(state_path.read_text(encoding="utf-8"))
-        assert saved["sessions"]["sess-1"] == path.stat().st_size
+        # State is persisted to a sharded store (a directory of shard files);
+        # load it back via the shared reader.
+        saved = load_watch_state(state_path)
+        assert saved.sessions["sess-1"] == path.stat().st_size
 
         # A fresh watcher with the same state path should resume from disk.
         w2 = Watcher(storage, source="claude", state_path=state_path)
@@ -668,10 +668,10 @@ def test_scan_all_drives_all_registered_parsers():
         # Both sources landed, each with its own source column.
         assert storage.get_session("sess-1", source="claude") is not None
         assert storage.get_session("cg-sess", source="chatgpt") is not None
-        # Offsets are keyed by composite source:session_id.
-        saved_state = json.loads(state_path.read_text(encoding="utf-8"))
-        assert "claude:sess-1" in saved_state["sessions"]
-        assert "chatgpt:cg-sess" in saved_state["sessions"]
+        # Offsets are keyed by composite source:session_id (sharded store).
+        saved_state = load_watch_state(state_path)
+        assert "claude:sess-1" in saved_state.sessions
+        assert "chatgpt:cg-sess" in saved_state.sessions
         _cleanup(storage, sync)
 
 
@@ -723,8 +723,8 @@ def test_offset_keys_are_source_scoped():
             ParserRegistry._parsers.clear()
             ParserRegistry._parsers.update(saved)
 
-        saved_state = json.loads(state_path.read_text(encoding="utf-8"))
-        sess = saved_state["sessions"]
+        saved_state = load_watch_state(state_path)
+        sess = saved_state.sessions
         assert "claude:shared" in sess
         assert "chatgpt:shared" in sess
         # Each advanced to its own file size — independent, not colliding.

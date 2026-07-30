@@ -14,6 +14,7 @@ from bagger.models.event import (
     Role,
     Session,
 )
+from bagger.storage.migrations import apply_migrations
 from bagger.storage.sqlite import SqliteStorage
 
 
@@ -638,8 +639,10 @@ def test_migration_v2_to_v3_creates_and_backfills_event_edges():
         cols = [r["name"] for r in storage.conn.execute("PRAGMA table_info(sessions)").fetchall()]
         assert {"parent_session_id", "resume_of", "is_compaction", "compaction_of"} <= set(cols)
 
-        # Explicit re-run is idempotent (upsert, not blind insert).
-        storage._apply_migration_v3()
+        # Explicit re-run is idempotent (upsert, not blind insert). The migration
+        # logic now lives in ``bagger.storage.migrations``; re-running it must not
+        # duplicate or drop the existing edges.
+        apply_migrations(storage.conn, lambda: storage._upsert_event_edges_for_sessions(None))
         assert storage.conn.execute("SELECT COUNT(*) FROM event_edges").fetchone()[0] == 2
 
         storage.close()
