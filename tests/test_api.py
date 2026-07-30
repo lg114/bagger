@@ -526,3 +526,45 @@ def test_lifespan_per_request_storage_isolated():
             # A real request still works end-to-end.
             resp = client.get("/api/health")
             assert resp.status_code == 200
+
+
+def test_scan_endpoint_runs_in_background(monkeypatch):
+    """POST /api/scan returns immediately and the result is pollable via status.
+
+    Locks in the A2 trigger-and-poll design: the endpoint must not block for the
+    whole scan (the old behavior) and must expose the final stats through
+    GET /api/scan/status so the UI can render sessions/events/skipped.
+    """
+    from fastapi.testclient import TestClient
+
+    import bagger.config as config
+    from bagger.api import routes
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config.settings = Settings(bagger_dir=Path(tmpdir))
+
+        # Stub the actual filesystem scan so the test is fast and deterministic.
+        monkeypatch.setattr(
+            routes.sync,
+            "scan_all",
+            lambda *a, **k: {"sessions": 3, "events": 12, "skipped": 1, "errors": 0},
+        )
+
+        app = create_app()
+        with TestClient(app) as client:
+            resp = client.post("/api/scan")
+            assert resp.status_code == 200
+            assert resp.json() == {"status": "started"}
+
+            status = client.get("/api/scan/status").json()
+            assert status["running"] is False
+            assert status["done"] is True
+            assert status["result"]["sessions"] == 3
+            assert status["result"]["events"] == 12
+
+            # Full rescan uses the same path.
+            resp2 = client.post("/api/scan/full")
+            assert resp2.json() == {"status": "started"}
+            status2 = client.get("/api/scan/status").json()
+            assert status2["done"] is True
+            assert status2["result"]["skipped"] == 1

@@ -184,10 +184,30 @@ export function getToolUsageStats(
 
 // ── Sync (scan) ────────────────────────────────────────
 
-export function triggerScan(): Promise<{ status: string; sessions: number; events: number; skipped: number }> {
-  return postApi<{ status: string; sessions: number; events: number; skipped: number }>("/scan");
+// A scan runs in the background; the trigger returns immediately and the UI
+// polls /scan/status until it completes (see ImportPage).
+export function triggerScan(): Promise<{ status: string }> {
+  return postApi<{ status: string }>("/scan");
 }
 
-export function triggerFullScan(): Promise<{ status: string; sessions: number; events: number; skipped: number }> {
-  return postApi<{ status: string; sessions: number; events: number; skipped: number }>("/scan/full");
+export function triggerFullScan(): Promise<{ status: string }> {
+  return postApi<{ status: string }>("/scan/full");
+}
+
+export interface ScanResult {
+  sessions: number;
+  events: number;
+  skipped: number;
+  errors?: number;
+}
+
+export interface ScanStatus {
+  running: boolean;
+  done: boolean;
+  result: ScanResult | null;
+  error: string | null;
+}
+
+export function getScanStatus(): Promise<ScanStatus> {
+  return fetchApi<ScanStatus>("/scan/status");
 }

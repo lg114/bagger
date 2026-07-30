@@ -10,6 +10,7 @@ import {
   getToolUsageStats,
   triggerScan,
   triggerFullScan,
+  getScanStatus,
 } from "../api";
 
 const mockFetch = vi.fn();
@@ -198,11 +199,11 @@ describe("getToolUsageStats", () => {
 // ── triggerScan ──────────────────────────────────────────
 
 describe("triggerScan", () => {
-  it("triggers incremental scan via POST", async () => {
-    mockApiResponse({ status: "ok", sessions: 1, events: 5, skipped: 0 });
+  it("triggers an incremental scan via POST and returns immediately", async () => {
+    mockApiResponse({ status: "started" });
 
     const result = await triggerScan();
-    expect(result.status).toBe("ok");
+    expect(result.status).toBe("started");
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining("/scan"),
       expect.objectContaining({ method: "POST" }),
@@ -213,14 +214,35 @@ describe("triggerScan", () => {
 // ── triggerFullScan ──────────────────────────────────────
 
 describe("triggerFullScan", () => {
-  it("triggers full scan via POST", async () => {
-    mockApiResponse({ status: "ok", sessions: 2, events: 10, skipped: 0 });
+  it("triggers a full scan via POST and returns immediately", async () => {
+    mockApiResponse({ status: "started" });
 
     const result = await triggerFullScan();
-    expect(result.events).toBe(10);
+    expect(result.status).toBe("started");
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining("/scan/full"),
       expect.objectContaining({ method: "POST" }),
+    );
+  });
+});
+
+// ── getScanStatus ───────────────────────────────────────
+
+describe("getScanStatus", () => {
+  it("fetches the background scan status via GET", async () => {
+    mockApiResponse({
+      running: false,
+      done: true,
+      result: { sessions: 3, events: 12, skipped: 1, errors: 0 },
+      error: null,
+    });
+
+    const status = await getScanStatus();
+    expect(status.done).toBe(true);
+    expect(status.result?.sessions).toBe(3);
+    expect(status.result?.events).toBe(12);
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("/scan/status"),
     );
   });
 });

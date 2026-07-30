@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   RefreshCw,
@@ -9,7 +9,7 @@ import {
   AlertCircle,
   Info,
 } from "lucide-react";
-import { triggerScan, triggerFullScan } from "@/lib/api";
+import { triggerScan, triggerFullScan, getScanStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { MetricCard } from "@/components/MetricCard";
@@ -22,14 +22,41 @@ export default function ImportPage() {
   const [mode, setMode] = useState<"incremental" | "full" | null>(null);
   const [lastResult, setLastResult] = useState<ScanResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const cancelledRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, []);
+
+  // Poll /scan/status until the background scan finishes, then resolve with its
+  // result. Cancelled on unmount; capped to avoid an infinite loop.
+  const pollUntilDone = async (): Promise<ScanResult> => {
+    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    for (let i = 0; i < 600; i++) {
+      if (cancelledRef.current) throw new Error("Scan cancelled");
+      const st = await getScanStatus();
+      if (st.error) throw new Error(st.error);
+      if (st.done && st.result) return { status: "ok", ...st.result };
+      await delay(700);
+    }
+    throw new Error("Scan did not finish in time");
+  };
 
   const runScan = async (kind: "incremental" | "full") => {
+    cancelledRef.current = false;
     setScanning(true);
     setMode(kind);
     setError(null);
     try {
-      const result =
-        kind === "incremental" ? await triggerScan() : await triggerFullScan();
+      // Trigger returns immediately; the actual scan runs in the background.
+      if (kind === "incremental") {
+        await triggerScan();
+      } else {
+        await triggerFullScan();
+      }
+      const result = await pollUntilDone();
       setLastResult(result);
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });

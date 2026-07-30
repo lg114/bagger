@@ -68,9 +68,7 @@ def test_search_ranks_by_content_relevance():
 
         # One event mentions "python" once, another many times.
         storage.insert_event(_ev("low-freq", "claude", "s1", "python"))
-        storage.insert_event(
-            _ev("high-freq", "claude", "s2", "python python python python python")
-        )
+        storage.insert_event(_ev("high-freq", "claude", "s2", "python python python python python"))
 
         hits = storage.search("python")
         assert len(hits) == 2
