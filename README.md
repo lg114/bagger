@@ -1,14 +1,14 @@
 # bagger
 
-> AI Coding Agent Data Collector — sync Claude Code transcripts into a searchable local database with a web UI.
+> AI Coding Agent Data Collector — sync AI coding tool transcripts into a searchable local database, with a desktop app to browse your agent history.
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
-[![Tests](https://img.shields.io/badge/tests-91%20passing-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-119%20passing-brightgreen.svg)](#development)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
 
-bagger reads the JSONL transcripts that Claude Code writes to `~/.claude/projects/` and turns them into a queryable SQLite database with FTS5 full-text search and session replay. Think of it as your AI coding memory layer — with a visual memory browser on top.
+bagger reads the JSONL transcripts that Claude Code writes to `~/.claude/projects/` and turns them into a queryable SQLite database with FTS5 full-text search (CJK-aware) and session replay. The pipeline is multi-source by design — a parser registry drives scan/watch across tools, and every event carries its `source` end to end (DB keys, CLI, API, UI). Claude Code is the bundled parser today. Think of it as your AI coding memory layer — with a visual memory browser on top.
 
 ## Why
 
@@ -55,7 +55,7 @@ bagger ships as a native desktop app with tray support:
 - **Tray**: Left-click to show, right-click menu (Show / Quit)
 - **Backend**: Two modes — **dev** (host Python + hot reload) or **production** (bundled sidecar exe)
 - **Single instance**: Named mutex prevents duplicate windows on restart
-- **UI**: React + Tailwind, dark editorial theme (Fraunces / Hanken Grotesk / JetBrains Mono)
+- **UI**: React + Tailwind, dark editorial theme (Fraunces / Hanken Grotesk / JetBrains Mono), project-centric sidebar navigation
 
 ### Dev setup
 
@@ -91,8 +91,8 @@ The resulting `.msi` installer is fully self-contained — no Python installatio
 | Command | Description |
 |---------|-------------|
 | `bagger init` | Create `~/.bagger/` and initialize the database |
-| `bagger scan` | Import all Claude Code sessions (use `--full` to re-import) |
-| `bagger watch` | Continuously sync new events as you chat with Claude Code |
+| `bagger scan` | Import sessions from every registered source (`--full` re-imports, `--source` limits to one tool) |
+| `bagger watch` | Live-sync new events via a watchdog filesystem observer (`--source` limits to one tool) |
 | `bagger search <query>` | FTS5 full-text search with BM25 ranking and snippet highlighting |
 | `bagger replay <session_id>` | Replay an entire conversation in the terminal |
 | `bagger stats` | Show session and event counts |
@@ -108,15 +108,17 @@ The resulting `.msi` installer is fully self-contained — no Python installatio
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/health` | Database status, event/session counts, FTS state |
-| `GET /api/sessions?page=1&per_page=50` | Paginated session list |
+| `GET /api/sessions?page=1&per_page=50&sort=...&project=...&source=...` | Paginated session list with sorting and project/source filters |
 | `GET /api/sessions/{id}` | Session metadata |
 | `GET /api/sessions/{id}/events?page=1&per_page=50` | Paginated events for a session (content_blocks parsed; `per_page` clamped to 1–500) |
+| `GET /api/sessions/{id}/tree` | Session topology — branches, compactions, resumptions |
 | `GET /api/search?q=...&page=1` | FTS5 full-text search with snippet highlighting |
-| `GET /api/stats` | Aggregate stats (events, roles, tokens) |
+| `GET /api/stats` | Aggregate stats (events, roles, tokens, per-model/per-provider breakdown) |
 | `GET /api/stats/daily?days=30` | Daily event/token time series |
 | `GET /api/stats/tools?limit=15` | Most frequently used tools |
-| `POST /api/scan` | Trigger incremental scan of new sessions |
-| `POST /api/scan/full` | Trigger full re-scan of all sessions |
+| `POST /api/scan` | Start a background incremental scan (returns immediately) |
+| `POST /api/scan/full` | Start a background full re-scan |
+| `GET /api/scan/status` | Poll background-scan progress and final stats |
 
 ## Configuration
 
@@ -139,12 +141,12 @@ source_alias = { "claude-mimo-proxy" = "xiaomi" }
 ## Architecture
 
 ```
-~/.claude/projects/<path>/<uuid>.jsonl
+~/.claude/projects/<path>/<uuid>.jsonl   (+ more sources via the parser registry)
                     │
           ┌─────────┴─────────┐
           ▼                   ▼
       bagger scan         bagger watch
-    (batch import)       (tail polling)
+    (batch import)     (watchdog observer)
           │                   │
           └─────────┬─────────┘
                     ▼
@@ -166,6 +168,9 @@ source_alias = { "claude-mimo-proxy" = "xiaomi" }
      (Click)   (FastAPI)  (React + Rust)
 ```
 
+Sessions and events are keyed by `(source, id)` throughout the database, so multiple
+AI tools can coexist in one bagger.db without ID collisions.
+
 ### Search: CJK-aware FTS5
 
 - All queries go through SQLite FTS5 with BM25 ranking and `<mark>` snippet highlighting
@@ -181,13 +186,13 @@ bagger/
 │   ├── api/               # FastAPI app + routes (health, sessions, search, stats, sync)
 │   │   └── routes/        # Route modules (health, sessions, search, stats, sync)
 │   ├── models/            # Pydantic data models (MemoryEvent, Session, WatchState)
-│   ├── parsers/           # Parser protocol (base.py) + Claude Code implementation (claude.py)
+│   ├── parsers/           # Parser protocol + registry (base.py) + Claude Code implementation (claude.py)
 │   ├── storage/           # Storage protocol (base.py) + SQLite/FTS5 implementation (sqlite.py)
 │   ├── services/          # Business logic (sync, scanner, watcher, search, replay)
 │   ├── exporters/         # Export abstractions (base, jsonl)
 │   ├── config.py          # Settings — single config entry point (~/.bagger/config.toml)
 │   └── sidecar_main.py    # PyInstaller entry for the Tauri sidecar
-├── tests/                 # pytest suite (91 tests) + fixtures/
+├── tests/                 # pytest suite (119 tests) + fixtures/
 ├── scripts/               # Build helpers (PyInstaller sidecar bundling)
 └── ui/                    # Tauri + React desktop frontend
     └── src-tauri/         # Rust shell, tray, sidecar lifecycle
@@ -227,7 +232,7 @@ From each Claude Code transcript, bagger extracts:
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -q            # 91 tests
+pytest tests/ -q            # 119 tests
 ```
 
 ### Code quality
@@ -266,8 +271,9 @@ Contributions are welcome. Before opening a PR, please read
 - [x] Config file (`~/.bagger/config.toml`) for non-default paths
 - [x] Desktop app production build (PyInstaller sidecar + Tauri .msi)
 - [x] Robust incremental parsing & watcher state persistence (survives restart, tolerant of partial writes)
+- [x] Multi-source foundation — parser registry drives scan/watch across tools; `source` flows through DB composite keys, CLI `--source`, `/api/sessions?source=`, and UI source badges/filters (Claude Code is the bundled parser)
 - [ ] More exporters (Zvec, Markdown)
-- [ ] Support for more AI coding agents (parser registry is ready)
+- [ ] Additional parsers for more AI coding agents (Cursor, Codex, ...)
 
 ## License
 
