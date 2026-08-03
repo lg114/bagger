@@ -20,6 +20,7 @@ etc.) are shared across repos and remain stateless.
 
 import contextlib
 import json
+import logging
 import re
 import sqlite3
 import threading
@@ -29,6 +30,8 @@ from pathlib import Path
 
 from bagger.models.event import BlockType, MemoryEvent, Session
 from bagger.storage.migrations import _column_exists, apply_migrations
+
+logger = logging.getLogger(__name__)
 
 # ── Schema ──────────────────────────────────────────────────
 
@@ -167,6 +170,46 @@ def _jieba_available() -> bool:
         except ImportError:
             _jieba_cached = False
     return _jieba_cached
+
+
+# Surfaced (non-fatally) when CJK search would be silently broken: FTS5's
+# unicode61 tokenizer does NOT split Chinese/Japanese/Korean characters, so
+# without jieba pre-tokenization the text is indexed as one opaque blob and
+# CJK queries return nothing. This is the exact failure we hit when a source
+# was scanned in an environment lacking jieba.
+_JIEBA_CJK_WARNING = (
+    "jieba is not installed — Chinese/Japanese/Korean text will be indexed as "
+    "opaque blobs and CJK search queries will return NO results. "
+    "Fix: `pip install jieba`, then re-run this command "
+    "(or `bagger rebuild-index` to re-index already-imported data)."
+)
+
+
+def _events_contain_cjk(conn: sqlite3.Connection, limit: int = 500) -> bool:
+    """Heuristic: do the first ``limit`` stored events contain CJK characters?
+
+    Used by the jieba guard to decide whether a missing jieba install actually
+    breaks search — English-only corpora don't need it. Samples the first
+    ``limit`` rows instead of scanning the whole table.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT content_text FROM events ORDER BY id LIMIT ?", (limit,)
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return False
+    return any(_contains_cjk(r[0] or "") for r in rows)
+
+
+def check_jieba_cjk_coverage(conn: sqlite3.Connection) -> str | None:
+    """Return a warning when jieba is unavailable but stored events contain CJK.
+
+    Returns ``None`` when CJK search is safe (jieba present, or no CJK data),
+    otherwise the warning message the caller should surface to the user.
+    """
+    if _jieba_available() or not _events_contain_cjk(conn):
+        return None
+    return _JIEBA_CJK_WARNING
 
 
 def _escape_fts5_query(query: str) -> str:
@@ -862,6 +905,9 @@ class SqliteSearchIndex:
         }
 
     def rebuild_fts_index(self) -> int:
+        warn = check_jieba_cjk_coverage(self._conn)
+        if warn:
+            logger.warning("⚠️  %s", warn)
         self._conn.execute("DROP TABLE IF EXISTS events_fts")
         self._conn.execute("DROP TRIGGER IF EXISTS events_ai")
         self._conn.executescript(FTS_SCHEMA)

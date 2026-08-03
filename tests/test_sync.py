@@ -465,6 +465,10 @@ def test_watcher_skips_failed_file_after_first_error():
             def discover_sessions(self):
                 return [path]
 
+            def session_id_for(self, path):
+                # Claude: the session id is the filename stem.
+                return path.stem
+
         watcher._sync.parser = _FakeParser()  # type: ignore[assignment]
         watcher._sync.sync_file = _fake_sync_file  # type: ignore[assignment]
 

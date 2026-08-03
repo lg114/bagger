@@ -390,11 +390,18 @@ class Watcher:
         where a stale offset would otherwise skip a genuinely new file). Also
         auto-resets when a file has shrunk (truncation / log rotation).
         """
-        if (source_name, filepath.stem) in self._failed:
+        sync = self._syncs[source_name]
+        # The offset/failure key MUST match SyncService.sync_file exactly: the
+        # parser owns the filename→session-id mapping (Claude: stem is the id;
+        # Codex: the id lives in session_meta, not the filename). Keying on
+        # filepath.stem here would track the wrong offset for Codex and silently
+        # disable the shrink/created detection below for that source.
+        session_id = sync.parser.session_id_for(filepath)
+        if (source_name, session_id) in self._failed:
             return  # already logged a parse error this run; avoid spam
 
-        offset_key = f"{source_name}:{filepath.stem}"
-        legacy_key = filepath.stem
+        offset_key = f"{source_name}:{session_id}"
+        legacy_key = session_id
         if reset:
             self._offsets.pop(offset_key, None)
             self._offsets.pop(legacy_key, None)
@@ -409,11 +416,10 @@ class Watcher:
                 self._offsets.pop(offset_key, None)
                 self._offsets.pop(legacy_key, None)
 
-        sync = self._syncs[source_name]
         try:
             result = sync.sync_file(filepath, self._offsets, upsert_always=False)
         except SyncError as exc:
-            self._failed.add((source_name, filepath.stem))
+            self._failed.add((source_name, session_id))
             logger.error(
                 "Parse failed for %s — skipping for the rest of this run. "
                 "Fix the file and restart the watcher to retry.",
