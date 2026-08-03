@@ -11,10 +11,29 @@ from bagger.models.event import (
     MemoryEvent,
     Role,
 )
+from bagger.parsers._common import (
+    TOOL_RESULT_MAX_CHARS,
+    truncate_text,
+)
+from bagger.parsers._common import (
+    scandir_files as _scandir,
+)
+from bagger.parsers._common import (
+    truncate_tool_result as _truncate_tool_result,
+)
 from bagger.parsers.base import Parser as _Parser
 from bagger.parsers.base import StandardUsage
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "ClaudeParser",
+    "parse_jsonl",
+    "extract_summary",
+    "normalize_claude_usage",
+    # Re-exported for tests and backward compat (lives in _common now).
+    "TOOL_RESULT_MAX_CHARS",
+]
 
 # ── Parser implementation ──────────────────────────────────
 
@@ -81,28 +100,6 @@ class ClaudeParser(_Parser):
 
 
 # ── Module-level functions (backward compat, delegated by ClaudeParser) ──
-
-
-def _scandir(projects_dir: Path):
-    """Recursively yield ``os.DirEntry`` for every file under ``projects_dir``.
-
-    ``os.scandir`` gives one traversal (vs ``os.walk``'s per-directory yield)
-    and exposes ``DirEntry.stat()`` without a second stat call.
-    """
-    import os
-
-    stack = [projects_dir]
-    while stack:
-        base = stack.pop()
-        try:
-            with os.scandir(base) as it:
-                for entry in it:
-                    if entry.is_dir(follow_symlinks=False):
-                        stack.append(entry.path)
-                    elif entry.is_file(follow_symlinks=False):
-                        yield entry
-        except (OSError, PermissionError):
-            continue
 
 
 def _parse_file(path: Path) -> list[MemoryEvent]:
@@ -221,9 +218,7 @@ extract_summary = _extract_summary
 
 
 def _truncate(text: str, max_len: int) -> str:
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 3] + "..."
+    return truncate_text(text, max_len)
 
 
 def normalize_claude_usage(raw_usage: dict, raw_model: str | None = None) -> StandardUsage:
@@ -332,19 +327,6 @@ def _parse_entry(raw: dict) -> MemoryEvent | None:
         model=msg.get("model"),
         provider=_resolve_provider(msg.get("model")),
     )
-
-
-# Cap tool_result payloads so a single huge command/file dump can't bloat the
-# SQLite row (and its FTS index). 32KB is generous for display/replay while
-# keeping the DB bounded on large sessions. ASCII marker appended when cut.
-TOOL_RESULT_MAX_CHARS = 32 * 1024
-
-
-def _truncate_tool_result(text: str) -> str:
-    """Truncate a tool_result payload to ``TOOL_RESULT_MAX_CHARS`` with a marker."""
-    if len(text) <= TOOL_RESULT_MAX_CHARS:
-        return text
-    return text[:TOOL_RESULT_MAX_CHARS] + "\n...[tool_result truncated]"
 
 
 def _parse_content(role: Role, content: str | list) -> list[ContentBlock]:

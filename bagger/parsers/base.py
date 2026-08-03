@@ -57,6 +57,18 @@ class Parser(ABC):
         """
         return None
 
+    def session_id_for(self, path: "Path") -> str:
+        """Canonical session id for a transcript file.
+
+        Default: the filename stem (true for Claude Code, whose transcripts
+        are named ``<sessionId>.jsonl``). Sources whose filenames don't equal
+        the session id — Codex's ``rollout-{ts}-{uuid}.jsonl`` — override this
+        to read the id from the file's own metadata. SyncService keys the
+        ``Session`` row and the watch offset on whatever this returns, so it
+        must agree with the ``session_id`` stamped on parsed events.
+        """
+        return path.stem
+
     @abstractmethod
     def discover_sessions(self) -> list[Path]:
         """Find all session transcript files for this source."""

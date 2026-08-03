@@ -132,7 +132,9 @@ class SyncService:
                 is surfaced to the caller (logged + recorded) rather than
                 silently swallowed.
         """
-        session_id = filepath.stem
+        # The parser owns the filename→session-id mapping (Claude: stem is the
+        # id; Codex: id lives in the session_meta line, not the filename).
+        session_id = self.parser.session_id_for(filepath)
         file_size = filepath.stat().st_size
         source = self.parser.source_name
         offset_key = f"{source}:{session_id}"

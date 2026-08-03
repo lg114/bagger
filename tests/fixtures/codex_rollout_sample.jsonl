@@ -1,0 +1,13 @@
+{"timestamp":"2026-07-01T09:00:00.000Z","type":"session_meta","payload":{"id":"codex-sess-001","cwd":"/home/gc/proj","model_provider":"openai","cli_version":"0.144.0","originator":"Codex Desktop","git":{"branch":"main"}}}
+{"timestamp":"2026-07-01T09:00:01.000Z","type":"turn_context","payload":{"model":"gpt-5.6","approval_policy":"on-request","sandbox_policy":{"type":"workspace-write"}}}
+{"timestamp":"2026-07-01T09:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"帮我看看为什么测试会 flaky"}]}}
+{"timestamp":"2026-07-01T09:00:03.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"You are Codex, a coding agent."}]}}
+{"timestamp":"2026-07-01T09:00:04.000Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"先跑一遍测试复现问题"}]}}
+{"timestamp":"2026-07-01T09:00:05.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"pytest -x\"}","call_id":"call_1"}}
+{"timestamp":"2026-07-01T09:00:06.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":120,"total_tokens":1120}}}}
+{"timestamp":"2026-07-01T09:00:07.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"1 failed, 4 passed"}}
+{"timestamp":"2026-07-01T09:00:08.000Z","type":"event_msg","payload":{"type":"agent_message","message":"这条是重复的助手消息，应被抑制"}}
+{"timestamp":"2026-07-01T09:00:09.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"flaky 的原因是并发写同一个临时文件。"}]}}
+{"timestamp":"2026-07-01T09:00:10.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1500,"cached_input_tokens":600,"output_tokens":300,"total_tokens":1800}}}}
+not-valid-json-at-all
+{"timestamp":"2026-07-01T09:00:11.000Z","type":"compacted","payload":{"summary":"前文压缩摘要"}}
