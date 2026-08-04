@@ -32,6 +32,7 @@ export interface Event {
   model?: string;
   content_text?: string;
   snippet?: string;
+  source?: string;
 }
 
 export interface Stats {
@@ -155,11 +156,13 @@ export function search(
   query: string,
   page = 1,
   perPage = 20,
+  source?: string,
 ): Promise<PaginatedResponse<Event>> {
   return fetchApi<PaginatedResponse<Event>>("/search", {
     q: query,
     page,
     per_page: perPage,
+    source,
   });
 }
 

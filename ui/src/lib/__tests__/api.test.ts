@@ -136,6 +136,22 @@ describe("search", () => {
     expect(url).toContain("page=2");
     expect(url).toContain("per_page=10");
   });
+
+  it("passes source param for multi-tool filtering", async () => {
+    mockApiResponse({ data: [], meta: { page: 1, per_page: 20, total: 0, pages: 0 } });
+
+    await search("hello", 1, 20, "codex");
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("source=codex");
+  });
+
+  it("omits source param when not provided", async () => {
+    mockApiResponse({ data: [], meta: { page: 1, per_page: 20, total: 0, pages: 0 } });
+
+    await search("hello");
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).not.toContain("source=");
+  });
 });
 
 // ── getStats ─────────────────────────────────────────────

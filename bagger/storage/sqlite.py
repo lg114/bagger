@@ -125,7 +125,7 @@ SESSION_COLS = (
 )
 
 EVENT_COLS = (
-    "e.id as db_id, e.event_id, e.session_id, s.summary as session_summary, "
+    "e.id as db_id, e.event_id, e.session_id, e.source, s.summary as session_summary, "
     "e.timestamp, e.role, e.content_json, e.content_text, "
     "e.token_input, e.token_output, s.project_path"
 )

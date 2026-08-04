@@ -5,6 +5,7 @@ import { ArrowLeft, Calendar, Folder, MessageSquare, Hash, AlertCircle, Search }
 import { getSession, getSessionEvents, getSessionTree } from "@/lib/api";
 import type { TreeNode } from "@/lib/api";
 import SessionTree from "@/components/SessionTree";
+import { SourceBadge } from "@/components/SourceBadge";
 import { formatDateShort, formatTokens } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -161,6 +162,15 @@ export default function SessionDetailPage() {
                   <Folder className="w-3 h-3 shrink-0 text-primary/40" />
                   {session.project_path}
                 </Link>
+              </div>
+            )}
+
+            {session.source && (
+              <div className="space-y-1">
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Source</span>
+                <div className="flex items-center gap-1.5">
+                  <SourceBadge source={session.source} />
+                </div>
               </div>
             )}
 

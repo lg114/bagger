@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { Event } from "@/lib/api";
+import { SourceBadge } from "@/components/SourceBadge";
 
 interface SearchResultsProps {
   results: Event[];
@@ -58,7 +59,7 @@ export default function SearchResults({ results, isLoading }: SearchResultsProps
           className="group relative block border-b border-[var(--border-subtle)] last:border-0 before:absolute before:left-0 before:top-2.5 before:bottom-2.5 before:w-0.5 before:rounded-full before:bg-[var(--brand-500)] before:opacity-0 hover:before:opacity-100 transition-colors hover:bg-[var(--brand-bg)]"
         >
           <div className="px-4 py-4 space-y-2.5">
-            {/* Meta row — role chip + timestamp + short session id */}
+            {/* Meta row — role chip + timestamp + source + short session id */}
             <div className="flex items-center gap-3 flex-wrap">
               <span
                 className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-element font-mono border ${
@@ -72,6 +73,7 @@ export default function SearchResults({ results, isLoading }: SearchResultsProps
               <span className="text-xs text-muted-foreground font-mono tabular-nums">
                 {event.timestamp?.slice(0, 19)?.replace("T", " ")}
               </span>
+              <SourceBadge source={event.source} />
               <span className="text-xs text-muted-foreground truncate ml-auto font-mono opacity-50">
                 {event.session_id.slice(0, 8)}
               </span>

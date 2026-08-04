@@ -1,5 +1,6 @@
 """Tests for the REST API endpoints."""
 
+import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ def _make_event(
     role=Role.USER,
     text="Hello world",
     parent_event_id=None,
+    source="claude",
 ) -> MemoryEvent:
     return MemoryEvent(
         event_id=event_id,
@@ -28,6 +30,7 @@ def _make_event(
         content_blocks=[ContentBlock(block_type=BlockType.TEXT, text=text)],
         token_input=10,
         token_output=20,
+        source=source,
     )
 
 
@@ -379,6 +382,84 @@ def test_search_pagination():
         assert r2.status_code == 200
         d2 = r2.json()
         assert len(d2["data"]) == 2
+
+
+def test_search_results_carry_source():
+    """Every search hit must expose its originating tool via `source` (§5.5/(c))."""
+    # Manual temp-dir cleanup: the sandbox file-lock shim (and external AV/
+    # indexers) occasionally hold bagger.db open at teardown, so ignore_errors
+    # keeps the assertion above from being masked by an environmental teardown
+    # error rather than a real failure.
+    td = Path(tempfile.mkdtemp())
+    try:
+        storage = _override_db(td)
+
+        e1 = _make_event(
+            event_id="e-src-1",
+            session_id="s-src",
+            role=Role.USER,
+            text="The codex rollout created a new session",
+            source="codex",
+        )
+        storage.insert_events([e1])
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+        client = TestClient(app)
+
+        response = client.get("/api/search?q=codex")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["meta"]["total"] >= 1
+        assert data["data"][0]["source"] == "codex"
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def test_search_filters_by_source():
+    """?source= scopes search hits (and meta.total) to one AI tool (§5.5/(b))."""
+    td = Path(tempfile.mkdtemp())
+    try:
+        storage = _override_db(td)
+
+        storage.insert_events(
+            [
+                _make_event(
+                    event_id="e-cl-1",
+                    session_id="s-cl",
+                    text="shared token refresh helper",
+                    source="claude",
+                ),
+                _make_event(
+                    event_id="e-cx-1",
+                    session_id="s-cx",
+                    text="shared token refresh helper",
+                    source="codex",
+                ),
+            ]
+        )
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+        client = TestClient(app)
+
+        # Unfiltered: both tools.
+        all_resp = client.get("/api/search?q=token")
+        all_data = all_resp.json()
+        assert all_data["meta"]["total"] == 2
+
+        # Scoped to codex: only the codex hit, and total reflects it.
+        cx_resp = client.get("/api/search?q=token&source=codex")
+        cx_data = cx_resp.json()
+        assert cx_data["meta"]["total"] == 1
+        assert cx_data["data"][0]["source"] == "codex"
+        assert cx_data["data"][0]["source"] != "claude"
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
 
 
 def test_stats():
