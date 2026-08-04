@@ -42,15 +42,17 @@ export interface Stats {
   assistant_events: number;
   tool_uses: number;
   total_tokens: number;
+  total_cost_usd: number;
   cache_hit_rate: number | null;
-  per_model: { model: string; tokens: number; events: number }[];
-  per_provider: { provider: string; tokens: number; events: number }[];
+  per_model: { model: string; tokens: number; events: number; cost: number }[];
+  per_provider: { provider: string; tokens: number; events: number; cost: number }[];
 }
 
 export interface DailyStat {
   date: string;
   count: number;
   tokens: number;
+  cost: number;
 }
 
 export interface Health {

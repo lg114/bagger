@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import type { LucideIcon } from "lucide-react";
 import {
   Activity,
+  CircleDollarSign,
   Coins,
   FolderOpen,
   MessageCircle,
@@ -17,7 +18,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { getStats, getDailyStats, getToolUsageStats } from "@/lib/api";
-import { formatTokens } from "@/lib/utils";
+import { formatCost, formatTokens } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { MetricCard } from "@/components/MetricCard";
@@ -85,6 +86,7 @@ function KpiSection() {
     { label: "Assistant", value: stats?.assistant_events?.toLocaleString(), icon: Bot, color: "var(--info)" },
     { label: "Tool Uses", value: stats?.tool_uses?.toLocaleString(), icon: Wrench, color: "var(--warning)" },
     { label: "Tokens", value: stats ? formatTokens(stats.total_tokens) : undefined, icon: Coins, color: "var(--brand-400)" },
+    { label: "Cost (USD)", value: stats ? formatCost(stats.total_cost_usd) : undefined, icon: CircleDollarSign, color: "var(--warning)" },
     {
       label: "Cache Hit",
       value: stats?.cache_hit_rate != null ? `${(stats.cache_hit_rate * 100).toFixed(1)}%` : undefined,
@@ -319,6 +321,7 @@ function DailyChartSection() {
 interface RankedItem {
   label: string;
   value: number;
+  sub?: string;
 }
 
 function RankedCard({
@@ -363,7 +366,12 @@ function RankedCard({
               className="group flex items-center gap-4 px-5 py-3 border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--brand-bg)] transition-colors duration-200"
             >
               <span className="text-xs text-muted-foreground font-mono w-5 tabular-nums shrink-0">{i + 1}</span>
-              <span className="flex-1 text-sm font-mono text-foreground/80 truncate min-w-0">{item.label}</span>
+              <div className="flex-1 min-w-0">
+                <span className="block text-sm font-mono text-foreground/80 truncate">{item.label}</span>
+                {item.sub && (
+                  <span className="block text-[10px] font-mono text-muted-foreground/70 truncate">{item.sub}</span>
+                )}
+              </div>
               <div className="w-20 h-1.5 rounded-full overflow-hidden bg-[var(--bg-elevated)] shrink-0">
                 <div
                   className="h-full rounded-full"
@@ -392,6 +400,7 @@ function ModelUsageSection() {
   const items: RankedItem[] = (stats?.per_model ?? []).map((m) => ({
     label: m.model,
     value: m.tokens,
+    sub: m.cost ? formatCost(m.cost) : undefined,
   }));
   return (
     <RankedCard
@@ -413,6 +422,7 @@ function ProviderUsageSection() {
   const items: RankedItem[] = (stats?.per_provider ?? []).map((p) => ({
     label: p.provider,
     value: p.tokens,
+    sub: p.cost ? formatCost(p.cost) : undefined,
   }));
   return (
     <RankedCard

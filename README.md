@@ -113,8 +113,8 @@ The resulting `.msi` installer is fully self-contained — no Python installatio
 | `GET /api/sessions/{id}/events?page=1&per_page=50` | Paginated events for a session (content_blocks parsed; `per_page` clamped to 1–500) |
 | `GET /api/sessions/{id}/tree` | Session topology — branches, compactions, resumptions |
 | `GET /api/search?q=...&page=1` | FTS5 full-text search with snippet highlighting |
-| `GET /api/stats` | Aggregate stats (events, roles, tokens, per-model/per-provider breakdown) |
-| `GET /api/stats/daily?days=30` | Daily event/token time series |
+| `GET /api/stats` | Aggregate stats (events, roles, tokens, total cost USD, per-model/per-provider breakdown) |
+| `GET /api/stats/daily?days=30` | Daily event/token/cost time series |
 | `GET /api/stats/tools?limit=15` | Most frequently used tools |
 | `POST /api/scan` | Start a background incremental scan (returns immediately) |
 | `POST /api/scan/full` | Start a background full re-scan |
@@ -227,6 +227,30 @@ From each Claude Code transcript, bagger extracts:
 - Token usage (input / output)
 - Model version
 - Session metadata (working directory, git branch)
+
+## Privacy & Security
+
+bagger is **local-first by design**. Your transcripts never leave your machine.
+
+- **No cloud, no telemetry.** bagger only reads the JSONL transcripts your AI tools
+  already write locally and stores them in a SQLite file on your disk. There is no
+  network call that uploads transcript content, and no analytics/phone-home of any kind.
+- **Where your data lives.** Everything — the database, FTS index, and config — lives
+  under `~/.bagger/` by default (override with `bagger_dir` in `~/.bagger/config.toml`).
+  Delete that folder and all of bagger's data is gone. The source transcripts in
+  `~/.claude/projects/` (and other tools' directories) are only *read*, never modified.
+- **API binds to loopback.** `bagger serve` and the bundled Tauri sidecar both listen on
+  `127.0.0.1:8723` — they are not reachable from the network. The API can trigger real
+  filesystem scans, so it must never be exposed.
+- **CORS is locked to loopback.** Cross-origin requests are restricted to
+  `http://127.0.0.1:8723` and `http://localhost:8723` by default. Because the API can
+  start scans and read local files, a wildcard `*` origin would let any website drive
+  your local agent — so the allow-list is taken verbatim from `cors_origins` in
+  `~/.bagger/config.toml` and never widened automatically. Only relax this if you
+  understand the implications.
+- **Cost data is stored as-is.** `cost_usd` is copied from provider usage records when
+  present (e.g. Anthropic transcripts) and shown in the Analytics view. It is never sent
+  anywhere; Codex/OpenAI transcripts carry no cost field and stay at `$0.00`.
 
 ## Development
 

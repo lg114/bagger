@@ -42,3 +42,13 @@ export function formatTokens(n: number): string {
   }
   return String(n);
 }
+
+export function formatCost(n: number | undefined | null): string {
+  if (n == null || n === 0) return "$0.00";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
+}

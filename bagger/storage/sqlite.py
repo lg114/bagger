@@ -689,7 +689,8 @@ class SqliteEventRepository:
             "SUM(CASE WHEN role='assistant' THEN 1 ELSE 0 END) as assistant_events, "
             "COALESCE(SUM(token_cache_read), 0) as cache_read, "
             "COALESCE(SUM(token_cache_write), 0) as cache_write, "
-            "COALESCE(SUM(token_input), 0) as total_input "
+            "COALESCE(SUM(token_input), 0) as total_input, "
+            "COALESCE(SUM(cost_usd), 0) as total_cost "
             "FROM events"
         ).fetchone()
         total_sessions = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
@@ -701,14 +702,16 @@ class SqliteEventRepository:
         per_model = self._conn.execute(
             "SELECT model, "
             "COALESCE(SUM(token_input + token_output), 0) as tokens, "
-            "COUNT(*) as events "
+            "COUNT(*) as events, "
+            "COALESCE(SUM(cost_usd), 0) as cost "
             "FROM events WHERE model IS NOT NULL "
             "GROUP BY model ORDER BY tokens DESC LIMIT 10"
         ).fetchall()
         per_provider = self._conn.execute(
             "SELECT provider, "
             "COALESCE(SUM(token_input + token_output), 0) as tokens, "
-            "COUNT(*) as events "
+            "COUNT(*) as events, "
+            "COALESCE(SUM(cost_usd), 0) as cost "
             "FROM events WHERE provider IS NOT NULL "
             "GROUP BY provider ORDER BY tokens DESC LIMIT 10"
         ).fetchall()
@@ -729,6 +732,7 @@ class SqliteEventRepository:
             "assistant_events": row["assistant_events"],
             "tool_uses": tool_uses,
             "cache_hit_rate": cache_hit_rate,
+            "total_cost_usd": row["total_cost"],
             "per_model": [_row_to_dict(r) for r in per_model],
             "per_provider": [_row_to_dict(r) for r in per_provider],
             "per_source": [_row_to_dict(r) for r in per_source],
@@ -738,7 +742,8 @@ class SqliteEventRepository:
         rows = self._conn.execute(
             "SELECT substr(timestamp, 1, 10) as date, "
             "COUNT(*) as count, "
-            "COALESCE(SUM(token_input + token_output), 0) as tokens "
+            "COALESCE(SUM(token_input + token_output), 0) as tokens, "
+            "COALESCE(SUM(cost_usd), 0) as cost "
             "FROM events GROUP BY date ORDER BY date DESC LIMIT ?",
             (days,),
         ).fetchall()

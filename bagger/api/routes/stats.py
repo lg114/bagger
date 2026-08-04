@@ -22,6 +22,7 @@ def get_stats() -> dict:
         "assistant_events": s["assistant_events"],
         "tool_uses": s["tool_uses"],
         "total_tokens": s["total_tokens"],
+        "total_cost_usd": s["total_cost_usd"],
         "cache_hit_rate": s.get("cache_hit_rate"),
         "per_model": s.get("per_model", []),
         "per_provider": s.get("per_provider", []),

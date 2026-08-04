@@ -475,6 +475,7 @@ def test_get_stats_includes_cache_rate_and_breakdown():
         e1.token_cache_read = 80
         e1.model = "claude-sonnet-4"
         e1.provider = "anthropic"
+        e1.cost_usd = 0.10
 
         e2 = _make_event(event_id="e2", session_id="s2", role=Role.ASSISTANT)
         e2.token_input = 10
@@ -482,6 +483,7 @@ def test_get_stats_includes_cache_rate_and_breakdown():
         e2.token_cache_read = 40
         e2.model = "claude-sonnet-4"
         e2.provider = "anthropic"
+        e2.cost_usd = 0.20
 
         storage.insert_events([e1, e2])
 
@@ -489,11 +491,14 @@ def test_get_stats_includes_cache_rate_and_breakdown():
         # cache_hit_rate = cache_read / (cache_read + input) = 120 / 150
         assert stats["cache_hit_rate"] == 0.8
         assert stats["total_tokens"] == 45
+        assert abs(stats["total_cost_usd"] - 0.30) < 1e-9
         assert len(stats["per_model"]) == 1
         assert stats["per_model"][0]["model"] == "claude-sonnet-4"
         assert stats["per_model"][0]["tokens"] == 45
+        assert abs(stats["per_model"][0]["cost"] - 0.30) < 1e-9
         assert len(stats["per_provider"]) == 1
         assert stats["per_provider"][0]["provider"] == "anthropic"
+        assert abs(stats["per_provider"][0]["cost"] - 0.30) < 1e-9
 
         storage.close()
 
