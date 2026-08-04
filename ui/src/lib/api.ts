@@ -216,3 +216,31 @@ export interface ScanStatus {
 export function getScanStatus(): Promise<ScanStatus> {
   return fetchApi<ScanStatus>("/scan/status");
 }
+
+// ── Export (session -> Markdown) ───────────────────────
+
+/**
+ * Trigger a Markdown download for a session.
+ *
+ * We point a real <a> at the export endpoint and click it synchronously
+ * inside the click handler. The server responds with
+ * `Content-Disposition: attachment`, so the browser downloads the file
+ * natively — and the filename comes from that header.
+ *
+ * This is deliberately synchronous. The previous implementation did
+ * `fetch` → `await` → build a blob → `a.click()`. Because the `click()`
+ * happened after an `await`, the user-activation window had already expired
+ * and Chrome silently dropped the download (no error thrown, nothing
+ * downloaded). A synchronous anchor click keeps the download inside the
+ * gesture, so it always works.
+ */
+export function exportSessionMarkdown(id: string, format = "markdown"): void {
+  const url = `${API_BASE}/sessions/${encodeURIComponent(id)}/export?format=${encodeURIComponent(format)}`;
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `bagger-${id.slice(0, 24)}.md`;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}

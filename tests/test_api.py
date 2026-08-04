@@ -241,6 +241,59 @@ def test_get_session_events():
         assert data["data"][0]["content_blocks"][0]["text"] == "First message"
 
 
+def test_export_session_markdown():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        storage = _override_db(td)
+
+        storage.upsert_session(Session(session_id="sess-x", summary="Export me", source="claude"))
+        storage.insert_events(
+            [
+                _make_event(
+                    event_id="e1", session_id="sess-x", role=Role.USER, text="What is 2+2?"
+                ),
+                _make_event(
+                    event_id="e2",
+                    session_id="sess-x",
+                    role=Role.ASSISTANT,
+                    text="4.",
+                    source="claude",
+                ),
+            ]
+        )
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+        client = TestClient(app)
+
+        # Prefix match works like other session routes.
+        response = client.get("/api/sessions/sess-x/export")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/markdown")
+        assert "attachment" in response.headers["content-disposition"]
+        body = response.text
+        assert "# Export me" in body
+        assert "What is 2+2?" in body
+        assert "🤖 Assistant" in body
+
+
+def test_export_session_unsupported_format():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        storage = _override_db(td)
+        storage.upsert_session(Session(session_id="sess-z", summary="Z"))
+        storage.insert_events([_make_event(session_id="sess-z")])
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        client = TestClient(create_app())
+        response = client.get("/api/sessions/sess-z/export?format=pdf")
+        assert response.status_code == 400
+
+
 def test_get_session_events_pagination():
     """/events supports page/per_page and caps per_page at 500 (P1)."""
     with tempfile.TemporaryDirectory() as tmpdir:

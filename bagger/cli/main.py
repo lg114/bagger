@@ -319,6 +319,72 @@ def doctor():
     click.echo()
 
 
+# ── export ──────────────────────────────────────────────────
+
+
+@cli.command()
+@click.argument("session_id")
+@click.option(
+    "--format",
+    "fmt",
+    default="markdown",
+    type=click.Choice(["markdown"]),
+    help="Export format (markdown)",
+)
+@click.option("-o", "--output", default=None, help="Write to this file (default: stdout)")
+@click.option(
+    "--dir",
+    "out_dir",
+    default=None,
+    help="Write to DIR using an auto-generated <session>.md filename",
+)
+@click.option("--source", default=None, help="Limit to a single source (multi-tool IDs)")
+@require_db()
+@with_storage
+def export(storage, session_id, fmt, output, out_dir, source):
+    """Export a conversation session to a readable document.
+
+    SESSION_ID may be a full or prefix match. With no -o/--dir the Markdown is
+    printed to stdout; with -o it is written to a file; with --dir it is written
+    to DIR/<session>.md.
+    """
+    from bagger.exporters.markdown import SUPPORTED_FORMATS, render_session
+
+    if fmt not in SUPPORTED_FORMATS:
+        click.echo(f"  Unsupported format '{fmt}'.", err=True)
+        click.echo(f"  Supported: {', '.join(SUPPORTED_FORMATS)}", err=True)
+        return
+
+    # Resolve the session (prefix match via SQL LIKE, optionally scoped by source).
+    session = storage.get_session(session_id, source=source)
+    if session is None:
+        session = storage.find_session_by_prefix(session_id, source=source)
+        if session is None:
+            click.echo(f"  No session found matching: {session_id}", err=True)
+            return
+    resolved_id = session["id"]
+
+    events = storage.get_session_events(resolved_id, source=source)
+    body = render_session(session, events, fmt=fmt)
+
+    if out_dir:
+        from pathlib import Path
+
+        target = Path(out_dir) / f"{resolved_id}.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+        click.echo(click.style(f"  Exported {len(events)} events -> {target}", fg="green"))
+    elif output:
+        from pathlib import Path
+
+        target = Path(output)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+        click.echo(click.style(f"  Exported {len(events)} events -> {target}", fg="green"))
+    else:
+        click.echo(body)
+
+
 # ── rebuild-index ───────────────────────────────────────────
 
 

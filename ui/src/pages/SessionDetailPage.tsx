@@ -1,8 +1,8 @@
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { ArrowLeft, Calendar, Folder, MessageSquare, Hash, AlertCircle, Search } from "lucide-react";
-import { getSession, getSessionEvents, getSessionTree } from "@/lib/api";
+import { ArrowLeft, Calendar, Folder, MessageSquare, Hash, AlertCircle, Search, Download } from "lucide-react";
+import { getSession, getSessionEvents, getSessionTree, exportSessionMarkdown } from "@/lib/api";
 import type { TreeNode } from "@/lib/api";
 import SessionTree from "@/components/SessionTree";
 import { SourceBadge } from "@/components/SourceBadge";
@@ -40,6 +40,20 @@ export default function SessionDetailPage() {
   const events: Event[] = eventsData?.data ?? [];
   const isLoading = sessLoading || evtLoading;
   const error = sessError || evtError;
+
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  function handleExport() {
+    if (!id || exporting) return;
+    setExporting(true);
+    setExportError(null);
+    // Synchronous anchor click (see exportSessionMarkdown). The browser
+    // downloads natively; we can't observe completion, so just flash the
+    // "Exporting…" state briefly as acknowledgement.
+    exportSessionMarkdown(id);
+    window.setTimeout(() => setExporting(false), 1200);
+  }
 
   // Loading
   if (isLoading) {
@@ -99,8 +113,21 @@ export default function SessionDetailPage() {
               Ctrl+F
             </kbd>
           </button>
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-element border border-border text-xs font-mono text-muted-foreground hover:text-primary hover:border-primary/35 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            title={exportError ? `Export failed: ${exportError}` : "Export this conversation as Markdown"}
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{exporting ? "Exporting…" : "Export"}</span>
+          </button>
         </div>
       </div>
+
+      {exportError && (
+        <p className="text-xs text-warning/80 font-mono mb-4">Export failed: {exportError}</p>
+      )}
 
       <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
         {/* Main: conversation / topology */}

@@ -11,6 +11,7 @@ import {
   triggerScan,
   triggerFullScan,
   getScanStatus,
+  exportSessionMarkdown,
 } from "../api";
 
 const mockFetch = vi.fn();
@@ -260,5 +261,36 @@ describe("getScanStatus", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining("/scan/status"),
     );
+  });
+});
+
+// ── exportSessionMarkdown ────────────────────────────────
+
+describe("exportSessionMarkdown", () => {
+  it("points a real anchor at the export endpoint and clicks it synchronously", () => {
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click");
+    const appendSpy = vi.spyOn(document.body, "appendChild");
+
+    exportSessionMarkdown("sess-9");
+
+    // An <a> was created and appended, and clicked synchronously (no fetch).
+    expect(clickSpy).toHaveBeenCalled();
+    expect(appendSpy).toHaveBeenCalled();
+
+    const anchor = appendSpy.mock.calls[0][0] as HTMLAnchorElement;
+    expect(anchor.tagName).toBe("A");
+    expect(anchor.href).toContain("/sessions/sess-9/export");
+    expect(anchor.href).toContain("format=markdown");
+
+    clickSpy.mockRestore();
+    appendSpy.mockRestore();
+  });
+
+  it("encodes the session id in the URL", () => {
+    const appendSpy = vi.spyOn(document.body, "appendChild");
+    exportSessionMarkdown("a/b%c");
+    const anchor = appendSpy.mock.calls[0][0] as HTMLAnchorElement;
+    expect(anchor.href).toContain("/sessions/a%2Fb%25c/export");
+    appendSpy.mockRestore();
   });
 });

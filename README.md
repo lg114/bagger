@@ -5,10 +5,14 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
-[![Tests](https://img.shields.io/badge/tests-119%20passing-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-156%20passing-brightgreen.svg)](#development)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
 
 bagger reads the JSONL transcripts that Claude Code writes to `~/.claude/projects/` and turns them into a queryable SQLite database with FTS5 full-text search (CJK-aware) and session replay. The pipeline is multi-source by design — a parser registry drives scan/watch across tools, and every event carries its `source` end to end (DB keys, CLI, API, UI). Claude Code is the bundled parser today. Think of it as your AI coding memory layer — with a visual memory browser on top.
+
+<p align="center">
+  <img src="docs/preview.png" alt="bagger Dashboard — session list with source badges, KPI cards, and project-centric sidebar" width="860" />
+</p>
 
 ## Why
 
@@ -100,6 +104,7 @@ The resulting `.msi` installer is fully self-contained — no Python installatio
 | `bagger rebuild-index` | Rebuild the FTS5 search index from all events |
 | `bagger serve` | Start the REST API server (requires `pip install -e ".[web]"`) |
 | `bagger serve --reload` | Start with hot reload — code changes auto-restart (dev mode) |
+| `bagger export <session_id>` | Export a session as Markdown (`--format`, `-o`, `--dir`, `--source`) |
 
 ## REST API
 
@@ -112,6 +117,7 @@ The resulting `.msi` installer is fully self-contained — no Python installatio
 | `GET /api/sessions/{id}` | Session metadata |
 | `GET /api/sessions/{id}/events?page=1&per_page=50` | Paginated events for a session (content_blocks parsed; `per_page` clamped to 1–500) |
 | `GET /api/sessions/{id}/tree` | Session topology — branches, compactions, resumptions |
+| `GET /api/sessions/{id}/export?format=markdown` | Export session as Markdown (download) |
 | `GET /api/search?q=...&page=1` | FTS5 full-text search with snippet highlighting |
 | `GET /api/stats` | Aggregate stats (events, roles, tokens, total cost USD, per-model/per-provider breakdown) |
 | `GET /api/stats/daily?days=30` | Daily event/token/cost time series |
@@ -189,10 +195,10 @@ bagger/
 │   ├── parsers/           # Parser protocol + registry (base.py) + Claude Code implementation (claude.py)
 │   ├── storage/           # Storage protocol (base.py) + SQLite/FTS5 implementation (sqlite.py)
 │   ├── services/          # Business logic (sync, scanner, watcher, search, replay)
-│   ├── exporters/         # Export abstractions (base, jsonl)
+│   ├── exporters/         # Export abstractions (base, jsonl, markdown)
 │   ├── config.py          # Settings — single config entry point (~/.bagger/config.toml)
 │   └── sidecar_main.py    # PyInstaller entry for the Tauri sidecar
-├── tests/                 # pytest suite (119 tests) + fixtures/
+├── tests/                 # pytest suite (156 tests) + fixtures/
 ├── scripts/               # Build helpers (PyInstaller sidecar bundling)
 └── ui/                    # Tauri + React desktop frontend
     └── src-tauri/         # Rust shell, tray, sidecar lifecycle
@@ -256,7 +262,7 @@ bagger is **local-first by design**. Your transcripts never leave your machine.
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -q            # 119 tests
+pytest tests/ -q            # 156 tests
 ```
 
 ### Code quality
@@ -295,9 +301,10 @@ Contributions are welcome. Before opening a PR, please read
 - [x] Config file (`~/.bagger/config.toml`) for non-default paths
 - [x] Desktop app production build (PyInstaller sidecar + Tauri .msi)
 - [x] Robust incremental parsing & watcher state persistence (survives restart, tolerant of partial writes)
-- [x] Multi-source foundation — parser registry drives scan/watch across tools; `source` flows through DB composite keys, CLI `--source`, `/api/sessions?source=`, and UI source badges/filters (Claude Code is the bundled parser)
-- [ ] More exporters (Zvec, Markdown)
-- [ ] Additional parsers for more AI coding agents (Cursor, Codex, ...)
+- [x] Multi-source foundation — parser registry drives scan/watch across tools; `source` flows through DB composite keys, CLI `--source`, `/api/sessions?source=`, and UI source badges/filters (Claude Code & Codex bundled)
+- [x] Markdown session export (CLI + REST API + UI download button)
+- [ ] More exporters (Zvec, structured summary)
+- [ ] Additional parsers for more AI coding agents (Cursor, Gemini, ...)
 
 ## License
 
