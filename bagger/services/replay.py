@@ -53,7 +53,8 @@ def replay_session(
         except (json.JSONDecodeError, TypeError):
             logger.warning(
                 "Skipping malformed content_json for event %s in session %s",
-                ev.get("event_id"), session_id,
+                ev.get("event_id"),
+                session_id,
             )
             blocks = []
         for block in blocks:
