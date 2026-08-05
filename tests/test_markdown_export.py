@@ -1,14 +1,19 @@
 """Unit tests for the Markdown session exporter (pure render_session_markdown)."""
 
 import json
+from datetime import datetime
 
 import pytest
 
 from bagger.exporters.markdown import (
     SUPPORTED_FORMATS,
+    Exporter,
+    MarkdownExporter,
+    _event_to_render_dict,
     render_session,
     render_session_markdown,
 )
+from bagger.models.event import ContentBlock, MemoryEvent, Role
 
 SESSION = {
     "id": "abc123def456",
@@ -123,3 +128,78 @@ def test_supported_formats_and_dispatch():
         render_session(SESSION, [], fmt="pdf")
     md = render_session(SESSION, [], fmt="markdown")
     assert "# Refactor the auth module" in md
+
+
+# ── MarkdownExporter (Exporter ABC) ─────────────────────────
+
+
+def _mev(role, blocks, **kw):
+    """Build a MemoryEvent from block dicts (mirrors how parsers produce them)."""
+    return MemoryEvent(
+        event_id=kw.get("event_id", "e1"),
+        session_id=kw.get("session_id", "s1"),
+        timestamp=datetime(2026, 8, 4, 10, 5),
+        role=role,
+        content_blocks=[
+            ContentBlock(
+                block_type=b["block_type"],
+                text=b.get("text"),
+                tool_name=b.get("tool_name"),
+                tool_input=b.get("tool_input"),
+            )
+            for b in blocks
+        ],
+        token_input=kw.get("token_input", 0),
+        token_output=kw.get("token_output", 0),
+        cost_usd=kw.get("cost_usd"),
+        model=kw.get("model"),
+    )
+
+
+def test_markdown_exporter_implements_abc_and_writes_file(tmp_path):
+    path = tmp_path / "abc123.md"
+    exporter = MarkdownExporter(path, dict(SESSION))
+    assert isinstance(exporter, Exporter)
+
+    exporter.export_event(
+        _mev(Role.USER, [{"block_type": "text", "text": "Please fix the bug in login.py"}])
+    )
+    exporter.export_event(
+        _mev(
+            Role.ASSISTANT,
+            [{"block_type": "text", "text": "Sure, I'll edit it."}],
+            token_input=120,
+            token_output=40,
+        )
+    )
+    exporter.flush()
+
+    md = path.read_text(encoding="utf-8")
+    assert "# Refactor the auth module" in md
+    assert "Please fix the bug in login.py" in md
+    assert "_tokens: in 120 · out 40_" in md
+
+
+def test_markdown_exporter_empty_session_still_writes_header(tmp_path):
+    path = tmp_path / "empty.md"
+    exporter = MarkdownExporter(path, dict(SESSION))
+    exporter.flush()  # no events exported
+    md = path.read_text(encoding="utf-8")
+    assert "# Refactor the auth module" in md
+    assert "**Messages:** 3" in md
+
+
+def test_markdown_exporter_matches_render_session_markdown(tmp_path):
+    """Class path must equal the pure-function path → conversion mirrors storage."""
+    ev = _mev(
+        Role.ASSISTANT,
+        [{"block_type": "tool_use", "tool_name": "Edit", "tool_input": {"file_path": "login.py"}}],
+    )
+    path = tmp_path / "x.md"
+    exporter = MarkdownExporter(path, dict(SESSION))
+    exporter.export_event(ev)
+    exporter.flush()
+    class_out = path.read_text(encoding="utf-8")
+
+    pure_out = render_session_markdown(SESSION, [_event_to_render_dict(ev)])
+    assert class_out == pure_out

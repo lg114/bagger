@@ -1,19 +1,30 @@
 """Markdown exporter: render a single session into readable Markdown.
 
-Unlike the event-stream ``Exporter`` ABC (used for JSONL backup), a Markdown
-export is session-scoped: one file per session, conversation replayed in
-reading order. The core ``render_session_markdown`` is a pure function over a
-session dict + its event dicts so it can be unit-tested without a database.
+``render_session_markdown`` / ``render_session`` are pure functions over a
+session dict + its event dicts, used directly by the API and CLI to return a
+Markdown string. ``MarkdownExporter`` wraps that same renderer to satisfy the
+event-stream ``Exporter`` ABC (used by ``JsonlExporter`` for backup), so a
+Markdown export is a first-class ``Exporter`` too — even though, unlike JSONL,
+it is session-scoped (one file per session, rendered on flush).
 """
 
 from __future__ import annotations
 
 import json
 from datetime import datetime
+from pathlib import Path
 
-# Cap tool_result blobs so the exported .md stays readable instead of
-# becoming a multi-megabyte paste of file contents / command output.
-DEFAULT_MAX_TOOL_RESULT_CHARS = 2000
+from bagger.exporters.base import Exporter
+from bagger.models.event import BlockType, MemoryEvent
+
+# Render-layer cap for human-readable Markdown output. Deliberately *much*
+# smaller than the storage-layer cap (32KB, ``bagger.parsers._common.
+# TOOL_RESULT_MAX_CHARS``): the database retains full tool_result fidelity,
+# while the exported .md is meant for skimming, so a 2KB ceiling keeps it
+# readable instead of a multi-megabyte paste of file contents / command output.
+# The two caps are intentionally different layers and are NOT unified into one
+# value — collapsing them would either bloat the DB (at 2KB) or the .md (at 32KB).
+MARKDOWN_RENDER_TOOL_RESULT_CAP = 2000
 
 # Formats the exporter understands today. "zvec" / structured-summary are
 # roadmap items; adding one is just another branch in ``render_session``.
@@ -84,7 +95,7 @@ def render_session_markdown(
     events: list[dict],
     *,
     include_meta: bool = True,
-    max_tool_result_chars: int = DEFAULT_MAX_TOOL_RESULT_CHARS,
+    max_tool_result_chars: int = MARKDOWN_RENDER_TOOL_RESULT_CAP,
 ) -> str:
     """Render ``session`` + its ``events`` into a readable Markdown document.
 
@@ -198,3 +209,74 @@ def render_session(
             f"Unsupported export format '{fmt}'. Supported: {', '.join(SUPPORTED_FORMATS)}"
         )
     return render_session_markdown(session, events, **kwargs)
+
+
+# ── Exporter ABC implementation ──────────────────────────────
+
+
+def _event_to_render_dict(event: MemoryEvent) -> dict:
+    """Convert a ``MemoryEvent`` to the storage-shape dict the renderer expects.
+
+    Mirrors ``SqliteEventRepository._event_params`` so a ``MarkdownExporter``
+    produces byte-for-byte the same Markdown as the API/CLI do from the database:
+    ``content_json`` is the serialized ``content_blocks`` list and ``content_text``
+    is the FTS-extraction fallback used when JSON is missing.
+    """
+    content_json = json.dumps([b.model_dump() for b in event.content_blocks], ensure_ascii=False)
+    text_parts: list[str] = []
+    for b in event.content_blocks:
+        if b.block_type in (BlockType.TEXT, BlockType.THINKING) and b.text:
+            text_parts.append(b.text)
+        elif b.block_type == BlockType.TOOL_USE:
+            text_parts.append(f"[tool_use:{b.tool_name}]")
+        elif b.block_type == BlockType.TOOL_RESULT and b.text:
+            text_parts.append(f"[tool_result:{b.text[:200]}]")
+    content_text = " ".join(text_parts)
+    ts = (
+        event.timestamp.isoformat()
+        if isinstance(event.timestamp, datetime)
+        else str(event.timestamp)
+    )
+    return {
+        "role": event.role.value,
+        "timestamp": ts,
+        "content_json": content_json,
+        "content_text": content_text,
+        "model": event.model,
+        "token_input": event.token_input,
+        "token_output": event.token_output,
+        "cost_usd": event.cost_usd,
+    }
+
+
+class MarkdownExporter(Exporter):
+    """Session-scoped Markdown exporter implementing the ``Exporter`` ABC.
+
+    Unlike ``JsonlExporter`` (which streams one event per line to a file), a
+    Markdown document needs the whole session rendered in reading order, so
+    events are buffered via :meth:`export_event` and the file is written once on
+    :meth:`flush`. The session dict is supplied up front (as to
+    ``render_session_markdown``).
+    """
+
+    def __init__(self, path: Path, session: dict):
+        self._path = path
+        self._session = session
+        self._events: list[MemoryEvent] = []
+
+    def export_event(self, event: MemoryEvent) -> None:
+        self._events.append(event)
+
+    def render(self) -> str:
+        """Render buffered events into a Markdown string (no file I/O)."""
+        events = [_event_to_render_dict(e) for e in self._events]
+        return render_session_markdown(self._session, events)
+
+    def flush(self) -> None:
+        body = self.render()
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(body, encoding="utf-8")
+
+    def close(self) -> None:
+        """Flush and release. Safe to call multiple times (mirrors JsonlExporter)."""
+        self.flush()

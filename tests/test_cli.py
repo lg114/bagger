@@ -61,9 +61,10 @@ def _setup_env(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 
 def _make_runner() -> CliRunner:
-    # mix_stderr=False so r.stderr is captured separately (click's default
-    # merges stderr into stdout, which makes r.stderr raise in newer versions).
-    return CliRunner(mix_stderr=False)
+    # Use the default CliRunner. In click 8.2+ the `mix_stderr` kwarg was
+    # removed, and in 8.0-8.1 it defaults to True anyway, so stderr is merged
+    # into `r.output`. We always assert against r.output for cross-version safety.
+    return CliRunner()
 
 
 # ── init ───────────────────────────────────────────────────
@@ -247,8 +248,10 @@ def test_commands_fail_before_init(tmp_path: Path):
         runner.invoke(cli, ["rebuild-index"]),
     ]
     for r in results:
-        # require_db prints to stderr via click.echo(..., err=True)
-        assert "bagger init" in r.stderr.lower()
+        # require_db prints to stderr via click.echo(..., err=True). With the
+        # default CliRunner, stderr is merged into r.output across all click
+        # versions, so assert here rather than on the (version-fragile) r.stderr.
+        assert "bagger init" in r.output.lower()
 
 
 # ── scan: parse errors are surfaced (P0-1) ───────────────────
