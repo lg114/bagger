@@ -1,6 +1,6 @@
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, Calendar, Folder, MessageSquare, Hash, AlertCircle, Search, Download } from "lucide-react";
 import { getSession, getSessionEvents, getSessionTree, exportSessionMarkdown } from "@/lib/api";
 import type { TreeNode } from "@/lib/api";
@@ -43,15 +43,25 @@ export default function SessionDetailPage() {
 
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportDone, setExportDone] = useState<string | null>(null);
+
+  // Clear the "exported → Downloads" note when switching to another session,
+  // so it never shows a stale filename for the session currently on screen.
+  useEffect(() => {
+    setExportDone(null);
+  }, [id]);
 
   function handleExport() {
     if (!id || exporting) return;
     setExporting(true);
     setExportError(null);
     // Synchronous anchor click (see exportSessionMarkdown). The browser
-    // downloads natively; we can't observe completion, so just flash the
-    // "Exporting…" state briefly as acknowledgement.
+    // downloads natively to the user's default Downloads folder. We can't
+    // observe completion, so we surface the expected filename + destination
+    // as confirmation instead of leaving the user guessing where it went.
+    const filename = `bagger-${session?.source ?? "session"}-${id.slice(0, 24)}.md`;
     exportSessionMarkdown(id);
+    setExportDone(filename);
     window.setTimeout(() => setExporting(false), 1200);
   }
 
@@ -127,6 +137,14 @@ export default function SessionDetailPage() {
 
       {exportError && (
         <p className="text-xs text-warning/80 font-mono mb-4">Export failed: {exportError}</p>
+      )}
+
+      {exportDone && !exportError && (
+        <p className="text-xs text-primary/80 font-mono mb-4 flex items-center gap-1.5">
+          <span className="text-primary">✓</span>
+          Exported <span className="text-foreground/90">{exportDone}</span> → your browser&apos;s
+          default <span className="text-foreground/90">Downloads</span> folder
+        </p>
       )}
 
       <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
