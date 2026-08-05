@@ -10,11 +10,11 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
+from bagger.cjk import JIEBA_CJK_WARNING
 from bagger.models.event import BlockType, ContentBlock, MemoryEvent, Role
 from bagger.parsers.base import Parser, StandardUsage
 from bagger.services.scanner import check_jieba_cjk_incoming
 from bagger.storage.sqlite import (
-    _JIEBA_CJK_WARNING,
     SqliteStorage,
     check_jieba_cjk_coverage,
 )
@@ -55,41 +55,41 @@ def test_rebuild_warns_when_jieba_missing_and_cjk(tmp_path, caplog):
     storage = _storage(tmp_path)
     storage.insert_event(_cjk_event())
     with (
-        patch("bagger.storage.sqlite._jieba_available", return_value=False),
+        patch("bagger.storage.sqlite.jieba_available", return_value=False),
         caplog.at_level(logging.WARNING),
     ):
         storage.rebuild_fts_index()
-    assert _JIEBA_CJK_WARNING in caplog.text
+    assert JIEBA_CJK_WARNING in caplog.text
 
 
 def test_rebuild_no_warn_when_jieba_present(tmp_path, caplog):
     storage = _storage(tmp_path)
     storage.insert_event(_cjk_event())
     with (
-        patch("bagger.storage.sqlite._jieba_available", return_value=True),
+        patch("bagger.storage.sqlite.jieba_available", return_value=True),
         caplog.at_level(logging.WARNING),
     ):
         storage.rebuild_fts_index()
-    assert _JIEBA_CJK_WARNING not in caplog.text
+    assert JIEBA_CJK_WARNING not in caplog.text
 
 
 def test_rebuild_no_warn_when_english_only(tmp_path, caplog):
     storage = _storage(tmp_path)
     storage.insert_event(_english_event())
     with (
-        patch("bagger.storage.sqlite._jieba_available", return_value=False),
+        patch("bagger.storage.sqlite.jieba_available", return_value=False),
         caplog.at_level(logging.WARNING),
     ):
         storage.rebuild_fts_index()
-    assert _JIEBA_CJK_WARNING not in caplog.text
+    assert JIEBA_CJK_WARNING not in caplog.text
 
 
 def test_check_jieba_cjk_coverage_direct(tmp_path):
     storage = _storage(tmp_path)
     storage.insert_event(_cjk_event())
-    with patch("bagger.storage.sqlite._jieba_available", return_value=False):
-        assert check_jieba_cjk_coverage(storage._conn) == _JIEBA_CJK_WARNING
-    with patch("bagger.storage.sqlite._jieba_available", return_value=True):
+    with patch("bagger.storage.sqlite.jieba_available", return_value=False):
+        assert check_jieba_cjk_coverage(storage._conn) == JIEBA_CJK_WARNING
+    with patch("bagger.storage.sqlite.jieba_available", return_value=True):
         assert check_jieba_cjk_coverage(storage._conn) is None
 
 
@@ -121,15 +121,15 @@ class _FakeEnglishParser(_FakeParser):
 
 
 def test_scanner_warns_when_jieba_missing_and_cjk():
-    with patch("bagger.services.scanner._jieba_available", return_value=False):
-        assert check_jieba_cjk_incoming(_FakeParser()) == _JIEBA_CJK_WARNING
+    with patch("bagger.services.scanner.jieba_available", return_value=False):
+        assert check_jieba_cjk_incoming(_FakeParser()) == JIEBA_CJK_WARNING
 
 
 def test_scanner_no_warn_when_jieba_present():
-    with patch("bagger.services.scanner._jieba_available", return_value=True):
+    with patch("bagger.services.scanner.jieba_available", return_value=True):
         assert check_jieba_cjk_incoming(_FakeParser()) is None
 
 
 def test_scanner_no_warn_when_english_only():
-    with patch("bagger.services.scanner._jieba_available", return_value=False):
+    with patch("bagger.services.scanner.jieba_available", return_value=False):
         assert check_jieba_cjk_incoming(_FakeEnglishParser()) is None

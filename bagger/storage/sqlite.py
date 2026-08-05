@@ -14,20 +14,25 @@ All three repos are thin wrappers around ``conn.execute()`` — they do not
 own the connection lifecycle. ``SqliteStorage.connect()`` creates the
 connection *and* the repos; ``.close()`` tears them all down.
 
-Module-level helpers (``_row_to_dict``, ``_extract_text``, ``_contains_cjk``,
+Module-level helpers (``_row_to_dict``, ``_extract_text``, ``contains_cjk``,
 etc.) are shared across repos and remain stateless.
 """
 
 import contextlib
 import json
 import logging
-import re
 import sqlite3
 import threading
 from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
 
+from bagger.cjk import (
+    _CJK_RE,
+    JIEBA_CJK_WARNING,
+    contains_cjk,
+    jieba_available,
+)
 from bagger.models.event import BlockType, MemoryEvent, Session
 from bagger.storage.migrations import _column_exists, apply_migrations
 
@@ -137,53 +142,6 @@ EVENT_DETAIL_COLS = (
     "token_cache_read, token_cache_write, cost_usd, currency, service_tier, provider"
 )
 
-# ── CJK detection ──────────────────────────────────────────
-
-_CJK_RE = re.compile(
-    r"["
-    r"\u4e00-\u9fff"  # CJK Unified Ideographs
-    r"\u3400-\u4dbf"  # CJK Unified Extension A
-    r"\uf900-\ufaff"  # CJK Compatibility
-    r"\u3040-\u309f"  # Hiragana
-    r"\u30a0-\u30ff"  # Katakana
-    r"\uac00-\ud7af"  # Hangul
-    r"]"
-)
-
-
-def _contains_cjk(text: str) -> bool:
-    """Check if text contains CJK characters."""
-    return bool(_CJK_RE.search(text))
-
-
-_jieba_cached: bool | None = None  # tri-state: None=not checked, True/False=result
-
-
-def _jieba_available() -> bool:
-    """True if jieba is importable (cached after first check)."""
-    global _jieba_cached
-    if _jieba_cached is None:
-        try:
-            import jieba  # noqa: F401
-
-            _jieba_cached = True
-        except ImportError:
-            _jieba_cached = False
-    return _jieba_cached
-
-
-# Surfaced (non-fatally) when CJK search would be silently broken: FTS5's
-# unicode61 tokenizer does NOT split Chinese/Japanese/Korean characters, so
-# without jieba pre-tokenization the text is indexed as one opaque blob and
-# CJK queries return nothing. This is the exact failure we hit when a source
-# was scanned in an environment lacking jieba.
-_JIEBA_CJK_WARNING = (
-    "jieba is not installed — Chinese/Japanese/Korean text will be indexed as "
-    "opaque blobs and CJK search queries will return NO results. "
-    "Fix: `pip install jieba`, then re-run this command "
-    "(or `bagger rebuild-index` to re-index already-imported data)."
-)
-
 
 def _events_contain_cjk(conn: sqlite3.Connection, limit: int = 500) -> bool:
     """Heuristic: do the first ``limit`` stored events contain CJK characters?
@@ -198,7 +156,7 @@ def _events_contain_cjk(conn: sqlite3.Connection, limit: int = 500) -> bool:
         ).fetchall()
     except sqlite3.OperationalError:
         return False
-    return any(_contains_cjk(r[0] or "") for r in rows)
+    return any(contains_cjk(r[0] or "") for r in rows)
 
 
 def check_jieba_cjk_coverage(conn: sqlite3.Connection) -> str | None:
@@ -207,9 +165,9 @@ def check_jieba_cjk_coverage(conn: sqlite3.Connection) -> str | None:
     Returns ``None`` when CJK search is safe (jieba present, or no CJK data),
     otherwise the warning message the caller should surface to the user.
     """
-    if _jieba_available() or not _events_contain_cjk(conn):
+    if jieba_available() or not _events_contain_cjk(conn):
         return None
-    return _JIEBA_CJK_WARNING
+    return JIEBA_CJK_WARNING
 
 
 def _escape_fts5_query(query: str) -> str:
@@ -255,7 +213,7 @@ def _tokenize_for_fts(text: str) -> str:
 
     Returns the input unchanged when jieba is unavailable or the text is pure ASCII.
     """
-    if not text or not _contains_cjk(text) or not _jieba_available():
+    if not text or not contains_cjk(text) or not jieba_available():
         return text
     import jieba
 
@@ -797,7 +755,7 @@ class SqliteSearchIndex:
         Returns the original query unchanged for ASCII-only input or when
         jieba is unavailable.
         """
-        if not _contains_cjk(query) or not _jieba_available():
+        if not contains_cjk(query) or not jieba_available():
             return query
         import jieba
 

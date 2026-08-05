@@ -12,6 +12,7 @@ files, and delegates each file to ``SyncService``.
 import logging
 from pathlib import Path
 
+from bagger.cjk import JIEBA_CJK_WARNING, contains_cjk, jieba_available
 from bagger.config import settings
 from bagger.models.event import WatchState
 from bagger.parsers import ParserRegistry
@@ -19,7 +20,6 @@ from bagger.parsers.base import Parser
 from bagger.services.sync import SyncError, SyncService
 from bagger.services.watch_state_io import load_watch_state, save_watch_state
 from bagger.storage.base import Storage
-from bagger.storage.sqlite import _JIEBA_CJK_WARNING, _contains_cjk, _jieba_available
 
 logger = logging.getLogger(__name__)
 
@@ -44,16 +44,16 @@ def _incoming_contains_cjk(parser: Parser, files: list[Path] | None = None) -> b
         return False
     for event in sample:
         for block in event.content_blocks:
-            if block.text and _contains_cjk(block.text):
+            if block.text and contains_cjk(block.text):
                 return True
     return False
 
 
 def check_jieba_cjk_incoming(parser: Parser, files: list[Path] | None = None) -> str | None:
     """Return a warning if jieba is unavailable but ``parser`` yields CJK text."""
-    if _jieba_available() or not _incoming_contains_cjk(parser, files):
+    if jieba_available() or not _incoming_contains_cjk(parser, files):
         return None
-    return _JIEBA_CJK_WARNING
+    return JIEBA_CJK_WARNING
 
 
 def scan_all(
