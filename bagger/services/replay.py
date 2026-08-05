@@ -1,8 +1,11 @@
 """Terminal-based conversation replay."""
 
 import json
+import logging
 
 from bagger.storage.base import Storage
+
+logger = logging.getLogger(__name__)
 
 try:
     import click
@@ -45,7 +48,14 @@ def replay_session(
             lines.append(_style(f"[{ts}]  Assistant:", fg="green", bold=True))
 
         # Content blocks
-        blocks = json.loads(ev["content_json"])
+        try:
+            blocks = json.loads(ev["content_json"])
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(
+                "Skipping malformed content_json for event %s in session %s",
+                ev.get("event_id"), session_id,
+            )
+            blocks = []
         for block in blocks:
             bt = block.get("block_type", "")
             text = block.get("text", "")
