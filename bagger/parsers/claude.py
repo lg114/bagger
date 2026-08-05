@@ -206,8 +206,8 @@ def _extract_summary(path: Path) -> str:
                         if text:
                             return _truncate(text, 120)
                     break
-    except (OSError, json.JSONDecodeError):
-        pass
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Could not extract summary from %s: %s", path, exc)
 
     return "(no summary)"
 
