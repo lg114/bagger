@@ -61,7 +61,9 @@ def _setup_env(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 
 def _make_runner() -> CliRunner:
-    return CliRunner()
+    # mix_stderr=False so r.stderr is captured separately (click's default
+    # merges stderr into stdout, which makes r.stderr raise in newer versions).
+    return CliRunner(mix_stderr=False)
 
 
 # ── init ───────────────────────────────────────────────────

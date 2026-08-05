@@ -1,0 +1,48 @@
+"""Isolated tests for schema migrations (bagger.storage.migrations)."""
+
+import sqlite3
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
+
+from bagger.models.event import MemoryEvent, Role
+from bagger.storage.migrations import _column_exists, apply_migrations
+from bagger.storage.sqlite import SqliteStorage
+
+
+def test_column_exists_detects_present_and_absent():
+    # migrations run on a connection configured with sqlite3.Row (as
+    # SqliteStorage.connect() sets it at line 1140), so mirror that here.
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE t (a TEXT, b TEXT)")
+    assert _column_exists(conn, "t", "a") is True
+    assert _column_exists(conn, "t", "b") is True
+    assert _column_exists(conn, "t", "c") is False
+    # Unknown table → no crash, returns False.
+    assert _column_exists(conn, "nope", "a") is False
+
+
+def test_apply_migrations_is_idempotent_on_fresh_db():
+    """apply_migrations must be safe to call on an already-up-to-date (v4) DB
+    without corrupting it — the connector calls it on every ``connect()``."""
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        storage = SqliteStorage(Path(tmpdir) / "test.db")
+        storage.connect()
+
+        # No-op backfill; migrations are gated on user_version so nothing runs,
+        # but the call must not raise or leave the DB unusable.
+        apply_migrations(storage.conn, backfill_event_edges=lambda: None)
+
+        # DB still usable after a repeat migration pass.
+        storage.insert_event(
+            MemoryEvent(
+                event_id="evt-mig",
+                session_id="sess-mig",
+                timestamp=datetime(2026, 6, 30, tzinfo=UTC),
+                role=Role.USER,
+                content_blocks=[],
+            )
+        )
+        assert storage.get_event_count("sess-mig") == 1
+        storage.close()
