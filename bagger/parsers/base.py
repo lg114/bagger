@@ -34,7 +34,6 @@ class Parser(ABC):
     """
 
     @property
-    @property
     @abstractmethod
     def source_name(self) -> str:
         """Unique identifier, e.g. 'claude', 'cursor'."""
