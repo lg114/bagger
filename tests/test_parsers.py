@@ -6,17 +6,16 @@ from pathlib import Path
 
 from bagger.models.event import BlockType, Role
 from bagger.parsers.claude import (
+    ClaudeParser,
     _resolve_provider,
-    extract_summary,
     normalize_claude_usage,
-    parse_jsonl,
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_session.jsonl"
 
 
 def test_parse_jsonl_returns_events():
-    events = parse_jsonl(FIXTURE)
+    events = ClaudeParser().parse(FIXTURE)
     assert len(events) == 6  # 3 user + 3 assistant
 
     roles = [e.role for e in events]
@@ -29,7 +28,7 @@ def test_parse_jsonl_returns_events():
 
 
 def test_user_message_has_text_block():
-    events = parse_jsonl(FIXTURE)
+    events = ClaudeParser().parse(FIXTURE)
     user_msg = events[0]
     assert user_msg.role == Role.USER
     assert len(user_msg.content_blocks) == 1
@@ -38,7 +37,7 @@ def test_user_message_has_text_block():
 
 
 def test_assistant_response_has_text_and_tool_use():
-    events = parse_jsonl(FIXTURE)
+    events = ClaudeParser().parse(FIXTURE)
     assistant = events[1]
     assert assistant.role == Role.ASSISTANT
     block_types = [b.block_type for b in assistant.content_blocks]
@@ -47,7 +46,7 @@ def test_assistant_response_has_text_and_tool_use():
 
 
 def test_tool_result_is_parsed():
-    events = parse_jsonl(FIXTURE)
+    events = ClaudeParser().parse(FIXTURE)
     tool_result = events[2]
     assert tool_result.role == Role.USER
     assert tool_result.content_blocks[0].block_type == BlockType.TOOL_RESULT
@@ -55,7 +54,7 @@ def test_tool_result_is_parsed():
 
 
 def test_thinking_is_parsed():
-    events = parse_jsonl(FIXTURE)
+    events = ClaudeParser().parse(FIXTURE)
     thinking_event = events[3]
     thinking_blocks = [
         b for b in thinking_event.content_blocks if b.block_type == BlockType.THINKING
@@ -65,7 +64,7 @@ def test_thinking_is_parsed():
 
 
 def test_model_and_usage_are_extracted():
-    events = parse_jsonl(FIXTURE)
+    events = ClaudeParser().parse(FIXTURE)
     assistant = events[1]
     assert assistant.model == "claude-sonnet-4-20250514"
     assert assistant.token_input == 150
@@ -73,7 +72,7 @@ def test_model_and_usage_are_extracted():
 
 
 def test_session_metadata():
-    events = parse_jsonl(FIXTURE)
+    events = ClaudeParser().parse(FIXTURE)
     user = events[0]
     assert user.session_id == "abc-123-session"
     assert user.cwd == "/home/gc/project"
@@ -81,12 +80,12 @@ def test_session_metadata():
 
 
 def test_extract_summary():
-    summary = extract_summary(FIXTURE)
+    summary = ClaudeParser().extract_summary(FIXTURE)
     assert "Fix login token expiration" in summary
 
 
 def test_file_history_snapshot_skipped():
-    events = parse_jsonl(FIXTURE)
+    events = ClaudeParser().parse(FIXTURE)
     # 4 real events, file-history-snapshot should be skipped
     assert len(events) == 6  # no file-history-snapshot
 
@@ -212,7 +211,7 @@ def test_parse_entry_stores_usage_and_provider():
     tmp = Path(tempfile.mktemp(suffix=".jsonl"))
     tmp.write_text(json.dumps(raw), encoding="utf-8")
     try:
-        events = parse_jsonl(tmp)
+        events = ClaudeParser().parse(tmp)
     finally:
         tmp.unlink()
 

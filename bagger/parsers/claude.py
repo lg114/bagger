@@ -12,11 +12,10 @@ from bagger.models.event import (
     Role,
 )
 from bagger.parsers._common import (
-    TOOL_RESULT_MAX_CHARS,
-    truncate_text,
+    scandir_files as _scandir,
 )
 from bagger.parsers._common import (
-    scandir_files as _scandir,
+    truncate_text,
 )
 from bagger.parsers._common import (
     truncate_tool_result as _truncate_tool_result,
@@ -28,11 +27,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ClaudeParser",
-    "parse_jsonl",
-    "extract_summary",
     "normalize_claude_usage",
-    # Re-exported for tests and backward compat (lives in _common now).
-    "TOOL_RESULT_MAX_CHARS",
 ]
 
 # ── Parser implementation ──────────────────────────────────
@@ -99,7 +94,7 @@ class ClaudeParser(_Parser):
         return _extract_summary(path)
 
 
-# ── Module-level functions (backward compat, delegated by ClaudeParser) ──
+# ── Module-level helpers (delegated by ClaudeParser) ──
 
 
 def _parse_file(path: Path) -> list[MemoryEvent]:
@@ -212,9 +207,7 @@ def _extract_summary(path: Path) -> str:
     return "(no summary)"
 
 
-# ── Backward-compat aliases ──
-parse_jsonl = _parse_file
-extract_summary = _extract_summary
+# ── Thin helpers ──
 
 
 def _truncate(text: str, max_len: int) -> str:

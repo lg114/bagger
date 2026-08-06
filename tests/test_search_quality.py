@@ -3,7 +3,8 @@
 import pytest
 
 from bagger.models.event import BlockType, Role
-from bagger.parsers.claude import TOOL_RESULT_MAX_CHARS, _parse_content, _truncate_tool_result
+from bagger.parsers._common import TOOL_RESULT_MAX_CHARS
+from bagger.parsers.claude import _parse_content, _truncate_tool_result
 
 
 def test_tokenize_for_fts_adds_cjk_char_tokens():
