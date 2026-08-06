@@ -1,10 +1,17 @@
 """Parser Protocol — every AI tool transcript source implements this."""
 
+import importlib
+import inspect
+import logging
+import pkgutil
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
 from bagger.models.event import MemoryEvent
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -103,6 +110,7 @@ class ParserRegistry:
     """Global registry of known parsers, keyed by source_name."""
 
     _parsers: dict[str, Parser] = {}
+    _loaded: bool = False
 
     @classmethod
     def register(cls, parser: Parser) -> None:
@@ -143,6 +151,59 @@ class ParserRegistry:
         return result
 
     @classmethod
+    def load_builtin(cls, force: bool = False) -> None:
+        """Auto-register every concrete :class:`Parser` in the
+        ``bagger.parsers`` package (see :func:`_iter_parser_classes`).
+
+        Adding a new AI tool source is now just dropping a module in
+        ``parsers/`` — no registry edits. Idempotent: scans once unless
+        ``force=True``. A broken plugin logs a warning and is skipped so it
+        can't block the rest from loading.
+        """
+        if cls._loaded and not force:
+            return
+        for klass in _iter_parser_classes():
+            try:
+                cls.register(klass())
+            except Exception:
+                logger.warning("Failed to register parser %s", klass.__name__, exc_info=True)
+        cls._loaded = True
+
+    @classmethod
     def clear(cls) -> None:
         """For testing only — reset the registry."""
         cls._parsers.clear()
+        cls._loaded = False
+
+
+def _iter_parser_classes() -> Iterator[type["Parser"]]:
+    """Yield concrete :class:`Parser` subclasses defined in this package.
+
+    Drives :meth:`ParserRegistry.load_builtin`: every module in
+    ``bagger/parsers/`` that defines a non-abstract ``Parser`` subclass gets
+    picked up — so new sources register automatically on import. Modules
+    whose name starts with ``_`` (helpers like ``_common``) and the protocol
+    module (``base``) are skipped; only classes *defined* in a plugin module
+    are yielded, so a parser imported merely for type hints isn't double
+    registered.
+    """
+    import bagger.parsers as _pkg
+
+    for mod_info in pkgutil.iter_modules(_pkg.__path__, prefix="bagger.parsers."):
+        module_name = mod_info.name
+        basename = module_name.rsplit(".", 1)[-1]
+        if basename.startswith("_") or basename in {"base"}:
+            continue
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            logger.warning("Skipping unimportable parser module %s", module_name, exc_info=True)
+            continue
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            if (
+                issubclass(obj, Parser)
+                and obj is not Parser
+                and not inspect.isabstract(obj)
+                and obj.__module__ == module.__name__
+            ):
+                yield obj

@@ -1,29 +1,16 @@
 """Parser package — abstract protocol + concrete implementations.
 
-Auto-registers known parsers on import so scanner/watcher can discover them.
+On import, :meth:`ParserRegistry.load_builtin` scans this package and
+auto-registers every concrete ``Parser`` subclass, so adding a new AI tool
+source is just a matter of dropping a module in here (no registry edits).
 """
 
-import logging
-
 from bagger.parsers.base import Parser, ParserRegistry
-from bagger.parsers.claude import ClaudeParser
-from bagger.parsers.codex import CodexParser
 
-logger = logging.getLogger(__name__)
-
-# ── Auto-register known parsers ──
-
-for _parser in (ClaudeParser(), CodexParser()):
-    try:
-        ParserRegistry.register(_parser)
-    except Exception:
-        # A broken parser must fail loudly, not hide behind suppress() and then
-        # blow up later with a cryptic KeyError from ParserRegistry.get().
-        logger.warning("Failed to auto-register %s", type(_parser).__name__, exc_info=True)
+# Auto-register all concrete parsers found in this package.
+ParserRegistry.load_builtin()
 
 __all__ = [
     "Parser",
     "ParserRegistry",
-    "ClaudeParser",
-    "CodexParser",
 ]
