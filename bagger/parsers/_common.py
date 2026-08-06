@@ -52,29 +52,41 @@ def scandir_files(root: Path):
             continue
 
 
+_READ_CHUNK = 1 << 20  # 1 MiB streaming read size; tunable for tests.
+
+
 def iter_complete_lines(path: Path, offset: int = 0) -> Iterator[tuple[int, str]]:
     """Yield ``(byte_start, line)`` for each complete JSONL line at/after ``offset``.
 
-    Reads in binary mode so byte offsets stay exact for non-ASCII content
-    (text-mode ``tell()`` cookies don't map to byte positions). A trailing line
-    without a newline terminator may be a half-written append from a live
-    session — it is dropped and will be picked up by a later full re-parse.
+    Streams the file in fixed-size binary chunks (see ``_READ_CHUNK``) so a
+    multi-GB transcript is never held in memory at once. Byte offsets stay
+    exact for non-ASCII content because we read in binary mode (text-mode
+    ``tell()`` cookies don't map to byte positions). A trailing line without a
+    newline terminator may be a half-written append from a live session — it is
+    dropped and will be picked up by a later full re-parse.
     """
     with open(path, "rb") as f:
         f.seek(offset)
-        data = f.read()
-    if data and not data.endswith(b"\n"):
-        last_nl = data.rfind(b"\n")
-        data = data[:last_nl] if last_nl != -1 else b""
-
-    pos = offset
-    for raw_line in data.split(b"\n"):
-        start = pos
-        pos += len(raw_line) + 1  # +1 for the consumed newline
-        stripped = raw_line.strip()
-        if not stripped:
-            continue
-        try:
-            yield start, stripped.decode("utf-8")
-        except UnicodeDecodeError:
-            logger.warning("Skipping undecodable line at byte %d in %s", start, path)
+        line_start = offset  # absolute byte offset where ``buf`` begins
+        buf = b""  # bytes of the current (possibly partial) line
+        while True:
+            chunk = f.read(_READ_CHUNK)
+            if not chunk:
+                break
+            buf += chunk
+            while True:
+                nl = buf.find(b"\n")
+                if nl == -1:
+                    break  # remainder is a (possibly partial) line; keep for next chunk
+                raw_line = buf[:nl]
+                buf = buf[nl + 1 :]
+                start = line_start
+                line_start += nl + 1
+                stripped = raw_line.strip()
+                if stripped:
+                    try:
+                        yield start, stripped.decode("utf-8")
+                    except UnicodeDecodeError:
+                        logger.warning("Skipping undecodable line at byte %d in %s", start, path)
+    # ``buf`` now holds the final newline-less tail (if any) — a possibly
+    # half-written append; drop it like the original in-memory implementation.
