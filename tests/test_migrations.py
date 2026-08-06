@@ -5,6 +5,8 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from bagger.models.event import MemoryEvent, Role
 from bagger.storage.migrations import _column_exists, apply_migrations
 from bagger.storage.sqlite import SqliteStorage
@@ -13,14 +15,27 @@ from bagger.storage.sqlite import SqliteStorage
 def test_column_exists_detects_present_and_absent():
     # migrations run on a connection configured with sqlite3.Row (as
     # SqliteStorage.connect() sets it at line 1140), so mirror that here.
+    # Use a name from KNOWN_TABLES so the allow-list guard passes; the actual
+    # columns here are just (a, b) for the test.
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    conn.execute("CREATE TABLE t (a TEXT, b TEXT)")
-    assert _column_exists(conn, "t", "a") is True
-    assert _column_exists(conn, "t", "b") is True
-    assert _column_exists(conn, "t", "c") is False
-    # Unknown table → no crash, returns False.
-    assert _column_exists(conn, "nope", "a") is False
+    conn.execute("CREATE TABLE events (a TEXT, b TEXT)")
+    assert _column_exists(conn, "events", "a") is True
+    assert _column_exists(conn, "events", "b") is True
+    assert _column_exists(conn, "events", "c") is False
+
+
+def test_column_exists_rejects_unknown_table():
+    # ``_column_exists`` interpolates `table` into a PRAGMA statement, which
+    # cannot use bind parameters. Only allow-listed names may pass; an
+    # untrusted or injection-shaped name must raise, never run SQL.
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    with pytest.raises(ValueError):
+        _column_exists(conn, "nope", "a")
+    # Even a name packed with SQL metacharacters must raise, not be executed.
+    with pytest.raises(ValueError):
+        _column_exists(conn, "events; DROP TABLE events--", "a")
 
 
 def test_apply_migrations_is_idempotent_on_fresh_db():

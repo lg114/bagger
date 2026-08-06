@@ -12,9 +12,24 @@ crash rolls back the open transaction and a re-run starts clean.
 import contextlib
 import sqlite3
 
+# Tables whose schema may be introspected by migrations. ``_column_exists``
+# interpolates ``table`` into a PRAGMA statement (PRAGMA does not accept bind
+# parameters for identifiers), so only these known-good names are permitted —
+# anything else is a programming error or an injection attempt and must raise
+# rather than be interpolated into SQL.
+KNOWN_TABLES: frozenset[str] = frozenset(
+    {"sessions", "events", "tool_uses", "event_edges", "events_fts"}
+)
+
 
 def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
-    """True if ``column`` is present on ``table`` (used by migrations)."""
+    """True if ``column`` is present on ``table`` (used by migrations).
+
+    ``table`` must be one of :data:`KNOWN_TABLES`; any other value raises
+    :class:`ValueError` instead of being interpolated into SQL.
+    """
+    if table not in KNOWN_TABLES:
+        raise ValueError(f"unknown table for introspection: {table!r}")
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return any(r["name"] == column for r in rows)
 
