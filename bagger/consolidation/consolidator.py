@@ -132,12 +132,14 @@ class Consolidator:
         full: bool = False,
         limit: int | None = None,
         dry_run: bool = False,
+        progress: bool = False,
     ) -> dict:
         """Run consolidation. Returns a summary dict.
 
         ``dry_run`` builds the prompt for the first unprocessed chunk of each
         session and returns it under ``previews`` without calling the LLM or
         writing anything — used to eyeball the design before spending tokens.
+        ``progress`` prints a line per session so a long run doesn't look frozen.
         """
         total_records = 0
         sessions_seen = 0
@@ -152,6 +154,8 @@ class Consolidator:
             last_id = 0 if full else self._get_last_event_id(source_, session_id)
             new_events = self._fetch_new_events(source_, session_id, last_id)
             if not new_events:
+                if progress:
+                    print(f"  [skip] {session_id[:12]} ({source_}): nothing new")
                 continue
 
             sessions_seen += 1
@@ -183,8 +187,28 @@ class Consolidator:
             )
             self.conn.commit()
             total_records += inserted
+            if progress:
+                print(
+                    f"  [{sessions_seen}] {session_id[:12]} ({source_}): "
+                    f"{len(new_events)} events -> {inserted} record(s)"
+                )
 
         return {"sessions": sessions_seen, "records": total_records, "previews": previews}
+
+    # -- maintenance ----------------------------------------------
+
+    def reset(self) -> int:
+        """Delete all memory records and incremental state.
+
+        Returns the number of records that were removed. Call this before a
+        full re-extraction so the next ``run()`` reprocesses every event
+        instead of appending duplicates on top of the existing ones.
+        """
+        removed = self.conn.execute("SELECT COUNT(*) FROM memory_records").fetchone()[0]
+        self.conn.execute("DELETE FROM memory_records")
+        self.conn.execute("DELETE FROM consolidation_state")
+        self.conn.commit()
+        return removed
 
     # -- query -----------------------------------------------------
 

@@ -416,9 +416,14 @@ def _llm_configured() -> bool:
 @click.option("--limit", default=None, type=int, help="Max sessions to process (smoke test)")
 @click.option("--dry-run", is_flag=True, help="Print the prompt that would be sent, no LLM call")
 @click.option("--mock", is_flag=True, help="Use a deterministic mock LLM (no network)")
+@click.option(
+    "--reset",
+    is_flag=True,
+    help="Clear all memory records + incremental state, then re-process everything",
+)
 @require_db()
 @with_storage
-def consolidate(storage, source, full, limit, dry_run, mock):
+def consolidate(storage, source, full, limit, dry_run, mock, reset):
     """Distill conversation events into structured memory records (phase 1)."""
     from bagger.consolidation.consolidator import Consolidator
     from bagger.consolidation.llm_client import create_llm_client
@@ -441,9 +446,35 @@ def consolidate(storage, source, full, limit, dry_run, mock):
         )
         return
 
+    import sqlite3
+
     llm = create_llm_client("mock" if mock else "openai")
     cons = Consolidator(storage, llm)
-    result = cons.run(source=source, full=full, limit=limit, dry_run=dry_run)
+    try:
+        if reset and not dry_run and not mock:
+            removed = cons.reset()
+            click.echo(
+                click.style(
+                    f"  Cleared {removed} memory record(s) + incremental state.",
+                    fg="yellow",
+                )
+            )
+        result = cons.run(
+            source=source, full=full or reset, limit=limit, dry_run=dry_run, progress=True
+        )
+    except sqlite3.OperationalError as e:
+        msg = str(e).lower()
+        if "readonly" in msg or "locked" in msg:
+            click.echo(
+                click.style(
+                    "  Database is locked / read-only. Another bagger process "
+                    "(e.g. the desktop app 'bagger.exe') is holding the SQLite "
+                    "connection. Close the desktop app (tray -> Quit), then retry.",
+                    fg="red",
+                )
+            )
+            return
+        raise
 
     if dry_run:
         for preview in result.get("previews", []):
@@ -458,6 +489,14 @@ def consolidate(storage, source, full, limit, dry_run, mock):
                 fg="green",
             )
         )
+        if result["sessions"] == 0:
+            click.echo(
+                click.style(
+                    "  Nothing new to consolidate (all sessions already processed). "
+                    "Use --full to re-process everything, or --limit N for a smoke test.",
+                    fg="yellow",
+                )
+            )
 
 
 # ── memories ────────────────────────────────────────────────
