@@ -160,12 +160,6 @@ def create_llm_client(
         return MockLLMClient()
 
     base_url = base_url or os.environ.get("BAGGER_LLM_BASE_URL") or settings.llm_base_url
-    api_key = (
-        api_key
-        or os.environ.get("BAGGER_LLM_API_KEY")
-        or settings.llm_api_key
-    )
+    api_key = api_key or os.environ.get("BAGGER_LLM_API_KEY") or settings.llm_api_key
     model = model or os.environ.get("BAGGER_LLM_MODEL") or settings.llm_model
-    return OpenAICompatibleClient(
-        base_url, api_key, model, use_json_schema=use_json_schema
-    )
+    return OpenAICompatibleClient(base_url, api_key, model, use_json_schema=use_json_schema)

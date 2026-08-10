@@ -429,8 +429,7 @@ def consolidate(storage, source, full, limit, dry_run, mock):
     if not mock and not dry_run and not _llm_configured():
         click.echo(
             click.style(
-                "  No LLM API key set. Set BAGGER_LLM_API_KEY "
-                "(or llm_api_key in config.toml).",
+                "  No LLM API key set. Set BAGGER_LLM_API_KEY (or llm_api_key in config.toml).",
                 fg="yellow",
             )
         )
@@ -497,9 +496,9 @@ def memories(storage, topic, source, limit):
             + click.style(f"{r['type']}", fg="yellow")
             + f"  (conf {r['confidence']:.2f})"
         )
-        click.echo(f'      {r["content"]}')
+        click.echo(f"      {r['content']}")
         if r.get("topics"):
-            click.echo(click.style(f'      # {r["topics"]}', fg="blue"))
+            click.echo(click.style(f"      # {r['topics']}", fg="blue"))
         click.echo("")
 
 

@@ -58,9 +58,7 @@ class Consolidator:
         """Yield every session, optionally scoped to one source."""
         page, per = 1, 200
         while True:
-            res = self.storage.list_sessions_paginated(
-                page=page, per_page=per, source=source
-            )
+            res = self.storage.list_sessions_paginated(page=page, per_page=per, source=source)
             yield from res["data"]
             if page >= res["meta"]["pages"]:
                 break
