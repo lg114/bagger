@@ -60,6 +60,17 @@ class Settings(BaseModel):
     ``~/.bagger/config.toml`` only to whitelist origins you trust.
     """
 
+    # ── Consolidation / LLM (phase-1 structured memory extraction) ──
+    # One OpenAI-compatible client covers every domestic provider (智谱 GLM,
+    # DeepSeek, 阿里百炼, 硅基流动, 火山, Kimi) plus OpenAI itself. Defaults
+    # point at 智谱 GLM-4-Flash, which is permanently free for personal use.
+    llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    """OpenAI-compatible base URL for the consolidation LLM."""
+    llm_model: str = "glm-4-flash"
+    """Model name for consolidation extraction."""
+    llm_api_key: str | None = None
+    """API key; if None, falls back to the BAGGER_LLM_API_KEY env var."""
+
     # ── Derived paths (properties so they always reflect bagger_dir) ──
 
     @property

@@ -110,6 +110,45 @@ CREATE INDEX IF NOT EXISTS idx_event_edges_session ON event_edges(session_id);
 -- index-only scan serves the dashboard query with no table lookups or temp sort.
 CREATE INDEX IF NOT EXISTS idx_events_date
     ON events(substr(timestamp, 1, 10), token_input, token_output);
+
+-- ── Phase 1: structured memory extraction (Consolidator output) ──
+-- A memory_record is a durable, reusable cognitive unit distilled from raw
+-- conversation events: a fact / preference / decision / lesson. It is what
+-- turns bagger from a "conversation search engine" into a memory store.
+CREATE TABLE IF NOT EXISTS memory_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,            -- fact / preference / decision / lesson
+    content TEXT NOT NULL,         -- the distilled cognitive unit (concise)
+    topics TEXT NOT NULL DEFAULT '',  -- comma-separated keywords for topic recall
+    confidence REAL NOT NULL DEFAULT 0.5,  -- extraction confidence 0..1
+    -- Provenance: points back to the source conversation + event.
+    source TEXT NOT NULL DEFAULT 'claude',
+    session_id TEXT NOT NULL,
+    event_id TEXT,                 -- primary source event (nullable: a record
+                                    -- may synthesize across several events)
+    created_at TEXT NOT NULL,
+    -- Phase 3 (forgetting) fields — created now, used later.
+    relevance REAL NOT NULL DEFAULT 1.0,
+    archived INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (source, session_id) REFERENCES sessions(source, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_records_type ON memory_records(type);
+CREATE INDEX IF NOT EXISTS idx_memory_records_topics ON memory_records(topics);
+CREATE INDEX IF NOT EXISTS idx_memory_records_session
+    ON memory_records(source, session_id);
+
+-- Incremental processing cursor: which (source, session) has been consolidated
+-- up to which event id. Mirrors the WatchState (session_id -> byte_offset) idea
+-- but at the event granularity, so a re-run only processes new events.
+CREATE TABLE IF NOT EXISTS consolidation_state (
+    source TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    last_event_id INTEGER NOT NULL DEFAULT 0,  -- MAX(events.id) already processed
+    last_run_at TEXT NOT NULL,
+    record_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (source, session_id)
+);
 """
 
 FTS_SCHEMA = """

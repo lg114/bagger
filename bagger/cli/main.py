@@ -398,6 +398,111 @@ def rebuild_index(storage):
     click.echo(click.style(f"  Index rebuilt: {count} events indexed", fg="green"))
 
 
+# ── consolidate ─────────────────────────────────────────────
+
+
+def _llm_configured() -> bool:
+    """Whether an LLM API key is available (env var or config.toml)."""
+    import os
+
+    from bagger.config import settings
+
+    return bool(os.environ.get("BAGGER_LLM_API_KEY") or settings.llm_api_key)
+
+
+@cli.command()
+@click.option("--source", default=None, help="Limit to one source (default: all)")
+@click.option("--full", is_flag=True, help="Re-process all events (ignore incremental state)")
+@click.option("--limit", default=None, type=int, help="Max sessions to process (smoke test)")
+@click.option("--dry-run", is_flag=True, help="Print the prompt that would be sent, no LLM call")
+@click.option("--mock", is_flag=True, help="Use a deterministic mock LLM (no network)")
+@require_db()
+@with_storage
+def consolidate(storage, source, full, limit, dry_run, mock):
+    """Distill conversation events into structured memory records (phase 1)."""
+    from bagger.consolidation.consolidator import Consolidator
+    from bagger.consolidation.llm_client import create_llm_client
+
+    if dry_run and mock:
+        click.echo("  --dry-run and --mock are mutually exclusive.", err=True)
+        return
+    if not mock and not dry_run and not _llm_configured():
+        click.echo(
+            click.style(
+                "  No LLM API key set. Set BAGGER_LLM_API_KEY "
+                "(or llm_api_key in config.toml).",
+                fg="yellow",
+            )
+        )
+        click.echo(
+            click.style(
+                "  Tip: run with --dry-run to inspect prompts, or --mock to test offline.",
+                fg="yellow",
+            )
+        )
+        return
+
+    llm = create_llm_client("mock" if mock else "openai")
+    cons = Consolidator(storage, llm)
+    result = cons.run(source=source, full=full, limit=limit, dry_run=dry_run)
+
+    if dry_run:
+        for preview in result.get("previews", []):
+            click.echo(preview)
+            click.echo("")
+        click.echo(click.style("  [dry-run] no records written.", fg="blue"))
+    else:
+        click.echo(
+            click.style(
+                f"  Consolidated {result['sessions']} session(s) -> "
+                f"{result['records']} memory record(s)",
+                fg="green",
+            )
+        )
+
+
+# ── memories ────────────────────────────────────────────────
+
+
+@cli.command()
+@click.argument("topic", required=False, default=None)
+@click.option("--source", default=None, help="Limit to one source")
+@click.option("--limit", "-n", default=20, help="Max results")
+@require_db()
+@with_storage
+def memories(storage, topic, source, limit):
+    """List consolidated memory records, optionally filtered by TOPIC."""
+    from bagger.consolidation.consolidator import Consolidator
+    from bagger.consolidation.llm_client import create_llm_client
+
+    cons = Consolidator(storage, create_llm_client("mock"))
+    if topic:
+        rows = cons.get_memories_by_topic(topic, source=source, limit=limit)
+    else:
+        rows = storage.conn.execute(
+            "SELECT id, type, content, topics, confidence, source, session_id "
+            "FROM memory_records ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        rows = [dict(r) for r in rows]
+
+    if not rows:
+        click.echo("  No memory records yet. Run 'bagger consolidate' first.")
+        return
+
+    click.echo(click.style(f"\n  {len(rows)} memory record(s):\n", bold=True))
+    for r in rows:
+        click.echo(
+            click.style(f"  [{r['id']}] ", fg="cyan")
+            + click.style(f"{r['type']}", fg="yellow")
+            + f"  (conf {r['confidence']:.2f})"
+        )
+        click.echo(f'      {r["content"]}')
+        if r.get("topics"):
+            click.echo(click.style(f'      # {r["topics"]}', fg="blue"))
+        click.echo("")
+
+
 # ── serve ───────────────────────────────────────────────────
 
 
