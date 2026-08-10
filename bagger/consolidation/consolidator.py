@@ -61,8 +61,7 @@ class Consolidator:
             res = self.storage.list_sessions_paginated(
                 page=page, per_page=per, source=source
             )
-            for s in res["data"]:
-                yield s
+            yield from res["data"]
             if page >= res["meta"]["pages"]:
                 break
             page += 1
