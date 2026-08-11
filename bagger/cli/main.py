@@ -157,6 +157,83 @@ def search(storage, query, session, limit):
         click.echo("")
 
 
+# ── embed ──────────────────────────────────────────────────
+
+
+@cli.command()
+@click.option(
+    "--provider",
+    type=click.Choice(["remote", "fake"]),
+    default="remote",
+    help="Embedding backend: remote API or offline fake (no network)",
+)
+@click.option("--model", default=None, help="Override embedding model name")
+@click.option("--no-fts", is_flag=True, help="Skip rebuilding the memory_fts BM25 index")
+@click.option("--batch-size", default=None, type=int, help="Texts per embedding request")
+@require_db()
+@with_storage
+def embed(storage, provider, model, no_fts, batch_size):
+    """Embed memory_records into vectors for semantic recall."""
+    from bagger.embedding import create_embedder
+    from bagger.services.embed import EmbedService
+
+    embedder = create_embedder(provider, model=model)
+    svc = EmbedService(storage, embedder)
+    summary = svc.backfill(batch_size=batch_size, reindex_fts=not no_fts)
+    click.echo(
+        f"embedded {summary['embedded']} record(s) with model "
+        f"'{summary['model']}' (dim={summary['dim']})"
+    )
+    click.echo(f"vector store: {summary['stats']}")
+
+
+@cli.command()
+@click.argument("query")
+@click.option(
+    "--mode",
+    type=click.Choice(["hybrid", "vector", "fts"]),
+    default="hybrid",
+    help="hybrid = vector ∪ FTS fused; vector = semantic only; fts = BM25 only",
+)
+@click.option("--limit", "-n", default=10, help="Max results")
+@click.option("--source", default=None, help="Filter by source label")
+@click.option(
+    "--provider",
+    type=click.Choice(["remote", "fake"]),
+    default=None,
+    help="Embedding backend (default: config embedding_provider)",
+)
+@click.option("--model", default=None, help="Override embedding model name")
+@require_db()
+@with_storage
+def recall(storage, query, mode, limit, source, provider, model):
+    """Recall memory_records by meaning, not keywords."""
+    from bagger.embedding import create_embedder
+    from bagger.services.hybrid_search import HybridSearch
+
+    embedder = create_embedder(provider, model=model)
+    hs = HybridSearch(storage, embedder)
+    try:
+        results = hs.search(query, mode=mode, limit=limit, source=source)
+    except RuntimeError as e:
+        raise click.ClickException(str(e)) from e
+
+    if not results:
+        click.echo(f"  No matches for: {query}")
+        return
+
+    click.echo(click.style(f"\n  {len(results)} result(s) [{mode}]:\n", bold=True))
+    for i, r in enumerate(results, 1):
+        score = r.get("fused_score", "")
+        content = r.get("content", "")[:140]
+        click.echo(
+            click.style(f"  [{i}] ", fg="cyan")
+            + click.style(f"[{r.get('type', '')}] ", fg="yellow")
+            + content
+            + click.style(f"  (score={score})", fg="green")
+        )
+
+
 # ── replay ──────────────────────────────────────────────────
 
 
@@ -410,6 +487,86 @@ def _llm_configured() -> bool:
     return bool(os.environ.get("BAGGER_LLM_API_KEY") or settings.llm_api_key)
 
 
+def _render_consolidation_report(report, dry_run: bool) -> None:
+    """Render a ``ConsolidationReport`` to stdout (structured, human-readable)."""
+    click.echo()
+
+    if dry_run:
+        click.echo(click.style("  Consolidation preview (dry-run)", bold=True))
+        for preview in report.previews:
+            click.echo(preview)
+            click.echo("")
+        click.echo(
+            click.style(
+                f"  [dry-run] {report.sessions_processed} session(s) previewed, "
+                f"no records written.",
+                fg="blue",
+            )
+        )
+        return
+
+    click.echo(click.style("  Consolidation complete", bold=True))
+    click.echo("  " + "─" * 44)
+    click.echo(
+        f"  Sessions:  seen={report.sessions_seen}  processed={report.sessions_processed}  "
+        f"skipped={report.sessions_skipped}  failed={report.sessions_failed}"
+    )
+    chunk_line = f"  Chunks:    {report.chunks_ok}/{report.chunks_total} ok"
+    if report.chunks_failed:
+        chunk_line += f", {report.chunks_failed} failed"
+    click.echo(chunk_line)
+    click.echo(
+        f"  Records:   extracted={report.records_extracted}  inserted={report.records_inserted}  "
+        f"merged={report.records_merged}  rejected={report.records_rejected}"
+    )
+    if report.by_type:
+        parts = ", ".join(f"{k}={v}" for k, v in sorted(report.by_type.items()))
+        click.echo(f"  By type:   {parts}")
+    if report.elapsed_seconds:
+        click.echo(f"  Elapsed:   {report.elapsed_seconds}s")
+    if report.interrupted:
+        click.echo(
+            click.style(
+                "  ⚠ Interrupted (Ctrl-C). Re-run to resume from the cursor.",
+                fg="yellow",
+            )
+        )
+
+    if report.rejects:
+        click.echo()
+        click.echo(
+            click.style(
+                f"  Rejected ({report.records_rejected} total, showing up to "
+                f"{len(report.rejects)}):",
+                fg="yellow",
+            )
+        )
+        for r in report.rejects:
+            excerpt = (r.excerpt or "")[:80]
+            click.echo(f"    - {r.reason.value}: {excerpt}")
+
+    if report.failures:
+        click.echo()
+        click.echo(
+            click.style(f"  Chunk failures (showing up to {len(report.failures)}):", fg="red")
+        )
+        for f in report.failures:
+            retry = " (retryable)" if f.retryable else ""
+            click.echo(
+                f"    - {f.source}/{f.session_id[:12]} chunk {f.chunk_index}: {f.error}{retry}"
+            )
+    click.echo()
+
+    if report.sessions_processed == 0 and report.sessions_failed == 0:
+        click.echo(
+            click.style(
+                "  Nothing new to consolidate (all sessions already processed). "
+                "Use --full to re-process everything, or --limit N for a smoke test.",
+                fg="yellow",
+            )
+        )
+
+
 @cli.command()
 @click.option("--source", default=None, help="Limit to one source (default: all)")
 @click.option("--full", is_flag=True, help="Re-process all events (ignore incremental state)")
@@ -450,6 +607,20 @@ def consolidate(storage, source, full, limit, dry_run, mock, reset):
 
     llm = create_llm_client("mock" if mock else "openai")
     cons = Consolidator(storage, llm)
+
+    def on_progress(ev):
+        if ev.kind == "session_skip":
+            return
+        if ev.kind == "session_start":
+            click.echo(f"  • {ev.source}/{ev.session_id[:12]} — {ev.events} new event(s)")
+        elif ev.kind == "session_done":
+            ins = ev.inserted or 0
+            mg = ev.merged or 0
+            tag = f"+{ins} new / {mg} merged" if (ins or mg) else "no records"
+            click.echo(f"      ✓ done ({tag})")
+        elif ev.kind == "chunk_error":
+            click.echo(click.style(f"      ✗ {ev.message}", fg="red"))
+
     try:
         if reset and not dry_run and not mock:
             removed = cons.reset()
@@ -459,8 +630,12 @@ def consolidate(storage, source, full, limit, dry_run, mock, reset):
                     fg="yellow",
                 )
             )
-        result = cons.run(
-            source=source, full=full or reset, limit=limit, dry_run=dry_run, progress=True
+        report = cons.run(
+            source=source,
+            full=full or reset,
+            limit=limit,
+            dry_run=dry_run,
+            on_progress=on_progress,
         )
     except sqlite3.OperationalError as e:
         msg = str(e).lower()
@@ -476,27 +651,7 @@ def consolidate(storage, source, full, limit, dry_run, mock, reset):
             return
         raise
 
-    if dry_run:
-        for preview in result.get("previews", []):
-            click.echo(preview)
-            click.echo("")
-        click.echo(click.style("  [dry-run] no records written.", fg="blue"))
-    else:
-        click.echo(
-            click.style(
-                f"  Consolidated {result['sessions']} session(s) -> "
-                f"{result['records']} memory record(s)",
-                fg="green",
-            )
-        )
-        if result["sessions"] == 0:
-            click.echo(
-                click.style(
-                    "  Nothing new to consolidate (all sessions already processed). "
-                    "Use --full to re-process everything, or --limit N for a smoke test.",
-                    fg="yellow",
-                )
-            )
+    _render_consolidation_report(report, dry_run)
 
 
 # ── memories ────────────────────────────────────────────────
@@ -519,7 +674,8 @@ def memories(storage, topic, source, limit):
     else:
         rows = storage.conn.execute(
             "SELECT id, type, content, topics, confidence, source, session_id "
-            "FROM memory_records ORDER BY created_at DESC LIMIT ?",
+            "FROM memory_records WHERE archived=0 "
+            "ORDER BY merge_count DESC, created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
         rows = [dict(r) for r in rows]
@@ -539,6 +695,115 @@ def memories(storage, topic, source, limit):
         if r.get("topics"):
             click.echo(click.style(f"      # {r['topics']}", fg="blue"))
         click.echo("")
+
+
+# ── memories-dedup ──────────────────────────────────────────
+
+
+@cli.command()
+@click.option(
+    "--threshold",
+    default=None,
+    type=float,
+    help="Jaccard cutoff for near-duplicate detection (default: conservative 0.72)",
+)
+@click.option("--dry-run", is_flag=True, help="Preview clusters only — nothing is merged (default)")
+@click.option(
+    "--apply",
+    "apply_",
+    is_flag=True,
+    help="Commit the merge (otherwise preview only)",
+)
+@click.option("--type", "record_type", default=None, help="Limit to one memory type")
+@require_db()
+@with_storage
+def memories_dedup(storage, threshold, dry_run, apply_, record_type):
+    """Find near-duplicate memory records and (optionally) merge them — L2 pass.
+
+    This is the *lossy* dedup step: paraphrases that survive normalization get
+    collapsed into one canonical record. It defaults to --dry-run so you see
+    exactly which records would fold together before committing anything.
+    Re-run with --apply to commit.
+    """
+    from bagger.consolidation.consolidator import Consolidator
+    from bagger.consolidation.llm_client import create_llm_client
+    from bagger.consolidation.normalize import DEFAULT_FUZZY_THRESHOLD
+
+    if dry_run and apply_:
+        click.echo("  --dry-run and --apply are mutually exclusive.", err=True)
+        return
+
+    llm = create_llm_client("mock")
+    cons = Consolidator(storage, llm)
+    thr = DEFAULT_FUZZY_THRESHOLD if threshold is None else threshold
+    report = cons.dedup(threshold=thr, dry_run=not apply_, record_type=record_type)
+
+    click.echo()
+    click.echo(click.style(f"  Memory dedup (threshold={thr})", bold=True))
+    click.echo("  " + "─" * 44)
+    click.echo(f"  Scanned:   {report.scanned} live record(s)")
+    click.echo(f"  Clusters:  {report.cluster_count} near-duplicate group(s)")
+    if report.dry_run:
+        click.echo(
+            click.style(
+                "  Mode:      PREVIEW — no records merged. Re-run with --apply to commit.",
+                fg="blue",
+            )
+        )
+    else:
+        click.echo(
+            click.style(
+                f"  Mode:      APPLIED — {report.records_merged} duplicate record(s) merged away.",
+                fg="green",
+            )
+        )
+
+    if report.clusters:
+        click.echo()
+        for c in report.clusters:
+            sim = f"{c.min_similarity:.2f}"
+            click.echo(
+                click.style(
+                    f"  • keeper #{c.keeper_id} (sim≥{sim}): {c.keeper_content[:70]}",
+                    fg="green",
+                )
+            )
+            for did, content in zip(c.duplicate_ids, c.duplicate_contents, strict=True):
+                click.echo(f"      └ merge #{did}: {content[:70]}")
+            if c.merged_topics:
+                click.echo(click.style(f"      # {', '.join(c.merged_topics)}", fg="blue"))
+    click.echo()
+
+
+# ── memories-stats ──────────────────────────────────────────
+
+
+@cli.command()
+@require_db()
+@with_storage
+def memories_stats(storage):
+    """Show corpus-level statistics for consolidated memory records."""
+    from bagger.consolidation.consolidator import Consolidator
+    from bagger.consolidation.llm_client import create_llm_client
+
+    llm = create_llm_client("mock")
+    cons = Consolidator(storage, llm)
+    s = cons.stats()
+
+    click.echo()
+    click.echo(click.style("  Memory corpus statistics", bold=True))
+    click.echo("  " + "─" * 44)
+    click.echo(f"  Records:               {s['records']}")
+    click.echo(f"  Archived:              {s['archived']}")
+    click.echo(f"  Sessions consolidated:  {s['sessions_consolidated']}")
+    click.echo(f"  With merges:           {s['records_with_merges']} (merge_count > 1)")
+    click.echo(f"  Total confirmations:   {s['total_confirmations']} (Σ merge_count)")
+    if s["by_type"]:
+        click.echo()
+        click.echo("  By type:")
+        for t, n in s["by_type"].items():
+            click.echo(f"    {t:<10} {n}")
+    click.echo()
 
 
 # ── serve ───────────────────────────────────────────────────
@@ -578,3 +843,7 @@ def serve(host, port, do_reload, no_open):
         log_level="info",
         reload=do_reload,
     )
+
+
+if __name__ == "__main__":
+    cli()

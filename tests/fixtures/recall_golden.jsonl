@@ -1,0 +1,4 @@
+{"query": "存储", "expect": ["Zvec", "Chroma", "localStorage"], "note": "向量存储替代 / 浏览器持久化"}
+{"query": "打包踩过的坑", "expect": ["PyInstaller", "sidecar"], "note": "Tauri sidecar 打包体积与坑"}
+{"query": "本地优先架构", "expect": ["本地", "离线", "local-first"], "note": "memorized 本地优先哲学"}
+{"query": "向量数据库选型", "expect": ["Zvec", "Chroma", "SQLite"], "note": "embedding 存储后端对比"}

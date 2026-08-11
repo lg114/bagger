@@ -18,9 +18,12 @@ Module-level helpers (``_row_to_dict``, ``_extract_text``, ``contains_cjk``,
 etc.) are shared across repos and remain stateless.
 """
 
+import array
 import contextlib
+import hashlib
 import json
 import logging
+import math
 import sqlite3
 import threading
 from collections.abc import Generator
@@ -34,6 +37,7 @@ from bagger.cjk import (
     jieba_available,
 )
 from bagger.models.event import BlockType, MemoryEvent, Session
+from bagger.storage.base import VectorItem
 from bagger.storage.migrations import _column_exists, apply_migrations
 
 logger = logging.getLogger(__name__)
@@ -127,6 +131,16 @@ CREATE TABLE IF NOT EXISTS memory_records (
     event_id TEXT,                 -- primary source event (nullable: a record
                                     -- may synthesize across several events)
     created_at TEXT NOT NULL,
+    -- Deduplication key: type-scoped fingerprint of the normalized content
+    -- (see ``bagger.textnorm.content_fingerprint``). UNIQUE below, so
+    -- "one memory, many confirmations" is a database invariant rather than a
+    -- Python convention that the next caller can forget.
+    content_hash TEXT NOT NULL DEFAULT '',
+    -- How many extractions produced this same record. Doubles as a
+    -- corroboration signal: a fact confirmed across ten sessions outranks a
+    -- one-off remark.
+    merge_count INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT '',   -- last time it was reinforced
     -- Phase 3 (forgetting) fields — created now, used later.
     relevance REAL NOT NULL DEFAULT 1.0,
     archived INTEGER NOT NULL DEFAULT 0,
@@ -137,6 +151,30 @@ CREATE INDEX IF NOT EXISTS idx_memory_records_type ON memory_records(type);
 CREATE INDEX IF NOT EXISTS idx_memory_records_topics ON memory_records(topics);
 CREATE INDEX IF NOT EXISTS idx_memory_records_session
     ON memory_records(source, session_id);
+-- NOTE: the UNIQUE index on content_hash is created by the v6 migration, not
+-- here. A legacy DB whose memory_records table pre-dates content_hash would skip
+-- the CREATE TABLE IF NOT EXISTS above (table already exists) but then crash on
+-- a CREATE INDEX referencing a column that does not exist yet — the migration
+-- adds the column first, so the index must live there, not in the base SCHEMA.
+
+-- Every (source, session, event) that confirmed a memory record. This table is
+-- what makes UNIQUE(content_hash) safe: collapsing ten duplicate rows into one
+-- would otherwise destroy nine provenance trails, and a memory that cannot be
+-- traced back to a transcript is a rumour.
+CREATE TABLE IF NOT EXISTS memory_provenance (
+    record_id   INTEGER NOT NULL,
+    source      TEXT NOT NULL,
+    session_id  TEXT NOT NULL,
+    -- '' rather than NULL: NULLs compare distinct inside a composite primary
+    -- key, so a nullable column would let the same pair be inserted twice.
+    event_id    TEXT NOT NULL DEFAULT '',
+    observed_at TEXT NOT NULL,
+    PRIMARY KEY (record_id, source, session_id, event_id),
+    FOREIGN KEY (record_id) REFERENCES memory_records(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_provenance_session
+    ON memory_provenance(source, session_id);
 
 -- Incremental processing cursor: which (source, session) has been consolidated
 -- up to which event id. Mirrors the WatchState (session_id -> byte_offset) idea
@@ -1024,6 +1062,207 @@ class SqliteSearchIndex:
             "meta": _pagination_meta(page, per_page, total),
         }
 
+    # -- memory_records full-text (BM25 half of hybrid search) -------
+
+    def _memory_fts_enabled(self) -> bool:
+        try:
+            return (
+                self._conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'"
+                ).fetchone()
+                is not None
+            )
+        except sqlite3.Error:
+            return False
+
+    def search_memory_fts(
+        self, query: str, limit: int = 20, source: str | None = None
+    ) -> list[dict]:
+        """FTS5 BM25 search over memory_records content + topics."""
+        if not self._memory_fts_enabled():
+            return []
+        tokenized = self._tokenized_fts_query(query)
+        safe = _escape_fts5_query(tokenized)
+        sql = (
+            "SELECT m.id, m.type, m.content, m.topics, m.source, m.session_id, "
+            "snippet(memory_fts, 0, '<mark>', '</mark>', '...', 32) as snippet, "
+            "bm25(memory_fts) as rank "
+            "FROM memory_fts fts "
+            "JOIN memory_records m ON m.id = CAST(fts.record_id AS INTEGER) "
+            "WHERE memory_fts MATCH ?"
+        )
+        params: list = [safe]
+        if source:
+            sql += " AND fts.source = ?"
+            params.append(source)
+        sql += " ORDER BY rank LIMIT ?"
+        params.append(limit)
+        return [_row_to_dict(r) for r in self._conn.execute(sql, params).fetchall()]
+
+    def index_memory_record(self, rec_id: int, content: str, topics: str, source: str) -> None:
+        """Insert/update one memory record into memory_fts (jieba-pre-tokenized)."""
+        if not self._memory_fts_enabled():
+            return
+        self._conn.execute("DELETE FROM memory_fts WHERE record_id=?", (str(rec_id),))
+        self._conn.execute(
+            "INSERT INTO memory_fts(content, topics, record_id, source) VALUES (?, ?, ?, ?)",
+            (
+                _tokenize_for_fts(content or ""),
+                _tokenize_for_fts(topics or ""),
+                str(rec_id),
+                source,
+            ),
+        )
+        self._conn.commit()
+
+    def reindex_memory_fts(self) -> int:
+        """Rebuild memory_fts from all memory_records. Idempotent."""
+        if not self._memory_fts_enabled():
+            return 0
+        self._conn.execute("DROP TABLE IF EXISTS memory_fts")
+        self._conn.execute(
+            "CREATE VIRTUAL TABLE memory_fts USING fts5("
+            "content, topics, record_id UNINDEXED, source UNINDEXED, tokenize='unicode61')"
+        )
+        rows = self._conn.execute(
+            "SELECT id, content, topics, source FROM memory_records"
+        ).fetchall()
+        for r in rows:
+            self._conn.execute(
+                "INSERT INTO memory_fts(content, topics, record_id, source) VALUES (?, ?, ?, ?)",
+                (
+                    _tokenize_for_fts(r["content"] or ""),
+                    _tokenize_for_fts(r["topics"] or ""),
+                    str(r["id"]),
+                    r["source"],
+                ),
+            )
+        self._conn.commit()
+        return len(rows)
+
+
+class SqliteVectorIndex:
+    """Pure-Python cosine vector store backed by the ``embeddings`` table.
+
+    Vectors are stored as float32 BLOBs (``array('f')``), normalized at write
+    time so a dot product with a normalized query equals cosine similarity.
+    No numpy dependency — at memory-record scale (hundreds–low-thousands) the
+    overhead is sub-millisecond.
+    """
+
+    OWNER_TABLES = {"memory": "memory_records"}
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    # -- helpers --------------------------------------------------
+
+    @staticmethod
+    def _normalize(vec: list[float]) -> list[float]:
+        norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+        return [x / norm for x in vec]
+
+    @staticmethod
+    def _pack(vec: list[float]) -> bytes:
+        return array.array("f", vec).tobytes()
+
+    @staticmethod
+    def _unpack(blob: bytes) -> list[float]:
+        a = array.array("f")
+        a.frombytes(blob)
+        return list(a)
+
+    @staticmethod
+    def _content_hash(text: str) -> str:
+        return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+    # -- VectorIndex Protocol --------------------------------------
+
+    def upsert_vectors(self, items: list[VectorItem]) -> int:
+        now = datetime.now(UTC).isoformat()
+        count = 0
+        for it in items:
+            blob = self._pack(self._normalize(it.vector))
+            self._conn.execute(
+                "INSERT INTO embeddings "
+                "(owner_type, owner_id, model, dim, vector, content_hash, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(owner_type, owner_id, model) DO UPDATE SET "
+                "dim=excluded.dim, vector=excluded.vector, "
+                "content_hash=excluded.content_hash, created_at=excluded.created_at",
+                (
+                    it.owner_type,
+                    str(it.owner_id),
+                    it.model,
+                    it.dim,
+                    blob,
+                    it.content_hash,
+                    now,
+                ),
+            )
+            count += 1
+        self._conn.commit()
+        return count
+
+    def pending_for_embedding(self, owner_type: str, model: str) -> list[dict]:
+        if owner_type not in self.OWNER_TABLES:
+            raise ValueError(f"unknown owner_type: {owner_type!r}")
+        table = self.OWNER_TABLES[owner_type]
+        rows = self._conn.execute(f"SELECT id, content, topics FROM {table}").fetchall()
+        have = {
+            r["owner_id"]: r["content_hash"]
+            for r in self._conn.execute(
+                "SELECT owner_id, content_hash FROM embeddings WHERE owner_type=? AND model=?",
+                (owner_type, model),
+            ).fetchall()
+        }
+        pending = []
+        for r in rows:
+            rid = str(r["id"])
+            if have.get(rid) != self._content_hash(r["content"]):
+                pending.append({"id": r["id"], "content": r["content"], "topics": r["topics"]})
+        return pending
+
+    def search_vectors(
+        self,
+        qv: list[float],
+        owner_type: str,
+        model: str,
+        limit: int = 20,
+        source: str | None = None,
+    ) -> list[dict]:
+        if owner_type not in self.OWNER_TABLES:
+            raise ValueError(f"unknown owner_type: {owner_type!r}")
+        q = self._normalize(qv)
+        sql = (
+            "SELECT e.owner_id, e.vector, e.dim FROM embeddings e "
+            "JOIN memory_records m ON m.id = CAST(e.owner_id AS INTEGER) "
+            "WHERE e.owner_type=? AND e.model=?"
+        )
+        params: list = [owner_type, model]
+        if source:
+            sql += " AND m.source=?"
+            params.append(source)
+        rows = self._conn.execute(sql, params).fetchall()
+        scored = []
+        for r in rows:
+            v = self._unpack(r["vector"])
+            dot = sum(a * b for a, b in zip(q, v, strict=True))
+            scored.append((dot, r["owner_id"]))
+        scored.sort(reverse=True)
+        return [{"owner_id": oid, "score": s} for s, oid in scored[:limit]]
+
+    def vector_stats(self) -> dict:
+        rows = self._conn.execute(
+            "SELECT model, COUNT(*), MAX(dim) FROM embeddings GROUP BY model"
+        ).fetchall()
+        by_model = {r["model"]: r["COUNT(*)"] for r in rows}
+        return {
+            "total": sum(by_model.values()),
+            "by_model": by_model,
+            "dim": max((r["MAX(dim)"] for r in rows), default=0),
+        }
+
 
 # ===================================================================
 # Facade
@@ -1045,6 +1284,7 @@ class SqliteStorage:
         self._sessions: SqliteSessionRepository | None = None
         self._events: SqliteEventRepository | None = None
         self._search: SqliteSearchIndex | None = None
+        self._vectors: SqliteVectorIndex | None = None
         # Serialize writes. The shared connection is opened with
         # ``check_same_thread=False`` and WAL mode keeps concurrent *reads* safe,
         # but SQLite still serializes *writes* at the file level — concurrent
@@ -1157,6 +1397,7 @@ class SqliteStorage:
         self._sessions = SqliteSessionRepository(self._conn, self._maybe_commit)
         self._events = SqliteEventRepository(self._conn, self._maybe_commit)
         self._search = SqliteSearchIndex(self._conn)
+        self._vectors = SqliteVectorIndex(self._conn)
 
         # Migrate: old FTS data was inserted raw (not tokenized) via the
         # legacy trigger.  Rebuild once on first connect, then skip.
@@ -1493,3 +1734,47 @@ class SqliteStorage:
     def fts_enabled(self) -> bool:
         """Whether the FTS5 virtual table exists (consumed by health/doctor)."""
         return self._search._fts_enabled()  # type: ignore[union-attr]
+
+    # -- Vector / semantic delegation ----------------------------------
+
+    def search_memory_vectors(
+        self, qv: list[float], model: str, limit: int = 20, source: str | None = None
+    ) -> list[dict]:
+        return self._vectors.search_vectors(  # type: ignore[union-attr]
+            qv, "memory", model, limit=limit, source=source
+        )
+
+    def upsert_vectors(self, items: list[VectorItem]) -> int:
+        with self._write():
+            return self._vectors.upsert_vectors(items)  # type: ignore[union-attr]
+
+    def pending_for_embedding(self, owner_type: str, model: str) -> list[dict]:
+        return self._vectors.pending_for_embedding(owner_type, model)  # type: ignore[union-attr]
+
+    def vector_stats(self) -> dict:
+        return self._vectors.vector_stats()  # type: ignore[union-attr]
+
+    def search_memory_fts(
+        self, query: str, limit: int = 20, source: str | None = None
+    ) -> list[dict]:
+        return self._search.search_memory_fts(query, limit=limit, source=source)  # type: ignore
+
+    def index_memory_record(self, rec_id: int, content: str, topics: str, source: str) -> None:
+        with self._write():
+            self._search.index_memory_record(rec_id, content, topics, source)  # type: ignore
+
+    def reindex_memory_fts(self) -> int:
+        with self._write():
+            return self._search.reindex_memory_fts()  # type: ignore
+
+    def get_memory_records(self, ids: list[int]) -> list[dict]:
+        """Return memory records by id, preserving input order is not guaranteed."""
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        rows = self._conn.execute(
+            f"SELECT id, type, content, topics, confidence, source, session_id, "
+            f"event_id, created_at FROM memory_records WHERE id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]

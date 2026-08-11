@@ -11,6 +11,9 @@ crash rolls back the open transaction and a re-run starts clean.
 
 import contextlib
 import sqlite3
+from datetime import UTC, datetime
+
+from bagger.textnorm import content_fingerprint
 
 # Tables whose schema may be introspected by migrations. ``_column_exists``
 # interpolates ``table`` into a PRAGMA statement (PRAGMA does not accept bind
@@ -18,7 +21,15 @@ import sqlite3
 # anything else is a programming error or an injection attempt and must raise
 # rather than be interpolated into SQL.
 KNOWN_TABLES: frozenset[str] = frozenset(
-    {"sessions", "events", "tool_uses", "event_edges", "events_fts"}
+    {
+        "sessions",
+        "events",
+        "tool_uses",
+        "event_edges",
+        "events_fts",
+        "memory_records",
+        "memory_provenance",
+    }
 )
 
 
@@ -54,6 +65,14 @@ def apply_migrations(conn: sqlite3.Connection, backfill_event_edges) -> None:
         conn.commit()
     if version < 4:
         _apply_migration_v4(conn)
+    if version < 5:
+        _apply_migration_v5(conn)
+        conn.execute("PRAGMA user_version = 5")
+        conn.commit()
+    if version < 6:
+        _apply_migration_v6(conn)
+        conn.execute("PRAGMA user_version = 6")
+        conn.commit()
 
 
 def _apply_migration_v2(conn: sqlite3.Connection) -> None:
@@ -289,3 +308,170 @@ def _apply_migration_v4(conn: sqlite3.Connection) -> None:
         raise
     finally:
         c.execute("PRAGMA foreign_keys=ON")
+
+
+def _apply_migration_v5(conn: sqlite3.Connection) -> None:
+    """Introduce vector embeddings + memory full-text index (semantic search).
+
+    ``embeddings`` stores float32 vectors as BLOBs keyed by
+    (owner_type, owner_id, model) so swapping models leaves old vectors in
+    place (rollback / A/B friendly); dimensions are per-row because models differ.
+    ``memory_fts`` is the BM25 half of hybrid search over ``memory_records``.
+    It is populated from Python (jieba pre-tokenization) via
+    ``Storage.index_memory_record`` / ``EmbedService``, because SQLite triggers
+    cannot run the Python tokenizer.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS embeddings (
+            owner_type   TEXT NOT NULL,
+            owner_id     TEXT NOT NULL,
+            model        TEXT NOT NULL,
+            dim          INTEGER NOT NULL,
+            vector       BLOB NOT NULL,
+            content_hash TEXT NOT NULL,
+            created_at   TEXT NOT NULL,
+            PRIMARY KEY (owner_type, owner_id, model)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(owner_type, model)")
+    conn.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5("
+        "content, topics, record_id UNINDEXED, source UNINDEXED, "
+        "tokenize='unicode61')"
+    )
+    conn.commit()
+
+
+def _apply_migration_v6(conn: sqlite3.Connection) -> None:
+    """Make ``memory_records`` de-duplicable: fingerprints + provenance.
+
+    Before this migration, consolidation could only ever *append*: re-running
+    with ``--full`` duplicated every record, and the same fact confirmed in ten
+    sessions produced ten rows. The fix has three parts.
+
+    1. ``content_hash`` — a type-scoped fingerprint of the normalized content,
+       backed by a UNIQUE index. This turns "have I already stored this?" from
+       a full-table LIKE scan into an index probe, and makes the no-duplicates
+       invariant enforced by the database rather than hoped for in Python.
+    2. ``memory_provenance`` — the reason a UNIQUE constraint is safe. Collapsing
+       ten rows into one would destroy nine (source, session, event) trails;
+       this table keeps all of them, so a merged memory is still auditable back
+       to every transcript that confirmed it.
+    3. ``merge_count`` / ``updated_at`` — how many extractions back a record and
+       when it was last reinforced. ``merge_count`` doubles as a cheap
+       corroboration signal for ranking.
+
+    Legacy rows are backfilled, and any pre-existing exact duplicates are
+    collapsed here (keeping the lowest id, summing counts, unioning topics)
+    *before* the UNIQUE index is created — otherwise the index would fail to
+    build on a database that predates the invariant.
+
+    Runs inside a single transaction: a crash mid-migration rolls back and a
+    re-run starts clean.
+    """
+    add = "ALTER TABLE memory_records ADD COLUMN"
+    for column, ddl in (
+        ("content_hash", f"{add} content_hash TEXT NOT NULL DEFAULT ''"),
+        ("merge_count", f"{add} merge_count INTEGER NOT NULL DEFAULT 1"),
+        ("updated_at", f"{add} updated_at TEXT NOT NULL DEFAULT ''"),
+    ):
+        if not _column_exists(conn, "memory_records", column):
+            conn.execute(ddl)
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memory_provenance (
+            record_id   INTEGER NOT NULL,
+            source      TEXT NOT NULL,
+            session_id  TEXT NOT NULL,
+            -- '' rather than NULL: NULLs are distinct in a composite primary
+            -- key, so a nullable column would let the same (record, session)
+            -- be inserted repeatedly.
+            event_id    TEXT NOT NULL DEFAULT '',
+            observed_at TEXT NOT NULL,
+            PRIMARY KEY (record_id, source, session_id, event_id),
+            FOREIGN KEY (record_id) REFERENCES memory_records(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_provenance_session "
+        "ON memory_provenance(source, session_id)"
+    )
+
+    rows = conn.execute(
+        "SELECT id, type, content, topics, confidence, source, session_id, event_id, "
+        "created_at, merge_count, relevance, content_hash FROM memory_records ORDER BY id"
+    ).fetchall()
+
+    now = datetime.now(UTC).isoformat()
+    groups: dict[str, list[sqlite3.Row]] = {}
+    hash_updates: list[tuple[str, str, int]] = []
+    for row in rows:
+        digest = row["content_hash"] or content_fingerprint(row["type"], row["content"])
+        if digest != row["content_hash"]:
+            hash_updates.append((digest, row["created_at"] or now, row["id"]))
+        groups.setdefault(digest, []).append(row)
+
+    if hash_updates:
+        conn.executemany(
+            "UPDATE memory_records SET content_hash=?, updated_at=? WHERE id=?",
+            hash_updates,
+        )
+
+    provenance: list[tuple[int, str, str, str, str]] = []
+    obsolete: list[int] = []
+    for members in groups.values():
+        keeper = members[0]  # lowest id — rows were selected ORDER BY id
+        for member in members:
+            provenance.append(
+                (
+                    keeper["id"],
+                    member["source"],
+                    member["session_id"],
+                    member["event_id"] or "",
+                    member["created_at"] or now,
+                )
+            )
+        if len(members) == 1:
+            continue
+        topics: list[str] = []
+        seen: set[str] = set()
+        for member in members:
+            for topic in (member["topics"] or "").split(","):
+                marker = topic.strip().casefold()
+                if topic.strip() and marker not in seen:
+                    seen.add(marker)
+                    topics.append(topic.strip())
+        conn.execute(
+            "UPDATE memory_records SET topics=?, confidence=?, merge_count=?, "
+            "relevance=?, created_at=?, updated_at=? WHERE id=?",
+            (
+                ",".join(topics),
+                max(float(m["confidence"] or 0.0) for m in members),
+                sum(int(m["merge_count"] or 1) for m in members),
+                max(float(m["relevance"] or 1.0) for m in members),
+                min((m["created_at"] or now) for m in members),
+                now,
+                keeper["id"],
+            ),
+        )
+        obsolete.extend(m["id"] for m in members[1:])
+
+    if provenance:
+        conn.executemany(
+            "INSERT OR IGNORE INTO memory_provenance "
+            "(record_id, source, session_id, event_id, observed_at) VALUES (?, ?, ?, ?, ?)",
+            provenance,
+        )
+    if obsolete:
+        conn.executemany("DELETE FROM memory_records WHERE id=?", [(rid,) for rid in obsolete])
+
+    conn.execute("UPDATE memory_records SET updated_at=created_at WHERE updated_at=''")
+    # Created last: the collapse above guarantees the column is unique by now.
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_records_hash ON memory_records(content_hash)"
+    )
+    conn.commit()

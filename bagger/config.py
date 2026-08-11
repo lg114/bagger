@@ -71,6 +71,23 @@ class Settings(BaseModel):
     llm_api_key: str | None = None
     """API key; if None, falls back to the BAGGER_LLM_API_KEY env var."""
 
+    # ── Embedding (semantic / vector retrieval) ──
+    # One OpenAI-compatible /embeddings endpoint covers 智谱 embedding-3, OpenAI
+    # text-embedding-3, DeepSeek, 硅基流动, etc. Defaults point at 智谱, which
+    # already holds the consolidation LLM key — so no extra secret to provision.
+    # ``provider`` selects the backend: ``remote`` (network API) or ``fake``
+    # (deterministic hash vectors, zero-dependency, for tests/offline smoke).
+    embedding_provider: str = "remote"
+    """Backend for embedding vectors: ``remote`` or ``fake``."""
+    embedding_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    """OpenAI-compatible base URL for the embedding endpoint."""
+    embedding_api_key: str | None = None
+    """Embedding API key; resolves via ``BAGGER_EMBEDDING_API_KEY`` / ``llm_api_key``."""
+    embedding_model: str = "embedding-3"
+    """Model name sent to the embedding endpoint (remote) or label for fake."""
+    embedding_batch_size: int = 32
+    """Max texts per embedding request (remote API batches)."""
+
     # ── Derived paths (properties so they always reflect bagger_dir) ──
 
     @property

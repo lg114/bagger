@@ -1,6 +1,7 @@
 """Repository protocols — services depend on these, not on concrete storage."""
 
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from bagger.models.event import MemoryEvent, Session
@@ -76,8 +77,48 @@ class SearchIndex(Protocol):
     """Whether the FTS5 virtual table exists. Public: consumed by health/doctor."""
 
 
+@dataclass
+class VectorItem:
+    """One vector to persist in the ``embeddings`` table."""
+
+    owner_type: str
+    owner_id: str
+    model: str
+    dim: int
+    vector: list[float]
+    content_hash: str
+
+
 @runtime_checkable
-class Storage(SessionRepository, EventRepository, SearchIndex, Protocol):
+class VectorIndex(Protocol):
+    """Vector store for semantic retrieval (numpy-free; pure-Python cosine)."""
+
+    def search_vectors(
+        self,
+        qv: list[float],
+        owner_type: str,
+        model: str,
+        limit: int = 20,
+        source: str | None = None,
+    ) -> list[dict]:
+        """Return top-``limit`` ``{owner_id, score}`` dicts by cosine similarity."""
+        ...
+
+    def upsert_vectors(self, items: list["VectorItem"]) -> int:
+        """Persist normalized vectors; returns the number written."""
+        ...
+
+    def pending_for_embedding(self, owner_type: str, model: str) -> list[dict]:
+        """Return ``{id, content, topics}`` rows lacking a current vector."""
+        ...
+
+    def vector_stats(self) -> dict:
+        """Return ``{total, by_model, dim}`` for the embeddings table."""
+        ...
+
+
+@runtime_checkable
+class Storage(SessionRepository, EventRepository, SearchIndex, VectorIndex, Protocol):
     """Combined storage — a single backend that handles sessions, events, and search.
 
     SqliteStorage satisfies this structurally. Split sub-protocols above exist
@@ -112,4 +153,8 @@ class Storage(SessionRepository, EventRepository, SearchIndex, Protocol):
         durability for incremental watchers). Inside bulk mode it commits only
         every ``commit_every`` units, deferring the rest.
         """
+        ...
+
+    def get_memory_records(self, ids: list[int]) -> list[dict]:
+        """Return memory records by id (used to hydrate retrieval results)."""
         ...
