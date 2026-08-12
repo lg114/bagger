@@ -1034,11 +1034,18 @@ def test_memories_list_filters_and_paginates():
         assert all_json["meta"]["pages"] == 1
         # topics normalized from the comma-joined DB string to a list.
         assert isinstance(all_json["data"][0]["topics"], list)
+        # meta.sources reflects the WHOLE dataset, not just page 1 — so the
+        # browse source facet stays complete even when the current page holds a
+        # single source.
+        assert set(all_json["meta"]["sources"]) == {"claude", "codex"}
 
         # source filter narrows to one tool.
         cl_resp = client.get("/api/memories?source=claude")
         assert cl_resp.status_code == 200
         assert cl_resp.json()["meta"]["total"] == 2
+        # Even with a source filter applied, meta.sources is still complete
+        # (otherwise the other source's chip would vanish from the facet).
+        assert set(cl_resp.json()["meta"]["sources"]) == {"claude", "codex"}
 
         # type filter narrows to one kind.
         fact_resp = client.get("/api/memories?type=fact")

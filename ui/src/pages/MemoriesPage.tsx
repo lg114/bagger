@@ -97,11 +97,15 @@ export default function MemoriesPage() {
     loadBrowse(1, source, type);
   };
 
-  // Distinct sources present in the current result set, plus the active source
-  // so it stays selectable even when every hit shares a single source.
+  // Browse view: the source facet comes from the FULL dataset (meta.sources),
+  // so it stays complete across pagination — the current page may contain only
+  // one source (e.g. the most recent 20 are all codex) and would otherwise hide
+  // the others. Search view has no meta, so it falls back to the result set.
   const sourceOptions = Array.from(
     new Set([
-      ...results.map((r) => r.source).filter(Boolean),
+      ...(view === "browse"
+        ? (meta?.sources ?? [])
+        : results.map((r) => r.source).filter(Boolean)),
       ...(source ? [source] : []),
     ] as string[]),
   ).sort();

@@ -92,6 +92,23 @@ describe("MemoriesPage browse view", () => {
       }),
     );
   });
+
+  it("shows every source from meta.sources in the facet, even when page 1 lacks it", async () => {
+    // Page 1's rows are all codex, but the dataset also contains claude. The
+    // facet must read meta.sources (full dataset), not the current page.
+    mockListMemories.mockResolvedValue({
+      data: [makeMemory({ id: 1, type: "fact", source: "codex" })],
+      meta: { page: 1, per_page: 20, total: 1, pages: 1, sources: ["claude", "codex"] },
+    });
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^codex$/i })).toBeInTheDocument(),
+    );
+    // claude is absent from the page-1 rows yet still surfaces as a chip.
+    expect(screen.getByRole("button", { name: /^claude$/i })).toBeInTheDocument();
+  });
 });
 
 describe("MemoriesPage source facet (search)", () => {

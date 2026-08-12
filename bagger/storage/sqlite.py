@@ -1829,7 +1829,24 @@ class SqliteStorage:
             data.append(d)
 
         pages = (total + per_page - 1) // per_page if total else 0
+        # Distinct sources across the WHOLE dataset (not just this page) so the
+        # browse-view source facet is always complete regardless of pagination or
+        # the active filter. The current page may contain only one source (e.g.
+        # the most recent 20 are all codex) and would otherwise hide the rest.
+        distinct_sources = [
+            r[0]
+            for r in self._conn.execute(
+                "SELECT DISTINCT source FROM memory_records "
+                "WHERE source IS NOT NULL AND source != '' ORDER BY source"
+            ).fetchall()
+        ]
         return {
             "data": data,
-            "meta": {"page": page, "per_page": per_page, "total": total, "pages": pages},
+            "meta": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "pages": pages,
+                "sources": distinct_sources,
+            },
         }

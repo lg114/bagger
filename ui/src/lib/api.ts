@@ -272,7 +272,7 @@ export interface MemorySearchResponse {
 
 export interface MemoryListResponse {
   data: Memory[];
-  meta: { page: number; per_page: number; total: number; pages: number };
+  meta: { page: number; per_page: number; total: number; pages: number; sources: string[] };
 }
 
 export function searchMemories(
