@@ -714,20 +714,40 @@ def _seed_memories(storage, rows):
     we only need rows + a populated ``memory_fts`` so the endpoint has something
     to retrieve. ``content_hash`` is given a distinct value per row to satisfy
     the UNIQUE(index) added by migration v6.
+
+    ``memory_records`` has FK(source, session_id) → sessions, so a session must
+    exist for every *distinct* source we seed; we create one per source using a
+    deterministic session id (``mem-sess-<source>``). This lets a single seed
+    carry mixed sources (e.g. claude + codex) for source-filter tests.
     """
     import hashlib
 
     from bagger.models.event import Session
 
-    # memory_records has FK(source, session_id) → sessions; satisfy it.
-    storage.upsert_session(Session(session_id="sess-1", summary="mem-seed", source="claude"))
+    # Satisfy the FK: one session per distinct source.
+    seen: list[str] = []
+    for _typ, _content, _topics, source in rows:
+        if source not in seen:
+            seen.append(source)
+            storage.upsert_session(
+                Session(session_id=f"mem-sess-{source}", summary="mem-seed", source=source)
+            )
 
     for typ, content, topics, source in rows:
         digest = hashlib.sha1(content.encode("utf-8")).hexdigest()[:16]
         storage._conn.execute(
             "INSERT INTO memory_records(type, content, topics, confidence, "
             "source, session_id, created_at, content_hash) VALUES (?,?,?,?,?,?,?,?)",
-            (typ, content, topics, 0.9, source, "sess-1", "2026-06-30T12:00:00", digest),
+            (
+                typ,
+                content,
+                topics,
+                0.9,
+                source,
+                f"mem-sess-{source}",
+                "2026-06-30T12:00:00",
+                digest,
+            ),
         )
     storage.reindex_memory_fts()
 
@@ -910,5 +930,66 @@ def test_memories_search_hybrid_with_fake_embedder(monkeypatch):
         assert data["count"] >= 1
         # The vector-db record must outrank the unrelated scrollbar record.
         assert "Zvec" in data["results"][0]["content"]
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def test_memories_search_filters_by_source():
+    """?source= scopes semantic recall to one AI tool (§5.5/(b)).
+
+    Two memories from *different* tools both contain the query term ``vector``;
+    without a filter both come back, but ``source=claude`` / ``source=codex``
+    must narrow the result set to exactly that tool — mirroring ``/api/search``.
+    Uses ``mode=fts`` so the test needs no embedder (offline, deterministic).
+    """
+    import bagger.config as config
+
+    td = Path(tempfile.mkdtemp())
+    try:
+        storage = _override_db(td)
+        _seed_memories(
+            storage,
+            [
+                (
+                    "fact",
+                    "Choose Zvec as the local vector storage backend",
+                    "vector-db,selection",
+                    "claude",
+                ),
+                (
+                    "fact",
+                    "Chroma is another vector storage backend option",
+                    "vector-db,selection",
+                    "codex",
+                ),
+            ],
+        )
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        config.settings = Settings(bagger_dir=td)
+        client = TestClient(create_app())
+
+        # No filter: both tools contribute a "vector" hit.
+        all_resp = client.get("/api/memories/search?q=vector&mode=fts")
+        assert all_resp.status_code == 200
+        all_data = all_resp.json()
+        assert all_data["mode"] == "fts"
+        assert all_data["count"] == 2
+
+        # source=claude → only the claude memory, and it carries source=claude.
+        cl_resp = client.get("/api/memories/search?q=vector&mode=fts&source=claude")
+        cl_json = cl_resp.json()
+        assert cl_resp.status_code == 200
+        assert cl_json["count"] == 1
+        assert cl_json["results"][0]["source"] == "claude"
+
+        # source=codex → only the codex memory.
+        cx_resp = client.get("/api/memories/search?q=vector&mode=fts&source=codex")
+        cx_json = cx_resp.json()
+        assert cx_resp.status_code == 200
+        assert cx_json["count"] == 1
+        assert cx_json["results"][0]["source"] == "codex"
     finally:
         shutil.rmtree(td, ignore_errors=True)

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Search as SearchIcon, AlertCircle, Brain } from "lucide-react";
 import { searchMemories, type Memory, type MemoryMode } from "@/lib/api";
 import SearchBar from "@/components/SearchBar";
-import { SourceBadge } from "@/components/SourceBadge";
+import { SourceBadge, sourceDotColor } from "@/components/SourceBadge";
 import { EmptyState } from "@/components/EmptyState";
 
 const MODES: { value: MemoryMode; label: string; hint: string }[] = [
@@ -22,19 +22,20 @@ const TYPE_COLOR: Record<string, string> = {
 export default function MemoriesPage() {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<MemoryMode>("hybrid");
+  const [source, setSource] = useState<string | null>(null);
   const [results, setResults] = useState<Memory[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [searched, setSearched] = useState(false);
 
-  const run = (q: string, m: MemoryMode = mode) => {
+  const run = (q: string, m: MemoryMode = mode, s: string | null = source) => {
     const trimmed = q.trim();
     if (!trimmed) return;
     setQuery(trimmed);
     setSearched(true);
     setIsLoading(true);
     setError(null);
-    searchMemories(trimmed, m)
+    searchMemories(trimmed, m, 20, s ?? undefined)
       .then((res) => setResults(res.results))
       .catch((e) => setError(e as Error))
       .finally(() => setIsLoading(false));
@@ -44,6 +45,20 @@ export default function MemoriesPage() {
     setMode(m);
     if (searched) run(query, m);
   };
+
+  const switchSource = (s: string | null) => {
+    setSource(s);
+    if (searched) run(query, mode, s);
+  };
+
+  // Distinct sources present in the current result set, plus the active source
+  // so it stays selectable even when every hit shares a single source.
+  const sourceOptions = Array.from(
+    new Set([
+      ...results.map((r) => r.source).filter(Boolean),
+      ...(source ? [source] : []),
+    ] as string[]),
+  ).sort();
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-fade-in-up">
@@ -73,8 +88,34 @@ export default function MemoriesPage() {
           >
             {m.label}
           </button>
-        ))}
+          ))}
       </div>
+
+      {/* Source facet — narrow the result set by originating AI tool. */}
+      {!isLoading && searched && sourceOptions.length > 0 && (
+        <div className="flex items-center gap-1 bg-muted rounded-element p-0.5 w-fit">
+          <button
+            onClick={() => switchSource(null)}
+            className={`px-3 py-1.5 rounded text-xs font-mono transition-all duration-200 ${
+              !source ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            All
+          </button>
+          {sourceOptions.map((s) => (
+            <button
+              key={s}
+              onClick={() => switchSource(s)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all duration-200 ${
+                source === s ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: sourceDotColor(s) }} />
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
 
       {!searched ? (
         <EmptyState
