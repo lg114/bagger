@@ -61,3 +61,20 @@ def search_memories(
             r["topics"] = [t.strip() for t in topics.split(",") if t.strip()]
 
     return {"query": q, "mode": mode, "count": len(results), "results": results}
+
+
+@router.get("/memories")
+def list_memories(
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    per_page: int = Query(50, ge=1, le=200, description="Results per page"),
+    source: str = Query(None, description="Filter by originating tool (e.g. claude, codex)"),
+    type: str = Query(None, description="Filter by memory type (fact/preference/decision/lesson)"),
+) -> dict:
+    """Browse all structured memories, optionally filtered by source/type.
+
+    Unlike ``/memories/search`` this needs no embedder and returns the full
+    record list (paginated) rather than ranked retrieval results. Powers the
+    Memories page's default "All memories" view.
+    """
+    with get_storage() as storage:
+        return storage.list_memories(page=page, per_page=per_page, source=source, type=type)

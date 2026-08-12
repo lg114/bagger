@@ -259,7 +259,8 @@ export interface Memory {
   session_id: string;
   event_id: string | null;
   created_at: string;
-  fused_score: number;
+  // Retrieval-only: absent in the browse (list) view, present in search results.
+  fused_score?: number;
 }
 
 export interface MemorySearchResponse {
@@ -267,6 +268,11 @@ export interface MemorySearchResponse {
   mode: MemoryMode;
   count: number;
   results: Memory[];
+}
+
+export interface MemoryListResponse {
+  data: Memory[];
+  meta: { page: number; per_page: number; total: number; pages: number };
 }
 
 export function searchMemories(
@@ -280,5 +286,19 @@ export function searchMemories(
     mode,
     limit,
     source,
+  });
+}
+
+export function listMemories(params?: {
+  page?: number;
+  perPage?: number;
+  source?: string;
+  type?: string;
+}): Promise<MemoryListResponse> {
+  return fetchApi<MemoryListResponse>("/memories", {
+    page: params?.page,
+    per_page: params?.perPage,
+    source: params?.source,
+    type: params?.type,
   });
 }

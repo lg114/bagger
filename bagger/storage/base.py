@@ -158,3 +158,19 @@ class Storage(SessionRepository, EventRepository, SearchIndex, VectorIndex, Prot
     def get_memory_records(self, ids: list[int]) -> list[dict]:
         """Return memory records by id (used to hydrate retrieval results)."""
         ...
+
+    def list_memories(
+        self,
+        page: int = 1,
+        per_page: int = 50,
+        source: str | None = None,
+        type: str | None = None,
+    ) -> dict:
+        """Return a paginated list of memory records (the browse view).
+
+        Optional ``source`` / ``type`` filters narrow the result set. ``topics``
+        is normalized from the comma-joined DB string to a list so the shape
+        matches the retrieval endpoint. Returns ``{"data": [...], "meta":
+        {"page", "per_page", "total", "pages"}}``.
+        """
+        ...

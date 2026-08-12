@@ -993,3 +993,74 @@ def test_memories_search_filters_by_source():
         assert cx_json["results"][0]["source"] == "codex"
     finally:
         shutil.rmtree(td, ignore_errors=True)
+
+
+def test_memories_list_filters_and_paginates():
+    """GET /api/memories browses records with source/type filters + pagination.
+
+    Unlike /memories/search this needs no embedder — pure SQL over memory_records.
+    Seeds 4 records across 2 sources and 4 types, then checks: total count, a
+    source filter, a type filter, combined source+type, pagination (offset +
+    limit), and that ``topics`` comes back as a list (not the comma-joined DB
+    string).
+    """
+    import bagger.config as config
+
+    td = Path(tempfile.mkdtemp())
+    try:
+        storage = _override_db(td)
+        _seed_memories(
+            storage,
+            [
+                ("fact", "Zvec is the local vector storage backend", "vector-db,storage", "claude"),
+                ("preference", "gc dislikes auto-starting the dev server", "habits,ux", "claude"),
+                ("decision", "Chose Zvec over Chroma for vectors", "vector-db,selection", "codex"),
+                ("lesson", "managed venv pip breaks; rebuild it", "python,tooling", "codex"),
+            ],
+        )
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        config.settings = Settings(bagger_dir=td)
+        client = TestClient(create_app())
+
+        # All four records; count + pagination meta are what we assert.
+        all_resp = client.get("/api/memories")
+        assert all_resp.status_code == 200
+        all_json = all_resp.json()
+        assert all_json["meta"]["total"] == 4
+        assert len(all_json["data"]) == 4
+        assert all_json["meta"]["pages"] == 1
+        # topics normalized from the comma-joined DB string to a list.
+        assert isinstance(all_json["data"][0]["topics"], list)
+
+        # source filter narrows to one tool.
+        cl_resp = client.get("/api/memories?source=claude")
+        assert cl_resp.status_code == 200
+        assert cl_resp.json()["meta"]["total"] == 2
+
+        # type filter narrows to one kind.
+        fact_resp = client.get("/api/memories?type=fact")
+        assert fact_resp.status_code == 200
+        fact_json = fact_resp.json()
+        assert fact_json["meta"]["total"] == 1
+        assert fact_json["data"][0]["type"] == "fact"
+
+        # source + type combine (AND).
+        combo = client.get("/api/memories?source=codex&type=lesson")
+        assert combo.json()["meta"]["total"] == 1
+
+        # Pagination: 2 per page → 2 pages; page 2 holds the remaining 2.
+        p1 = client.get("/api/memories?per_page=2&page=1")
+        assert p1.status_code == 200
+        p1_json = p1.json()
+        assert len(p1_json["data"]) == 2
+        assert p1_json["meta"]["pages"] == 2
+        assert p1_json["meta"]["page"] == 1
+
+        p2 = client.get("/api/memories?per_page=2&page=2")
+        assert len(p2.json()["data"]) == 2
+        assert p2.json()["meta"]["page"] == 2
+    finally:
+        shutil.rmtree(td, ignore_errors=True)

@@ -4,10 +4,15 @@ import { MemoryRouter } from "react-router-dom";
 import MemoriesPage from "@/pages/MemoriesPage";
 import type { Memory } from "@/lib/api";
 
-// Runtime mock of the API; types still resolve from the real module.
-const mockSearchMemories = vi.fn();
+// Both API functions are mocked; types still resolve from the real module.
+const { mockSearchMemories, mockListMemories } = vi.hoisted(() => ({
+  mockSearchMemories: vi.fn(),
+  mockListMemories: vi.fn(),
+}));
+
 vi.mock("@/lib/api", () => ({
   searchMemories: (...args: unknown[]) => mockSearchMemories(...args),
+  listMemories: (...args: unknown[]) => mockListMemories(...args),
 }));
 
 function makeMemory(overrides: Partial<Memory> = {}): Memory {
@@ -21,7 +26,6 @@ function makeMemory(overrides: Partial<Memory> = {}): Memory {
     session_id: "s1",
     event_id: "e1",
     created_at: "2026-06-30T12:00:00+00:00",
-    fused_score: 1,
     ...overrides,
   };
 }
@@ -43,9 +47,54 @@ function typeAndSubmit(value: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockSearchMemories.mockResolvedValue({ query: "", mode: "hybrid", count: 0, results: [] });
+  mockListMemories.mockResolvedValue({
+    data: [],
+    meta: { page: 1, per_page: 20, total: 0, pages: 0 },
+  });
 });
 
-describe("MemoriesPage source facet", () => {
+describe("MemoriesPage browse view", () => {
+  it("loads all memories on mount via listMemories", async () => {
+    mockListMemories.mockResolvedValue({
+      data: [makeMemory({ id: 1, type: "fact", source: "claude" })],
+      meta: { page: 1, per_page: 20, total: 1, pages: 1 },
+    });
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(mockListMemories).toHaveBeenCalledWith({
+        page: 1,
+        perPage: 20,
+        source: undefined,
+        type: undefined,
+      }),
+    );
+  });
+
+  it("re-runs listMemories with the selected type when a type chip is clicked", async () => {
+    mockListMemories.mockResolvedValue({
+      data: [makeMemory({ id: 1, type: "fact", source: "claude" })],
+      meta: { page: 1, per_page: 20, total: 1, pages: 1 },
+    });
+
+    renderPage();
+
+    const factChip = await screen.findByRole("button", { name: /^fact$/i });
+    fireEvent.click(factChip);
+
+    await waitFor(() =>
+      expect(mockListMemories).toHaveBeenLastCalledWith({
+        page: 1,
+        perPage: 20,
+        source: undefined,
+        type: "fact",
+      }),
+    );
+  });
+});
+
+describe("MemoriesPage source facet (search)", () => {
   it("renders one chip per distinct source after a search", async () => {
     mockSearchMemories.mockResolvedValue({
       query: "zvec",

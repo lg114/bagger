@@ -1778,3 +1778,58 @@ class SqliteStorage:
             ids,
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
+
+    def list_memories(
+        self,
+        page: int = 1,
+        per_page: int = 50,
+        source: str | None = None,
+        type: str | None = None,
+    ) -> dict:
+        """Return a paginated list of memory records (the browse view).
+
+        Optional ``source`` / ``type`` filters narrow the result set. ``topics``
+        is normalized from the comma-joined DB string to a list, matching the
+        shape the retrieval endpoint exposes. Newest first (created_at desc,
+        then id desc as a stable tiebreaker).
+        """
+        page = max(1, page)
+        per_page = max(1, min(per_page, 200))
+        where: list[str] = []
+        params: list = []
+        if source:
+            where.append("source = ?")
+            params.append(source)
+        if type:
+            where.append("type = ?")
+            params.append(type)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+        total = self._conn.execute(
+            f"SELECT COUNT(*) FROM memory_records{where_sql}", params
+        ).fetchone()[0]
+
+        offset = (page - 1) * per_page
+        rows = self._conn.execute(
+            f"SELECT id, type, content, topics, confidence, source, session_id, "
+            f"event_id, created_at FROM memory_records{where_sql} "
+            f"ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            params + [per_page, offset],
+        ).fetchall()
+
+        data: list[dict] = []
+        for r in rows:
+            d = _row_to_dict(r)
+            topics = d.get("topics")
+            d["topics"] = (
+                [t.strip() for t in topics.split(",") if t.strip()]
+                if isinstance(topics, str)
+                else []
+            )
+            data.append(d)
+
+        pages = (total + per_page - 1) // per_page if total else 0
+        return {
+            "data": data,
+            "meta": {"page": page, "per_page": per_page, "total": total, "pages": pages},
+        }
