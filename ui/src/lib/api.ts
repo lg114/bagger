@@ -244,3 +244,41 @@ export function exportSessionMarkdown(id: string, format = "markdown"): void {
   a.click();
   a.remove();
 }
+
+// ── Memories (semantic / hybrid retrieval) ─────────────
+
+export type MemoryMode = "hybrid" | "vector" | "fts";
+
+export interface Memory {
+  id: number;
+  type: string; // fact | preference | decision | lesson
+  content: string;
+  topics: string[];
+  confidence: number;
+  source?: string;
+  session_id: string;
+  event_id: string | null;
+  created_at: string;
+  fused_score: number;
+}
+
+export interface MemorySearchResponse {
+  query: string;
+  mode: MemoryMode;
+  count: number;
+  results: Memory[];
+}
+
+export function searchMemories(
+  query: string,
+  mode: MemoryMode = "hybrid",
+  limit = 20,
+  source?: string,
+): Promise<MemorySearchResponse> {
+  return fetchApi<MemorySearchResponse>("/memories/search", {
+    q: query,
+    mode,
+    limit,
+    source,
+  });
+}

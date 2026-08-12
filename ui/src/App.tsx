@@ -5,6 +5,7 @@ import SessionsPage from "./pages/SessionsPage";
 import SessionDetailPage from "./pages/SessionDetailPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import SearchPage from "./pages/SearchPage";
+import MemoriesPage from "./pages/MemoriesPage";
 import StatsPage from "./pages/StatsPage";
 import ImportPage from "./pages/ImportPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="sessions/:id" element={<SessionDetailPage />} />
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="search" element={<SearchPage />} />
+        <Route path="memories" element={<MemoriesPage />} />
           <Route path="stats" element={<StatsPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="settings" element={<SettingsPage />} />

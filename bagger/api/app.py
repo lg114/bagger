@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from bagger import __version__
-from bagger.api.routes import export, health, search, sessions, stats, sync
+from bagger.api.routes import export, health, memories, search, sessions, stats, sync
 
 
 @asynccontextmanager
@@ -52,5 +52,6 @@ def create_app() -> FastAPI:
     app.include_router(stats.router, prefix="/api", tags=["stats"])
     app.include_router(sync.router, prefix="/api", tags=["sync"])
     app.include_router(export.router, prefix="/api", tags=["export"])
+    app.include_router(memories.router, prefix="/api", tags=["memories"])
 
     return app

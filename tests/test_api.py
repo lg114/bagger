@@ -702,3 +702,213 @@ def test_scan_endpoint_runs_in_background(monkeypatch):
             status2 = client.get("/api/scan/status").json()
             assert status2["done"] is True
             assert status2["result"]["skipped"] == 1
+
+
+# ---- /api/memories/search (semantic / hybrid retrieval) ----
+
+
+def _seed_memories(storage, rows):
+    """Insert (type, content, topics, source) rows and reindex the FTS table.
+
+    Mirrors what the consolidation pipeline writes, but without the LLM client —
+    we only need rows + a populated ``memory_fts`` so the endpoint has something
+    to retrieve. ``content_hash`` is given a distinct value per row to satisfy
+    the UNIQUE(index) added by migration v6.
+    """
+    import hashlib
+
+    from bagger.models.event import Session
+
+    # memory_records has FK(source, session_id) → sessions; satisfy it.
+    storage.upsert_session(Session(session_id="sess-1", summary="mem-seed", source="claude"))
+
+    for typ, content, topics, source in rows:
+        digest = hashlib.sha1(content.encode("utf-8")).hexdigest()[:16]
+        storage._conn.execute(
+            "INSERT INTO memory_records(type, content, topics, confidence, "
+            "source, session_id, created_at, content_hash) VALUES (?,?,?,?,?,?,?,?)",
+            (typ, content, topics, 0.9, source, "sess-1", "2026-06-30T12:00:00", digest),
+        )
+    storage.reindex_memory_fts()
+
+
+def _seed_vectors(storage, embedder):
+    """Embed every seeded memory record and persist it as a "memory" vector."""
+    from bagger.storage.base import VectorItem
+
+    rows = storage._conn.execute("SELECT id, content FROM memory_records ORDER BY id").fetchall()
+    items = []
+    for rid, content in rows:
+        vec = embedder.embed_query(content)
+        items.append(
+            VectorItem(
+                owner_type="memory",
+                owner_id=str(rid),
+                model=embedder.model_name,
+                dim=len(vec),
+                vector=vec,
+                content_hash=f"v{rid}",
+            )
+        )
+    storage.upsert_vectors(items)
+
+
+def test_memories_search_fts_offline():
+    """``mode=fts`` works with zero embedding config (BM25 only)."""
+    import bagger.config as config
+
+    td = Path(tempfile.mkdtemp())
+    try:
+        storage = _override_db(td)
+        _seed_memories(
+            storage,
+            [
+                (
+                    "fact",
+                    "Choose Zvec as the local vector storage backend",
+                    "vector-db,selection",
+                    "claude",
+                ),
+                (
+                    "preference",
+                    "The scrollbar uses a thin floating style",
+                    "ui,scrollbar",
+                    "claude",
+                ),
+            ],
+        )
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        config.settings = Settings(bagger_dir=td)
+        client = TestClient(create_app())
+
+        resp = client.get("/api/memories/search?q=vector&mode=fts")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["mode"] == "fts"
+        assert data["query"] == "vector"
+        assert data["count"] >= 1
+        contents = [r["content"] for r in data["results"]]
+        assert any("Zvec" in c for c in contents)
+        # FTS result shape carries the storage fields the UI renders.
+        first = data["results"][0]
+        assert "id" in first and "type" in first and "content" in first
+        assert "fused_score" in first
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def test_memories_search_invalid_mode_rejected():
+    """An unknown mode must be rejected with 422, not silently coerced."""
+    import bagger.config as config
+
+    td = Path(tempfile.mkdtemp())
+    try:
+        _override_db(td).close()
+
+        from fastapi.testclient import TestClient
+
+        config.settings = Settings(bagger_dir=td)
+        client = TestClient(create_app())
+
+        resp = client.get("/api/memories/search?q=anything&mode=bogus")
+        assert resp.status_code == 422
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def test_memories_search_vector_needs_embedder_returns_503(monkeypatch):
+    """``mode=hybrid|vector`` without a reachable embedder surfaces 503 (no 500)."""
+    import bagger.config as config
+
+    td = Path(tempfile.mkdtemp())
+    try:
+        storage = _override_db(td)
+        _seed_memories(
+            storage,
+            [
+                (
+                    "fact",
+                    "Choose Zvec as the local vector storage backend",
+                    "vector-db,selection",
+                    "claude",
+                )
+            ],
+        )
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        config.settings = Settings(bagger_dir=td)
+        monkeypatch.setattr(
+            "bagger.embedding.create_embedder",
+            lambda *a, **k: (_ for _ in ()).throw(
+                RuntimeError("embedding unavailable: no API key")
+            ),
+        )
+        client = TestClient(create_app())
+
+        resp = client.get("/api/memories/search?q=vector+database&mode=hybrid")
+        assert resp.status_code == 503
+        assert "embedding unavailable" in resp.json()["detail"]
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def test_memories_search_hybrid_with_fake_embedder(monkeypatch):
+    """``mode=hybrid`` fuses vector + FTS when an embedder is configured.
+
+    Uses the offline FakeEmbedder so the test is deterministic and network-free;
+    it still exercises the full HybridSearch → storage → RRF path the real remote
+    embedder uses.
+    """
+    import bagger.config as config
+    from bagger.embedding.fake import FakeEmbedder
+
+    td = Path(tempfile.mkdtemp())
+    try:
+        storage = _override_db(td)
+        _seed_memories(
+            storage,
+            [
+                (
+                    "fact",
+                    "Choose Zvec as the local vector storage backend",
+                    "vector-db,selection",
+                    "claude",
+                ),
+                (
+                    "preference",
+                    "The scrollbar uses a thin floating style",
+                    "ui,scrollbar",
+                    "claude",
+                ),
+            ],
+        )
+        embedder = FakeEmbedder(model="fake")
+        _seed_vectors(storage, embedder)
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        # Point the API at the temp DB (the embedder is forced below).
+        config.settings = Settings(bagger_dir=td)
+        # Force the offline embedder regardless of configured provider, so the
+        # test exercises the real HybridSearch → storage → RRF path with no key.
+        monkeypatch.setattr(
+            "bagger.embedding.create_embedder",
+            lambda *a, **k: FakeEmbedder(model="fake"),
+        )
+        client = TestClient(create_app())
+
+        resp = client.get("/api/memories/search?q=vector+database&mode=hybrid")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["mode"] == "hybrid"
+        assert data["count"] >= 1
+        # The vector-db record must outrank the unrelated scrollbar record.
+        assert "Zvec" in data["results"][0]["content"]
+    finally:
+        shutil.rmtree(td, ignore_errors=True)

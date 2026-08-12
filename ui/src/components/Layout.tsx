@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Settings,
   Folder,
+  Brain,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ const navItems = {
   browse: [
     { to: "/", icon: Home, label: "Dashboard" },
     { to: "/search", icon: Search, label: "Search" },
+    { to: "/memories", icon: Brain, label: "Memories" },
     { to: "/projects", icon: Folder, label: "Projects" },
   ],
   manage: [
