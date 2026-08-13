@@ -109,6 +109,28 @@ describe("MemoriesPage browse view", () => {
     // claude is absent from the page-1 rows yet still surfaces as a chip.
     expect(screen.getByRole("button", { name: /^claude$/i })).toBeInTheDocument();
   });
+
+  it("reloads with the selected page size when a per-page chip is clicked", async () => {
+    mockListMemories.mockResolvedValue({
+      data: [makeMemory({ id: 1, type: "fact", source: "claude" })],
+      meta: { page: 1, per_page: 20, total: 50, pages: 3 },
+    });
+
+    renderPage();
+
+    // Wait for the initial browse load, then switch to 50 per page.
+    await waitFor(() => expect(mockListMemories).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: /^50$/i }));
+
+    await waitFor(() =>
+      expect(mockListMemories).toHaveBeenLastCalledWith({
+        page: 1,
+        perPage: 50,
+        source: undefined,
+        type: undefined,
+      }),
+    );
+  });
 });
 
 describe("MemoriesPage source facet (search)", () => {

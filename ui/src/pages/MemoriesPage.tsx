@@ -28,6 +28,7 @@ const TYPE_COLOR: Record<string, string> = {
 };
 
 const PAGE_SIZE = 20;
+const PAGE_SIZES = [20, 50, 100];
 
 export default function MemoriesPage() {
   const [view, setView] = useState<"browse" | "search">("browse");
@@ -40,12 +41,13 @@ export default function MemoriesPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState<number>(PAGE_SIZE);
   const [searched, setSearched] = useState(false);
 
-  const loadBrowse = (pg: number, s: string | null, t: string | null) => {
+  const loadBrowse = (pg: number, s: string | null, t: string | null, pp: number = perPage) => {
     setIsLoading(true);
     setError(null);
-    listMemories({ page: pg, perPage: PAGE_SIZE, source: s ?? undefined, type: t ?? undefined })
+    listMemories({ page: pg, perPage: pp, source: s ?? undefined, type: t ?? undefined })
       .then((res) => {
         setResults(res.data);
         setMeta(res.meta);
@@ -95,6 +97,11 @@ export default function MemoriesPage() {
     setQuery("");
     setSearched(false);
     loadBrowse(1, source, type);
+  };
+
+  const changePerPage = (sz: number) => {
+    setPerPage(sz);
+    loadBrowse(1, source, type, sz);
   };
 
   // Browse view: the source facet comes from the FULL dataset (meta.sources),
@@ -237,7 +244,7 @@ export default function MemoriesPage() {
           )}
 
           <div
-            key={`${view}-${source}-${type}-${page}-${query}`}
+            key={`${view}-${source}-${type}-${page}-${perPage}-${query}`}
             className="space-y-3 animate-fade-in"
           >
             {results.map((r) => (
@@ -281,26 +288,48 @@ export default function MemoriesPage() {
             ))}
           </div>
 
-          {/* Pagination — browse view only */}
-          {view === "browse" && meta && meta.pages > 1 && (
-            <div className="flex items-center justify-center gap-3 pt-2">
-              <button
-                onClick={() => loadBrowse(Math.max(1, page - 1), source, type)}
-                disabled={page <= 1}
-                className="px-3 py-1.5 rounded text-xs font-mono bg-muted text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                ← Prev
-              </button>
-              <span className="text-xs font-mono text-muted-foreground">
-                {page} / {meta.pages}
-              </span>
-              <button
-                onClick={() => loadBrowse(Math.min(meta.pages, page + 1), source, type)}
-                disabled={page >= meta.pages}
-                className="px-3 py-1.5 rounded text-xs font-mono bg-muted text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                Next →
-              </button>
+          {/* Page size + pagination — browse view only */}
+          {view === "browse" && meta && meta.total > 0 && (
+            <div className="flex items-center justify-between gap-3 pt-2 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-mono text-muted-foreground">Per page</span>
+                <div className="flex items-center gap-0.5 bg-muted rounded-element p-0.5">
+                  {PAGE_SIZES.map((sz) => (
+                    <button
+                      key={sz}
+                      onClick={() => changePerPage(sz)}
+                      className={`px-2.5 py-1 rounded text-[11px] font-mono transition-all duration-200 ${
+                        perPage === sz
+                          ? "bg-surface text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {sz}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {meta.pages > 1 && (
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => loadBrowse(Math.max(1, page - 1), source, type)}
+                    disabled={page <= 1}
+                    className="px-3 py-1.5 rounded text-xs font-mono bg-muted text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    ← Prev
+                  </button>
+                  <span className="text-xs font-mono text-muted-foreground">
+                    {page} / {meta.pages}
+                  </span>
+                  <button
+                    onClick={() => loadBrowse(Math.min(meta.pages, page + 1), source, type)}
+                    disabled={page >= meta.pages}
+                    className="px-3 py-1.5 rounded text-xs font-mono bg-muted text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Next →
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
