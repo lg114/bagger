@@ -1,310 +1,234 @@
 # bagger
 
-> AI Coding Agent Data Collector — sync AI coding tool transcripts into a searchable local database, with a desktop app to browse your agent history.
+> A local memory layer for AI coding agents.
 
-[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://docs.astral.sh/ruff/)
-[![Tests](https://img.shields.io/badge/tests-156%20passing-brightgreen.svg)](#development)
-[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
-
-bagger reads the JSONL transcripts that Claude Code writes to `~/.claude/projects/` and turns them into a queryable SQLite database with FTS5 full-text search (CJK-aware) and session replay. The pipeline is multi-source by design — a parser registry drives scan/watch across tools, and every event carries its `source` end to end (DB keys, CLI, API, UI). Claude Code is the bundled parser today. Think of it as your AI coding memory layer — with a visual memory browser on top.
+bagger imports local coding-agent transcripts into a searchable SQLite database, then lets you browse, replay, export, and distill that history into reusable memories. It currently supports **Claude Code** and **Codex**, with a parser registry designed for more sources.
 
 <p align="center">
-  <img src="docs/preview.png" alt="bagger Dashboard — session list with source badges, KPI cards, and project-centric sidebar" width="860" />
+  <img src="docs/preview.png" alt="bagger desktop app" width="860" />
 </p>
 
-## Why
+## What it does
 
-Claude Code already records everything you and the assistant say — every prompt, response, tool call, and thinking block. But those JSONL files sit in `~/.claude/projects/` as raw append-only logs. bagger makes them searchable and browsable.
-
-```
-~/.claude/projects/<hash>/<uuid>.jsonl    # raw transcript
-          │
-          ▼
-       bagger
-          │
-          ▼
-    ~/.bagger/bagger.db                    # searchable SQLite (FTS5)
-```
+- Imports append-only JSONL transcripts from Claude Code and Codex
+- Keeps sources isolated with `(source, id)` database identities
+- Searches raw conversations with SQLite FTS5, BM25 ranking, and CJK-aware tokenization
+- Replays complete sessions, including text, thinking, tool calls, and tool results
+- Watches transcript folders and incrementally syncs new events
+- Extracts structured memories (facts, preferences, decisions, and lessons) with an OpenAI-compatible LLM
+- Retrieves memories with keyword, vector, or hybrid search
+- Provides a CLI, loopback-only FastAPI service, and native Tauri desktop app
 
 ## Quick start
 
 ```bash
-# 1. Install (with web deps for the desktop app)
+# Install the CLI and API dependencies.
 pip install -e ".[web]"
 
-# 2. Initialize
+# Create ~/.bagger/bagger.db and import existing sessions.
 bagger init
-
-# 3. Import your existing sessions
 bagger scan
 
-# 4. Search (CLI)
+# Search or replay imported conversations.
 bagger search "token expiration"
-bagger search "登录" -s abc123     # filter by session prefix
+bagger replay <session-id-prefix>
 
-# 5. Replay a session
-bagger replay abc123               # supports prefix matching
-
-# 6. Start the desktop app
-cd ui && npm install && npm run tauri dev
+# Run the local API.
+bagger serve
 ```
 
-## Desktop App (Tauri)
-
-bagger ships as a native desktop app with tray support:
-
-- **Window**: 1200×800, dev mode closes normally, release hides to tray
-- **Tray**: Left-click to show, right-click menu (Show / Quit)
-- **Backend**: Two modes — **dev** (host Python + hot reload) or **production** (bundled sidecar exe)
-- **Single instance**: Named mutex prevents duplicate windows on restart
-- **UI**: React + Tailwind, dark editorial theme (Fraunces / Hanken Grotesk / JetBrains Mono), project-centric sidebar navigation
-
-### Dev setup
+To run the desktop app in development:
 
 ```bash
-# Prerequisites: Rust, Node.js 22+, Python 3.12+
 pip install -e ".[web,dev]"
-cd ui && npm install
-npm run tauri dev               # Auto-spawns backend with --reload (hot reload ON)
+cd ui
+npm install
+npm run tauri dev
 ```
 
-Or start backend manually if you want to see logs:
+Prerequisites for the desktop app are Python 3.12+, Node.js 22+, and Rust.
 
-```bash
-bagger serve --reload           # Terminal 1: API (hot reload ON)
-npm run tauri dev               # Terminal 2: Desktop
-```
+## Data sources
 
-### Production build
+| Source | Transcript location | Notes |
+| --- | --- | --- |
+| Claude Code | `~/.claude/projects/` | JSONL session files |
+| Codex | `$CODEX_HOME/sessions/` (defaults to `~/.codex/sessions/`) | Rollout JSONL session files |
 
-```bash
-# 1. Bundle Python backend into standalone sidecar exe
-pip install -e ".[web,bundle]"
-python scripts/build-backend.py
+The parser registry auto-discovers concrete parsers in `bagger/parsers/`. Scan and watch operate across all registered sources by default; pass `--source claude` or `--source codex` to scope an operation.
 
-# 2. Build the desktop app (sidecar is automatically included)
-cd ui && npm run tauri build
-```
-
-The resulting `.msi` installer is fully self-contained — no Python installation required on the user's machine.
-
-## Commands
+## CLI
 
 | Command | Description |
-|---------|-------------|
+| --- | --- |
 | `bagger init` | Create `~/.bagger/` and initialize the database |
-| `bagger scan` | Import sessions from every registered source (`--full` re-imports, `--source` limits to one tool) |
-| `bagger watch` | Live-sync new events via a watchdog filesystem observer (`--source` limits to one tool) |
-| `bagger search <query>` | FTS5 full-text search with BM25 ranking and snippet highlighting |
-| `bagger replay <session_id>` | Replay an entire conversation in the terminal |
-| `bagger stats` | Show session and event counts |
-| `bagger doctor` | Run diagnostics (DB integrity, FTS status, Claude config) |
-| `bagger rebuild-index` | Rebuild the FTS5 search index from all events |
-| `bagger serve` | Start the REST API server (requires `pip install -e ".[web]"`) |
-| `bagger serve --reload` | Start with hot reload — code changes auto-restart (dev mode) |
-| `bagger export <session_id>` | Export a session as Markdown (`--format`, `-o`, `--dir`, `--source`) |
+| `bagger scan [--full] [--source …]` | Import sessions incrementally, or fully re-import them |
+| `bagger watch [--source …]` | Watch transcript folders and sync new events |
+| `bagger search <query>` | Search raw conversation events with FTS5/BM25 |
+| `bagger replay <session-id>` | Render a full conversation in the terminal |
+| `bagger export <session-id>` | Export a session as Markdown |
+| `bagger stats` | Show session, event, token, and tool-use totals |
+| `bagger doctor` | Check database integrity, FTS, and source discovery |
+| `bagger rebuild-index` | Rebuild the raw-event FTS5 index |
+| `bagger consolidate` | Distill new conversation content into structured memories |
+| `bagger memories [topic]` | Browse consolidated memories |
+| `bagger memories-dedup` | Preview or merge near-duplicate memory records |
+| `bagger memories-stats` | Show memory-corpus statistics |
+| `bagger embed` | Create embeddings for memory records |
+| `bagger recall <query>` | Retrieve memories with `fts`, `vector`, or `hybrid` mode |
+| `bagger serve` | Start the local REST API and Swagger UI |
+
+Examples:
+
+```bash
+bagger scan --source codex
+bagger search "登录" --session abc123
+bagger consolidate --dry-run
+bagger consolidate --mock                 # offline smoke test
+bagger embed --provider remote
+bagger recall "how we handle migrations" --mode hybrid
+bagger memories-dedup --dry-run
+```
+
+`consolidate` needs `BAGGER_LLM_API_KEY` (or `llm_api_key` in the config) unless using `--dry-run` or `--mock`. Vector and hybrid recall need an embedding provider; FTS-only recall works offline.
+
+## Structured memory and retrieval
+
+Raw transcript search answers “where was this said?”. Consolidation adds a curated memory layer that answers “what did we learn or decide?”. It extracts normalized records such as facts, preferences, decisions, and lessons, retains their source/session provenance, and can merge corroborating records.
+
+Memory retrieval modes:
+
+- `fts`: local BM25 keyword search
+- `vector`: semantic nearest-neighbour search over embeddings
+- `hybrid`: combines FTS and vector rankings with reciprocal-rank fusion
+
+Embeddings and consolidation use configurable OpenAI-compatible endpoints. The defaults target Zhipu AI's compatible API, but URL, model, and keys can all be overridden.
 
 ## REST API
 
-`bagger serve` starts a FastAPI server on `http://localhost:8723` with interactive Swagger docs.
+`bagger serve` listens on `http://127.0.0.1:8723`; interactive docs are at `/docs`.
 
 | Endpoint | Description |
-|----------|-------------|
-| `GET /api/health` | Database status, event/session counts, FTS state |
-| `GET /api/sessions?page=1&per_page=50&sort=...&project=...&source=...` | Paginated session list with sorting and project/source filters |
-| `GET /api/sessions/{id}` | Session metadata |
-| `GET /api/sessions/{id}/events?page=1&per_page=50` | Paginated events for a session (content_blocks parsed; `per_page` clamped to 1–500) |
-| `GET /api/sessions/{id}/tree` | Session topology — branches, compactions, resumptions |
-| `GET /api/sessions/{id}/export?format=markdown` | Export session as Markdown (download) |
-| `GET /api/search?q=...&page=1` | FTS5 full-text search with snippet highlighting |
-| `GET /api/stats` | Aggregate stats (events, roles, tokens, total cost USD, per-model/per-provider breakdown) |
-| `GET /api/stats/daily?days=30` | Daily event/token/cost time series |
-| `GET /api/stats/tools?limit=15` | Most frequently used tools |
-| `POST /api/scan` | Start a background incremental scan (returns immediately) |
-| `POST /api/scan/full` | Start a background full re-scan |
-| `GET /api/scan/status` | Poll background-scan progress and final stats |
+| --- | --- |
+| `GET /api/health` | Database, FTS, event, and session health |
+| `GET /api/sessions` | Paginated sessions with project and source filters |
+| `GET /api/sessions/{id}` | Session metadata, with prefix matching |
+| `GET /api/sessions/{id}/events` | Paginated, parsed event blocks |
+| `GET /api/sessions/{id}/tree` | Conversation topology and lineage |
+| `GET /api/sessions/{id}/export?format=markdown` | Download a session as Markdown |
+| `GET /api/search?q=…` | Search raw conversation events |
+| `GET /api/memories` | Browse consolidated memories by source and type |
+| `GET /api/memories/search?q=…&mode=…` | FTS, vector, or hybrid memory retrieval |
+| `GET /api/stats`, `/daily`, `/tools` | Aggregate, time-series, and tool-use statistics |
+| `POST /api/scan`, `POST /api/scan/full` | Start a background scan |
+| `GET /api/scan/status` | Poll scan progress and outcome |
+
+## Desktop app
+
+The desktop client uses Tauri, React, Vite, and Tailwind. It offers dashboards, conversation and project browsing, raw search, memory browsing/retrieval, analytics, import status, and settings. In development, Tauri starts the Python API with reload enabled; production bundles the API as a PyInstaller sidecar.
+
+```bash
+# Build the production sidecar, then the native installer.
+pip install -e ".[web,bundle]"
+python scripts/build-backend.py
+cd ui
+npm run tauri build
+```
 
 ## Configuration
 
-Everything works with zero config. To override defaults, create `~/.bagger/config.toml` — only the keys you change need to be present:
+Everything works with defaults. To override them, create `~/.bagger/config.toml`:
 
 ```toml
-bagger_dir = "D:/data/bagger"        # move the database elsewhere
-parser_source = "claude"              # default source for scan / watch
+# Store bagger data elsewhere.
+bagger_dir = "D:/data/bagger"
 
-# CORS whitelist for the REST API (loopback-only by default — the API can
-# trigger real file scans, so don't open this up casually)
+# Keep the local API constrained to trusted origins.
 cors_origins = ["http://127.0.0.1:8723", "http://localhost:8723"]
 
-# Provider alias: override backend detection when a proxy spoofs the model
-# name. e.g. a MiMo backend served as "claude-*" would otherwise be
-# mislabeled as anthropic — register an explicit override to fix it:
+# Consolidation LLM (or set BAGGER_LLM_API_KEY in the environment).
+llm_base_url = "https://open.bigmodel.cn/api/paas/v4"
+llm_model = "glm-4-flash"
+# llm_api_key = "..."
+
+# Embedding provider (or set BAGGER_EMBEDDING_API_KEY).
+embedding_provider = "remote"
+embedding_base_url = "https://open.bigmodel.cn/api/paas/v4"
+embedding_model = "embedding-3"
+
+# Override provider detection for a proxy or custom backend.
 source_alias = { "claude-mimo-proxy" = "xiaomi" }
 ```
 
 ## Architecture
 
-```
-~/.claude/projects/<path>/<uuid>.jsonl   (+ more sources via the parser registry)
-                    │
-          ┌─────────┴─────────┐
-          ▼                   ▼
-      bagger scan         bagger watch
-    (batch import)     (watchdog observer)
-          │                   │
-          └─────────┬─────────┘
-                    ▼
-              SyncService
-          (services/sync.py)
-                    │
-          ┌─────────┼─────────┐
-          ▼                   ▼
-    Parser Protocol     Storage Protocol
-    (parsers/base.py)   (storage/base.py)
-          │                   │
-          └─────────┬─────────┘
-                    ▼
-         ~/.bagger/bagger.db (SQLite + FTS5)
-                    │
-          ┌─────────┼──────────┐
-          ▼         ▼          ▼
-       CLI      REST API    Tauri Desktop
-     (Click)   (FastAPI)  (React + Rust)
+```text
+Claude Code JSONL ─┐
+                  ├─ Parser registry ── Sync service ── SQLite + FTS5
+Codex rollout JSONL┘                                  │
+                                                        ├─ CLI
+                                                        ├─ FastAPI
+                                                        └─ Tauri + React
+
+SQLite memories ── Consolidator ── structured records ── FTS / embeddings / hybrid recall
 ```
 
-Sessions and events are keyed by `(source, id)` throughout the database, so multiple
-AI tools can coexist in one bagger.db without ID collisions.
+Dependencies flow downward only:
 
-### Search: CJK-aware FTS5
-
-- All queries go through SQLite FTS5 with BM25 ranking and `<mark>` snippet highlighting
-- **Chinese/CJK text** is pre-tokenized with **jieba** at index and query time, so unicode61 can segment it — Chinese search is ranked and fast, same as English
-- If jieba is unavailable (minimal install), CJK queries gracefully fall back to LIKE scans — exhaustive, never misses
-
-## Project structure
-
+```text
+cli / api  →  services  →  parsers / storage  →  models
 ```
+
+Key directories:
+
+```text
 bagger/
-├── bagger/                # Python package
-│   ├── cli/               # Click commands (init, scan, watch, search, ...)
-│   ├── api/               # FastAPI app + routes (health, sessions, search, stats, sync)
-│   │   └── routes/        # Route modules (health, sessions, search, stats, sync)
-│   ├── models/            # Pydantic data models (MemoryEvent, Session, WatchState)
-│   ├── parsers/           # Parser protocol + registry (base.py) + Claude Code implementation (claude.py)
-│   ├── storage/           # Storage protocol (base.py) + SQLite/FTS5 implementation (sqlite.py)
-│   ├── services/          # Business logic (sync, scanner, watcher, search, replay)
-│   ├── exporters/         # Export abstractions (base, jsonl, markdown)
-│   ├── config.py          # Settings — single config entry point (~/.bagger/config.toml)
-│   └── sidecar_main.py    # PyInstaller entry for the Tauri sidecar
-├── tests/                 # pytest suite (156 tests) + fixtures/
-├── scripts/               # Build helpers (PyInstaller sidecar bundling)
-└── ui/                    # Tauri + React desktop frontend
-    └── src-tauri/         # Rust shell, tray, sidecar lifecycle
+├── api/            FastAPI application and routes
+├── cli/            Click commands
+├── consolidation/  memory extraction, validation, normalization, deduplication
+├── embedding/      embedding providers
+├── exporters/      session exports
+├── models/         normalized event and session models
+├── parsers/        source parser protocol plus Claude and Codex parsers
+├── services/       scan, sync, watch, search, replay, and embedding services
+└── storage/        SQLite, FTS5, migrations, and cache
+tests/              pytest suite and transcript fixtures
+ui/                 Tauri shell and React desktop application
 ```
 
-Dependency flow is strictly downward: `cli`/`api` → `services` → `parsers`/`storage` → `models`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full layering rules.
+## Privacy and security
 
-## Tech stack
+bagger is local-first: transcript content is read from local files and stored in `~/.bagger/` by default. It does not include telemetry or a cloud sync service. Source transcript files are never modified.
 
-| Layer        | Technology                                             |
-|--------------|--------------------------------------------------------|
-| CLI          | Click                                                  |
-| Data models  | Pydantic v2                                            |
-| Parsers      | Parser Protocol + stdlib `json` (streaming JSONL)      |
-| Storage      | Storage Protocol + SQLite + FTS5 (stdlib `sqlite3`)    |
-| CJK search   | jieba pre-tokenization + FTS5 BM25                     |
-| Config       | pydantic + `~/.bagger/config.toml` (tomllib)           |
-| REST API     | FastAPI + Uvicorn                                      |
-| Desktop      | Tauri (Rust) + React + Tailwind                        |
-| Lint/format  | ruff (replaces flake8 + isort + black)                 |
-| Tests        | pytest + httpx (FastAPI TestClient)                    |
-| Bundling     | PyInstaller (backend sidecar) + Tauri (desktop .msi)   |
-
-## Data captured
-
-From each Claude Code transcript, bagger extracts:
-
-- User prompts
-- Assistant responses (text)
-- Thinking blocks (Claude's internal reasoning)
-- Tool calls (name, arguments) and tool results
-- Token usage (input / output)
-- Model version
-- Session metadata (working directory, git branch)
-
-## Privacy & Security
-
-bagger is **local-first by design**. Your transcripts never leave your machine.
-
-- **No cloud, no telemetry.** bagger only reads the JSONL transcripts your AI tools
-  already write locally and stores them in a SQLite file on your disk. There is no
-  network call that uploads transcript content, and no analytics/phone-home of any kind.
-- **Where your data lives.** Everything — the database, FTS index, and config — lives
-  under `~/.bagger/` by default (override with `bagger_dir` in `~/.bagger/config.toml`).
-  Delete that folder and all of bagger's data is gone. The source transcripts in
-  `~/.claude/projects/` (and other tools' directories) are only *read*, never modified.
-- **API binds to loopback.** `bagger serve` and the bundled Tauri sidecar both listen on
-  `127.0.0.1:8723` — they are not reachable from the network. The API can trigger real
-  filesystem scans, so it must never be exposed.
-- **CORS is locked to loopback.** Cross-origin requests are restricted to
-  `http://127.0.0.1:8723` and `http://localhost:8723` by default. Because the API can
-  start scans and read local files, a wildcard `*` origin would let any website drive
-  your local agent — so the allow-list is taken verbatim from `cors_origins` in
-  `~/.bagger/config.toml` and never widened automatically. Only relax this if you
-  understand the implications.
-- **Cost data is stored as-is.** `cost_usd` is copied from provider usage records when
-  present (e.g. Anthropic transcripts) and shown in the Analytics view. It is never sent
-  anywhere; Codex/OpenAI transcripts carry no cost field and stay at `$0.00`.
+The API binds to loopback by default, and CORS is an explicit loopback allow-list because scan endpoints can read local transcript folders. Only widen `cors_origins` for origins you trust. Consolidation and remote embeddings are optional network operations: they send the material selected for those requests to the configured provider.
 
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest tests/ -q            # 156 tests
+pip install -e ".[dev,web]"
+pytest tests/ -q
+ruff check .
+ruff format --check .
 ```
 
-### Code quality
-
-We use **ruff** for linting and formatting (configured in `pyproject.toml`).
-Run these before every commit:
+For frontend changes:
 
 ```bash
-ruff check .               # lint
-ruff check . --fix         # auto-fix safe issues
-ruff format .              # format
-ruff format --check .      # CI-style check (no writes)
+cd ui
+npm test
+npm run build
 ```
 
-The quality gate (enforced in CI) is: `ruff check . && ruff format --check . && pytest tests/ -q`.
-If any of these fail, the PR is not ready.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branching strategy, commit
-conventions, the code review checklist, and the project's module layering rules.
-
-## Contributing
-
-Contributions are welcome. Before opening a PR, please read
-[CONTRIBUTING.md](CONTRIBUTING.md) — it covers:
-
-- Development setup and the ruff gate
-- Project structure and dependency layering
-- Git workflow (branch naming, Conventional Commits, PR process)
-- Code review checklist
-- How to add a new CLI command or API endpoint
+See [CONTRIBUTING.md](CONTRIBUTING.md) for project layering, test expectations, and the contribution workflow.
 
 ## Roadmap
 
-- [x] CI pipeline (GitHub Actions: ruff + pytest on every PR)
-- [x] CJK-aware FTS search (jieba pre-tokenization + FTS5 BM25)
-- [x] Config file (`~/.bagger/config.toml`) for non-default paths
-- [x] Desktop app production build (PyInstaller sidecar + Tauri .msi)
-- [x] Robust incremental parsing & watcher state persistence (survives restart, tolerant of partial writes)
-- [x] Multi-source foundation — parser registry drives scan/watch across tools; `source` flows through DB composite keys, CLI `--source`, `/api/sessions?source=`, and UI source badges/filters (Claude Code & Codex bundled)
-- [x] Markdown session export (CLI + REST API + UI download button)
-- [ ] More exporters (Zvec, structured summary)
-- [ ] Additional parsers for more AI coding agents (Cursor, Gemini, ...)
+- [x] Multi-source ingestion for Claude Code and Codex
+- [x] CJK-aware full-text search and Markdown export
+- [x] Desktop app and production sidecar build
+- [x] Structured memory extraction, deduplication, embeddings, and hybrid recall
+- [ ] Additional source parsers (Cursor, Gemini, and others)
+- [ ] Additional export formats
 
 ## License
 
