@@ -128,15 +128,18 @@ export function getSessions(
   });
 }
 
-export function getSession(id: string): Promise<Session> {
-  return fetchApi<Session>(`/sessions/${id}`);
+export function getSession(id: string, source?: string): Promise<Session> {
+  const qs = source ? `?source=${encodeURIComponent(source)}` : "";
+  return fetchApi<Session>(`/sessions/${id}${qs}`);
 }
 
 export function getSessionEvents(
   id: string,
+  source?: string,
 ): Promise<{ data: Event[]; meta: { total: number } }> {
+  const qs = source ? `?source=${encodeURIComponent(source)}` : "";
   return fetchApi<{ data: Event[]; meta: { total: number } }>(
-    `/sessions/${id}/events`,
+    `/sessions/${id}/events${qs}`,
   );
 }
 
@@ -150,8 +153,10 @@ export interface TreeNode {
 
 export function getSessionTree(
   id: string,
+  source?: string,
 ): Promise<{ data: TreeNode[] }> {
-  return fetchApi<{ data: TreeNode[] }>(`/sessions/${id}/tree`);
+  const qs = source ? `?source=${encodeURIComponent(source)}` : "";
+  return fetchApi<{ data: TreeNode[] }>(`/sessions/${id}/tree${qs}`);
 }
 
 export function search(

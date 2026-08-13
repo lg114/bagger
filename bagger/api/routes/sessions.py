@@ -34,13 +34,18 @@ def list_sessions(
 
 
 @router.get("/sessions/{session_id}")
-def get_session(session_id: str) -> dict:
+def get_session(
+    session_id: str,
+    source: str | None = Query(
+        None, description="Originating tool (claude, codex, …). Disambiguates shared ids."
+    ),
+) -> dict:
     """Get metadata for a single session."""
     with get_storage() as storage:
-        session = storage.get_session(session_id)
+        session = storage.get_session(session_id, source=source)
         if session is None:
-            # Try prefix match via SQL LIKE
-            session = storage.find_session_by_prefix(session_id)
+            # Try prefix match via SQL LIKE (scoped to source when given)
+            session = storage.find_session_by_prefix(session_id, source=source)
             if session is None:
                 raise HTTPException(status_code=404, detail="Session not found")
         return session
@@ -51,6 +56,9 @@ def get_session_events(
     session_id: str,
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(50, ge=1, le=500, description="Events per page"),
+    source: str | None = Query(
+        None, description="Originating tool (claude, codex, …). Scopes events to that tool."
+    ),
 ) -> dict:
     """Get events for a session, ordered by timestamp ascending, paginated.
 
@@ -59,14 +67,16 @@ def get_session_events(
     """
     with get_storage() as storage:
         # Resolve session ID (support prefix matching via SQL LIKE)
-        session = storage.get_session(session_id)
+        session = storage.get_session(session_id, source=source)
         if session is None:
-            session = storage.find_session_by_prefix(session_id)
+            session = storage.find_session_by_prefix(session_id, source=source)
             if session is None:
                 raise HTTPException(status_code=404, detail="Session not found")
             session_id = session["id"]
 
-        result = storage.get_session_events_paginated(session_id, page=page, per_page=per_page)
+        result = storage.get_session_events_paginated(
+            session_id, page=page, per_page=per_page, source=source
+        )
 
     # Parse content_json into content_blocks for the frontend
     parsed_events = []
@@ -82,18 +92,23 @@ def get_session_events(
 
 
 @router.get("/sessions/{session_id}/tree")
-def get_session_tree(session_id: str) -> dict:
+def get_session_tree(
+    session_id: str,
+    source: str | None = Query(
+        None, description="Originating tool (claude, codex, …). Scopes the topology to that tool."
+    ),
+) -> dict:
     """Get the session topology as a nested forest.
 
     Returns the event tree (branches, compactions, resumptions) derived from
     ``event_edges``. Supports prefix matching like the events endpoint.
     """
     with get_storage() as storage:
-        session = storage.get_session(session_id)
+        session = storage.get_session(session_id, source=source)
         if session is None:
-            session = storage.find_session_by_prefix(session_id)
+            session = storage.find_session_by_prefix(session_id, source=source)
             if session is None:
                 raise HTTPException(status_code=404, detail="Session not found")
             session_id = session["id"]
-        tree = storage.get_session_tree(session_id)
+        tree = storage.get_session_tree(session_id, source=source)
     return {"data": tree}

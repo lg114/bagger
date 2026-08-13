@@ -14,7 +14,7 @@ import { SourceBadge } from "./SourceBadge";
 export function SessionRow({ session }: { session: Session }) {
   return (
     <Link
-      to={`/sessions/${session.id}`}
+      to={`/sessions/${session.id}${session.source ? `?source=${session.source}` : ""}`}
       className="group relative block border-b border-[var(--border-subtle)] last:border-0 before:absolute before:left-0 before:top-2.5 before:bottom-2.5 before:w-0.5 before:rounded-full before:bg-[var(--brand-500)] before:opacity-0 hover:before:opacity-100 transition-colors hover:bg-[var(--brand-bg)]"
     >
       <div className="flex items-center justify-between gap-4 px-4 py-4">

@@ -73,6 +73,10 @@ def apply_migrations(conn: sqlite3.Connection, backfill_event_edges) -> None:
         _apply_migration_v6(conn)
         conn.execute("PRAGMA user_version = 6")
         conn.commit()
+    if version < 7:
+        _apply_migration_v7(conn, backfill_event_edges)
+        conn.execute("PRAGMA user_version = 7")
+        conn.commit()
 
 
 def _apply_migration_v2(conn: sqlite3.Connection) -> None:
@@ -106,12 +110,12 @@ def _apply_migration_v3(conn: sqlite3.Connection, backfill_event_edges) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS event_edges (
-            event_id TEXT PRIMARY KEY,
+            event_id TEXT NOT NULL,
             parent_event_id TEXT,
             session_id TEXT NOT NULL,
             depth INTEGER NOT NULL DEFAULT 0,
-            source TEXT,
-            UNIQUE(event_id)
+            source TEXT NOT NULL DEFAULT 'claude',
+            PRIMARY KEY (source, event_id)
         )
         """
     )
@@ -474,4 +478,35 @@ def _apply_migration_v6(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_records_hash ON memory_records(content_hash)"
     )
+    conn.commit()
+
+
+def _apply_migration_v7(conn: sqlite3.Connection, backfill_event_edges) -> None:
+    """Rebuild ``event_edges`` with a composite primary key ``(source, event_id)``.
+
+    The v3 schema keyed edges on the bare ``event_id``. With multi-source support
+    (design doc (a)) two tools can legitimately share an ``event_id``; the single-
+    column PK then let one tool's edges silently overwrite another's, corrupting
+    the topology tree and the doctor's edge-consistency report.
+
+    ``event_edges`` is fully *derived* from ``events.parent_event_id`` — it holds
+    no original data — so a DROP + recreate + full backfill is lossless: every
+    edge is recomputed from ``events``, never migrated. The new table also sets
+    ``source NOT NULL`` (backfilled from sessions during v4) so the composite PK
+    is well-formed.
+    """
+    conn.execute("DROP TABLE IF EXISTS event_edges")
+    conn.execute(
+        """
+        CREATE TABLE event_edges (
+            event_id TEXT NOT NULL,
+            parent_event_id TEXT,
+            session_id TEXT NOT NULL,
+            depth INTEGER NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT 'claude',
+            PRIMARY KEY (source, event_id)
+        )
+        """
+    )
+    backfill_event_edges()
     conn.commit()

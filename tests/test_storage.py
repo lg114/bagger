@@ -628,7 +628,7 @@ def test_migration_v2_to_v3_creates_and_backfills_event_edges():
         storage = SqliteStorage(db_path)
         storage.connect()
 
-        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 7
 
         rows = storage.conn.execute(
             "SELECT event_id, parent_event_id, depth FROM event_edges ORDER BY depth, event_id"
@@ -815,13 +815,16 @@ def test_migration_v4_introduces_source_identity():
             "INSERT INTO sessions (id, summary, message_count) VALUES ('sess-1', 'demo', 2)"
         )
         conn.execute(
-            "INSERT INTO events (event_id, session_id, timestamp, role, content_json, "
-            "content_text) VALUES ('e-1', 'sess-1', '2026-01-01T00:00:00+00:00', 'user', '{}', "
-            "'hello world')"
+            "INSERT INTO events (event_id, session_id, parent_event_id, timestamp, role, "
+            "content_json, content_text) VALUES ('e-1', 'sess-1', 'e-0', "
+            "'2026-01-01T00:00:00+00:00', 'user', '{}', 'hello world')"
         )
+        # event_edges only holds events WITH a parent (roots are intentionally
+        # absent — see get_event_edges docstring). e-1 chains off the synthetic
+        # 'e-0', so it survives the v7 rebuild + backfill as a valid edge row.
         conn.execute(
             "INSERT INTO event_edges (event_id, parent_event_id, session_id, depth) "
-            "VALUES ('e-1', NULL, 'sess-1', 0)"
+            "VALUES ('e-1', 'e-0', 'sess-1', 1)"
         )
         conn.execute(
             "INSERT INTO events_fts (content_text, session_id, event_id) "
@@ -834,7 +837,7 @@ def test_migration_v4_introduces_source_identity():
         # Re-open: connect() should apply v4 migration and backfill source.
         storage = SqliteStorage(db_path)
         storage.connect()
-        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 7
 
         # Every session/event/edge/fts row carries source='claude'.
         for table in ("sessions", "events", "event_edges", "events_fts"):

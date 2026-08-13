@@ -1,4 +1,4 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ArrowLeft, Calendar, Folder, MessageSquare, Hash, AlertCircle, Search, Download } from "lucide-react";
@@ -14,25 +14,27 @@ import type { Event } from "@/lib/api";
 
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const source = searchParams.get("source") ?? undefined;
   const [searchOpen, setSearchOpen] = useState(false);
 
   const { data: session, isLoading: sessLoading, error: sessError } = useQuery({
-    queryKey: ["sessions", id],
-    queryFn: () => getSession(id!),
+    queryKey: ["sessions", id, source],
+    queryFn: () => getSession(id!, source),
     enabled: !!id,
   });
 
   const { data: eventsData, isLoading: evtLoading, error: evtError } = useQuery({
-    queryKey: ["sessions", id, "events"],
-    queryFn: () => getSessionEvents(id!),
+    queryKey: ["sessions", id, source, "events"],
+    queryFn: () => getSessionEvents(id!, source),
     enabled: !!id,
   });
 
   const [view, setView] = useState<"transcript" | "topology">("transcript");
 
   const { data: treeData, isLoading: treeLoading } = useQuery({
-    queryKey: ["sessions", id, "tree"],
-    queryFn: () => getSessionTree(id!),
+    queryKey: ["sessions", id, source, "tree"],
+    queryFn: () => getSessionTree(id!, source),
     enabled: !!id,
   });
   const tree: TreeNode[] = treeData?.data ?? [];

@@ -544,7 +544,7 @@ def test_migration_v6_folds_exact_duplicates_and_is_idempotent():
 
     apply_migrations(conn, backfill_event_edges=lambda: None)
 
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
     assert _column_exists(conn, "memory_records", "content_hash")
     assert _column_exists(conn, "memory_records", "merge_count")
 
@@ -561,7 +561,7 @@ def test_migration_v6_folds_exact_duplicates_and_is_idempotent():
 
     # Re-running on the now-v6 DB must be a safe no-op.
     apply_migrations(conn, backfill_event_edges=lambda: None)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
     assert conn.execute("SELECT COUNT(*) FROM memory_records").fetchone()[0] == 1
 
 

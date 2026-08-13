@@ -99,12 +99,12 @@ CREATE INDEX IF NOT EXISTS idx_tool_uses_event ON tool_uses(event_id);
 CREATE INDEX IF NOT EXISTS idx_tool_uses_name ON tool_uses(tool_name);
 
 CREATE TABLE IF NOT EXISTS event_edges (
-    event_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
     parent_event_id TEXT,
     session_id TEXT NOT NULL,
     depth INTEGER NOT NULL DEFAULT 0,
-    source TEXT,
-    UNIQUE(event_id)
+    source TEXT NOT NULL DEFAULT 'claude',
+    PRIMARY KEY (source, event_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_event_edges_session ON event_edges(session_id);
@@ -368,8 +368,16 @@ class SqliteSessionRepository:
                summary=excluded.summary,
                project_path=excluded.project_path,
                message_count=excluded.message_count,
-               first_message_at=excluded.first_message_at,
-               last_message_at=excluded.last_message_at,
+               first_message_at=COALESCE(
+                   MIN(excluded.first_message_at, sessions.first_message_at),
+                   excluded.first_message_at,
+                   sessions.first_message_at
+               ),
+               last_message_at=COALESCE(
+                   MAX(excluded.last_message_at, sessions.last_message_at),
+                   excluded.last_message_at,
+                   sessions.last_message_at
+               ),
                last_synced_at=excluded.last_synced_at,
                parent_session_id=excluded.parent_session_id,
                resume_of=excluded.resume_of,
@@ -1480,7 +1488,7 @@ class SqliteStorage:
             self._conn.executemany(
                 """INSERT INTO event_edges (event_id, parent_event_id, session_id, depth, source)
                    VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(event_id) DO UPDATE SET
+                   ON CONFLICT(source, event_id) DO UPDATE SET
                        parent_event_id=excluded.parent_event_id,
                        session_id=excluded.session_id,
                        depth=excluded.depth,
