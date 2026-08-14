@@ -252,6 +252,12 @@ def _escape_fts5_query(query: str) -> str:
 
     Wraps each word in double quotes with ``*`` for prefix matching
     (e.g. ``"auth"*``).  Called for both ASCII and pre-tokenized CJK queries.
+
+    Multiple words are joined with ``OR`` (not the default implicit AND):
+    a natural-language query tokenizes into stopword-ish terms (怎么/的/选)
+    that never co-occur in a single short document, so AND returns nothing.
+    OR + BM25 ranking gives broad recall while still ranking docs that match
+    more terms higher — the industry-standard lexical-search semantics.
     """
     query = query.strip()
     if not query:
@@ -259,7 +265,7 @@ def _escape_fts5_query(query: str) -> str:
 
     query = query.replace('"', '""')
     parts = [f'"{w}"*' if len(w) >= 2 else f'"{w}"' for w in query.split()]
-    return " ".join(parts) or f'"{query}"'
+    return " OR ".join(parts) or f'"{query}"'
 
 
 def _extract_text(event: MemoryEvent) -> str:

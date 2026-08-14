@@ -17,6 +17,7 @@ Usage::
 
     python scripts/eval_recall.py            # provider from config (default remote)
     python scripts/eval_recall.py fake       # offline hash embedder, no network
+    python scripts/eval_recall.py --verbose  # print per-query hit ranks for every mode
 """
 
 from __future__ import annotations
@@ -45,10 +46,11 @@ def load_golden(path: Path) -> list[dict]:
     return rows
 
 
-def evaluate(queries: list[dict], hs: HybridSearch) -> None:
+def evaluate(queries: list[dict], hs: HybridSearch, verbose: bool = False) -> None:
     for mode in ("fts", "vector", "hybrid"):
         recalls: list[int] = []
         mrrs: list[float] = []
+        per_query: list[tuple[str, int]] = []  # (query, first_hit_rank or 0)
         for g in queries:
             res = hs.search(g["query"], mode=mode, limit=TOP_K)
             hit = None
@@ -58,15 +60,22 @@ def evaluate(queries: list[dict], hs: HybridSearch) -> None:
                     break
             recalls.append(1 if hit else 0)
             mrrs.append(1.0 / hit if hit else 0.0)
+            per_query.append((g["query"], hit or 0))
         n = len(recalls) or 1
         print(
             f"  {mode:8}  Recall@{TOP_K}={sum(recalls) / n:.2f}   "
             f"MRR={sum(mrrs) / n:.2f}   ({sum(recalls)}/{len(recalls)} hits)"
         )
+        if verbose:
+            for q, rank in per_query:
+                mark = f"hit@{rank}" if rank else "MISS"
+                print(f"      {mark:8}  {q}")
 
 
 def main() -> None:
-    provider = sys.argv[1] if len(sys.argv) > 1 else None
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    verbose = "--verbose" in sys.argv
+    provider = args[0] if args else None
     golden = load_golden(GOLDEN)
     if not golden:
         print(f"no golden queries in {GOLDEN}")
@@ -86,7 +95,7 @@ def main() -> None:
         print(
             f"eval on {len(golden)} golden queries (provider={embedder.model_name}, top-{TOP_K}):"
         )
-        evaluate(golden, hs)
+        evaluate(golden, hs, verbose=verbose)
     finally:
         storage.close()
 
