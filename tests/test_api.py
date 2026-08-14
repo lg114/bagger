@@ -1071,3 +1071,77 @@ def test_memories_list_filters_and_paginates():
         assert p2.json()["meta"]["page"] == 2
     finally:
         shutil.rmtree(td, ignore_errors=True)
+
+
+def test_memories_archive_lifecycle():
+    """PATCH /api/memories/{id} archives (soft-deletes) and restores a record.
+
+    Archive = the row survives but browse defaults to ``archived=0`` and
+    retrieval (FTS mode here; vector shares the same filter) no longer surfaces
+    it. Restore brings it back everywhere. A non-existent id is a 404.
+    """
+    import bagger.config as config
+
+    td = Path(tempfile.mkdtemp())
+    try:
+        storage = _override_db(td)
+        _seed_memories(
+            storage,
+            [
+                ("fact", "Zvec is the local vector storage backend", "vector-db,storage", "claude"),
+                ("preference", "gc dislikes auto-starting the dev server", "habits,ux", "claude"),
+                ("decision", "Chose Zvec over Chroma for vectors", "vector-db,selection", "codex"),
+                ("lesson", "managed venv pip breaks; rebuild it", "python,tooling", "codex"),
+            ],
+        )
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        config.settings = Settings(bagger_dir=td)
+        client = TestClient(create_app())
+
+        # Pick the record we will archive from a FTS hit set (query "Zvec" is
+        # unique to the two Zvec rows, so the archived one must actually be
+        # retrievable before archiving for the filter assertions to bite).
+        fts_before = client.get("/api/memories/search?q=Zvec&mode=fts").json()["results"]
+        assert len(fts_before) >= 1
+        target_id = fts_before[0]["id"]
+        assert client.get("/api/memories").json()["meta"]["total"] == 4
+
+        # Archive it: soft-delete, not a row removal.
+        resp = client.patch(f"/api/memories/{target_id}", json={"archived": True})
+        assert resp.status_code == 200
+        assert resp.json() == {"id": target_id, "archived": True}
+
+        # Default browse (archived=0) hides it; the archive view shows exactly it.
+        live = client.get("/api/memories")
+        assert live.json()["meta"]["total"] == 3
+        assert all(r["id"] != target_id for r in live.json()["data"])
+        archived_only = client.get("/api/memories?archived=1")
+        assert archived_only.json()["meta"]["total"] == 1
+        assert archived_only.json()["data"][0]["id"] == target_id
+        assert archived_only.json()["data"][0]["archived"] == 1
+        # Explicit archived=0 matches the default view.
+        assert client.get("/api/memories?archived=0").json()["meta"]["total"] == 3
+        # The source facet reflects the archive view's own contents (the target's source).
+        target_source = fts_before[0].get("source") or "claude"
+        assert set(archived_only.json()["meta"]["sources"]) == {target_source}
+
+        # Retrieval no longer surfaces the archived record (FTS needs no embedder).
+        fts_all = client.get("/api/memories/search?q=Zvec&mode=fts").json()["results"]
+        assert all(r["id"] != target_id for r in fts_all)
+
+        # Restore: back in the default browse and in retrieval again.
+        resp = client.patch(f"/api/memories/{target_id}", json={"archived": False})
+        assert resp.status_code == 200
+        assert resp.json() == {"id": target_id, "archived": False}
+        assert client.get("/api/memories").json()["meta"]["total"] == 4
+        fts_all = client.get("/api/memories/search?q=Zvec&mode=fts").json()["results"]
+        assert any(r["id"] == target_id for r in fts_all)
+
+        # Unknown id → 404, not a silent success.
+        missing = client.patch("/api/memories/999999", json={"archived": True})
+        assert missing.status_code == 404
+    finally:
+        shutil.rmtree(td, ignore_errors=True)

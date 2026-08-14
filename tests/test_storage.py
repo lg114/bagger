@@ -624,11 +624,11 @@ def test_migration_v2_to_v3_creates_and_backfills_event_edges():
         storage.close()
 
         # Re-open: connect() should upgrade v2 -> v3 (edges) and v4 (source),
-        # backfilling both along the way.
+        # backfilling both along the way, and land on the latest schema version.
         storage = SqliteStorage(db_path)
         storage.connect()
 
-        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 8
 
         rows = storage.conn.execute(
             "SELECT event_id, parent_event_id, depth FROM event_edges ORDER BY depth, event_id"
@@ -749,9 +749,10 @@ def test_migration_v4_introduces_source_identity():
     """connect() upgrades a legacy (v3) claude DB to v4 with source wired in.
 
     Builds a v3-shaped database (no ``source`` column anywhere), seeds some
-    claude rows, then lets connect() run the v4 migration and asserts
-    user_version=4, every legacy row backfilled with source='claude', and the
-    composite (source, id) / (source, event_id) keys are in place.
+    claude rows, then lets connect() run the v4 migration and asserts the
+    schema is fully upgraded (latest user_version), every legacy row backfilled
+    with source='claude', and the composite (source, id) / (source, event_id)
+    keys are in place.
     """
     import sqlite3
 
@@ -837,7 +838,7 @@ def test_migration_v4_introduces_source_identity():
         # Re-open: connect() should apply v4 migration and backfill source.
         storage = SqliteStorage(db_path)
         storage.connect()
-        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 8
 
         # Every session/event/edge/fts row carries source='claude'.
         for table in ("sessions", "events", "event_edges", "events_fts"):

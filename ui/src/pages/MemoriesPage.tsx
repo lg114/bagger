@@ -1,8 +1,16 @@
 import { useState, useEffect } from "react";
-import { Search as SearchIcon, AlertCircle, Brain, ArrowLeft } from "lucide-react";
+import {
+  Search as SearchIcon,
+  AlertCircle,
+  Brain,
+  ArrowLeft,
+  Archive,
+  ArchiveRestore,
+} from "lucide-react";
 import {
   searchMemories,
   listMemories,
+  setMemoryArchived,
   type Memory,
   type MemoryMode,
   type MemoryListResponse,
@@ -36,6 +44,8 @@ export default function MemoriesPage() {
   const [mode, setMode] = useState<MemoryMode>("hybrid");
   const [source, setSource] = useState<string | null>(null);
   const [type, setType] = useState<string | null>(null);
+  // false = live memories (archived=0, the default); true = the archive (archived=1).
+  const [archivedView, setArchivedView] = useState(false);
   const [results, setResults] = useState<Memory[]>([]);
   const [meta, setMeta] = useState<MemoryListResponse["meta"] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -43,11 +53,25 @@ export default function MemoriesPage() {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState<number>(PAGE_SIZE);
   const [searched, setSearched] = useState(false);
+  // Memory id whose archive/restore PATCH is in flight — guards double-clicks.
+  const [busyId, setBusyId] = useState<number | null>(null);
 
-  const loadBrowse = (pg: number, s: string | null, t: string | null, pp: number = perPage) => {
+  const loadBrowse = (
+    pg: number,
+    s: string | null,
+    t: string | null,
+    pp: number = perPage,
+    av: boolean = archivedView,
+  ) => {
     setIsLoading(true);
     setError(null);
-    listMemories({ page: pg, perPage: pp, source: s ?? undefined, type: t ?? undefined })
+    listMemories({
+      page: pg,
+      perPage: pp,
+      source: s ?? undefined,
+      type: t ?? undefined,
+      archived: av ? 1 : 0,
+    })
       .then((res) => {
         setResults(res.data);
         setMeta(res.meta);
@@ -92,6 +116,15 @@ export default function MemoriesPage() {
     if (view === "browse") loadBrowse(1, source, t);
   };
 
+  const switchArchivedView = (archived: boolean) => {
+    if (archived === archivedView) return;
+    setArchivedView(archived);
+    // Pass the new value explicitly: setState is async, so a plain loadBrowse
+    // here would read the stale archivedView from the closure and reload the
+    // wrong half of the dataset.
+    loadBrowse(1, source, type, perPage, archived);
+  };
+
   const backToBrowse = () => {
     setView("browse");
     setQuery("");
@@ -102,6 +135,24 @@ export default function MemoriesPage() {
   const changePerPage = (sz: number) => {
     setPerPage(sz);
     loadBrowse(1, source, type, sz);
+  };
+
+  // Archive (soft-delete) or restore a memory, then reload the current view so
+  // the list reflects the server state. Browse: the record leaves the current
+  // bucket (live → gone, archive → restored into live). Search: archived
+  // memories are filtered server-side, so it simply disappears from results.
+  const toggleArchive = (r: Memory) => {
+    const target = r.archived === 1;
+    if (busyId !== null) return;
+    setBusyId(r.id);
+    setError(null);
+    setMemoryArchived(r.id, !target)
+      .then(() => {
+        if (view === "browse") loadBrowse(page, source, type);
+        else if (searched) runSearch(query, mode, source);
+      })
+      .catch((e) => setError(e as Error))
+      .finally(() => setBusyId(null));
   };
 
   // Browse view: the source facet comes from the FULL dataset (meta.sources),
@@ -188,6 +239,31 @@ export default function MemoriesPage() {
         </div>
       )}
 
+      {/* Archive status — browse view only: live memories (default) or the archive. */}
+      {view === "browse" && (
+        <div className="flex items-center gap-1 bg-muted rounded-element p-0.5 w-fit">
+          <button
+            onClick={() => switchArchivedView(false)}
+            className={`px-3 py-1.5 rounded text-xs font-mono transition-all duration-200 ${
+              !archivedView ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            }`}
+            title="Live memories — hidden from this view once archived"
+          >
+            Live
+          </button>
+          <button
+            onClick={() => switchArchivedView(true)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition-all duration-200 ${
+              archivedView ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            }`}
+            title="Archived memories — restorable"
+          >
+            <Archive className="w-3 h-3" />
+            Archived
+          </button>
+        </div>
+      )}
+
       {/* Source facet — both views */}
       {sourceOptions.length > 0 && (
         <div className="flex items-center gap-1 bg-muted rounded-element p-0.5 w-fit flex-wrap">
@@ -240,11 +316,14 @@ export default function MemoriesPage() {
               )}
               {source && <span className="ml-2 opacity-50">· {source}</span>}
               {type && <span className="ml-2 opacity-50">· {type}</span>}
+              {view === "browse" && archivedView && (
+                <span className="ml-2 opacity-50">· archived</span>
+              )}
             </p>
           )}
 
           <div
-            key={`${view}-${source}-${type}-${page}-${perPage}-${query}`}
+            key={`${view}-${source}-${type}-${page}-${perPage}-${query}-${archivedView}`}
             className="space-y-3 animate-fade-in"
           >
             {results.map((r) => (
@@ -260,14 +339,37 @@ export default function MemoriesPage() {
                     {r.type}
                   </span>
                   <SourceBadge source={r.source} />
-                  {r.fused_score != null && (
-                    <span
-                      className="ml-auto text-[10px] font-mono text-muted-foreground opacity-60"
-                      title="fused RRF score"
+                  <div className="ml-auto flex items-center gap-2">
+                    {r.fused_score != null && (
+                      <span
+                        className="text-[10px] font-mono text-muted-foreground opacity-60"
+                        title="fused RRF score"
+                      >
+                        {r.fused_score.toFixed(4)}
+                      </span>
+                    )}
+                    <button
+                      onClick={() => toggleArchive(r)}
+                      disabled={busyId === r.id}
+                      className={`flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded transition-colors ${
+                        r.archived === 1
+                          ? "text-muted-foreground hover:text-primary"
+                          : "text-muted-foreground opacity-70 hover:opacity-100 hover:text-primary"
+                      } disabled:opacity-40 disabled:cursor-wait`}
+                      title={
+                        r.archived === 1
+                          ? "Restore this memory so it shows up again"
+                          : "Archive (soft-delete) — hidden from browse & retrieval, restorable"
+                      }
                     >
-                      {r.fused_score.toFixed(4)}
-                    </span>
-                  )}
+                      {r.archived === 1 ? (
+                        <ArchiveRestore className="w-3 h-3" />
+                      ) : (
+                        <Archive className="w-3 h-3" />
+                      )}
+                      {r.archived === 1 ? "Restore" : "Archive"}
+                    </button>
+                  </div>
                 </div>
 
                 <p className="text-sm text-foreground leading-relaxed">{r.content}</p>
@@ -336,11 +438,19 @@ export default function MemoriesPage() {
           {!isLoading && results.length === 0 && (
             <EmptyState
               icon={view === "search" ? SearchIcon : Brain}
-              title={view === "search" ? "No memories found" : "No memories yet"}
+              title={
+                view === "search"
+                  ? "No memories found"
+                  : archivedView
+                    ? "No archived memories"
+                    : "No memories yet"
+              }
               description={
                 view === "search"
                   ? "Try a different phrasing or the FTS mode"
-                  : "Run consolidation to distill memories from your conversations"
+                  : archivedView
+                    ? "Archived memories appear here — they stay restorable"
+                    : "Run consolidation to distill memories from your conversations"
               }
             />
           )}

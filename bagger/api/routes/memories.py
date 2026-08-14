@@ -16,12 +16,20 @@ A missing or failing provider surfaces as ``503`` with the underlying reason.
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from bagger.api.dependencies import get_storage
 
 router = APIRouter()
 
 SearchMode = Literal["hybrid", "vector", "fts"]
+
+
+class MemoryPatch(BaseModel):
+    """Body for ``PATCH /memories/{id}`` — the only mutable memory attribute
+    today is the archived (soft-delete) flag."""
+
+    archived: bool
 
 
 @router.get("/memories/search")
@@ -69,12 +77,32 @@ def list_memories(
     per_page: int = Query(50, ge=1, le=200, description="Results per page"),
     source: str = Query(None, description="Filter by originating tool (e.g. claude, codex)"),
     type: str = Query(None, description="Filter by memory type (fact/preference/decision/lesson)"),
+    archived: int = Query(0, ge=0, le=1, description="0 = live only (default), 1 = archived only"),
 ) -> dict:
-    """Browse all structured memories, optionally filtered by source/type.
+    """Browse structured memories, optionally filtered by source/type/archived.
 
     Unlike ``/memories/search`` this needs no embedder and returns the full
     record list (paginated) rather than ranked retrieval results. Powers the
-    Memories page's default "All memories" view.
+    Memories page's default "All memories" view. ``archived`` defaults to ``0``
+    so soft-deleted memories stay out of sight unless explicitly requested.
     """
     with get_storage() as storage:
-        return storage.list_memories(page=page, per_page=per_page, source=source, type=type)
+        return storage.list_memories(
+            page=page, per_page=per_page, source=source, type=type, archived=archived
+        )
+
+
+@router.patch("/memories/{record_id}")
+def patch_memory(record_id: int, payload: MemoryPatch) -> dict:
+    """Archive (soft-delete) or restore one memory record.
+
+    ``archived: true`` hides the record from browse (default view) and from
+    vector/FTS retrieval without deleting the row — a restorable "archive" of
+    memories you no longer want to resurface. ``archived: false`` restores it.
+    Returns 404 when the record id does not exist.
+    """
+    with get_storage() as storage:
+        ok = storage.set_memory_archived(record_id, payload.archived)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"memory record {record_id} not found")
+    return {"id": record_id, "archived": payload.archived}

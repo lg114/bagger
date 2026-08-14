@@ -1103,7 +1103,7 @@ class SqliteSearchIndex:
             "bm25(memory_fts) as rank "
             "FROM memory_fts fts "
             "JOIN memory_records m ON m.id = CAST(fts.record_id AS INTEGER) "
-            "WHERE memory_fts MATCH ?"
+            "WHERE m.archived = 0 AND memory_fts MATCH ?"
         )
         params: list = [safe]
         if source:
@@ -1222,7 +1222,9 @@ class SqliteVectorIndex:
         if owner_type not in self.OWNER_TABLES:
             raise ValueError(f"unknown owner_type: {owner_type!r}")
         table = self.OWNER_TABLES[owner_type]
-        rows = self._conn.execute(f"SELECT id, content, topics FROM {table}").fetchall()
+        rows = self._conn.execute(
+            f"SELECT id, content, topics FROM {table} WHERE archived = 0"
+        ).fetchall()
         have = {
             r["owner_id"]: r["content_hash"]
             for r in self._conn.execute(
@@ -1251,7 +1253,7 @@ class SqliteVectorIndex:
         sql = (
             "SELECT e.owner_id, e.vector, e.dim FROM embeddings e "
             "JOIN memory_records m ON m.id = CAST(e.owner_id AS INTEGER) "
-            "WHERE e.owner_type=? AND e.model=?"
+            "WHERE e.owner_type=? AND e.model=? AND m.archived = 0"
         )
         params: list = [owner_type, model]
         if source:
@@ -1782,16 +1784,41 @@ class SqliteStorage:
             return self._search.reindex_memory_fts()  # type: ignore
 
     def get_memory_records(self, ids: list[int]) -> list[dict]:
-        """Return memory records by id, preserving input order is not guaranteed."""
+        """Return memory records by id, preserving input order is not guaranteed.
+
+        Archived records are excluded: retrieval hydration must never surface a
+        soft-deleted memory (a defensive backstop — the vector/FTS search paths
+        already filter ``archived = 0`` before they ever produce these ids).
+        """
         if not ids:
             return []
         placeholders = ",".join("?" * len(ids))
         rows = self._conn.execute(
             f"SELECT id, type, content, topics, confidence, source, session_id, "
-            f"event_id, created_at FROM memory_records WHERE id IN ({placeholders})",
+            f"event_id, created_at, archived FROM memory_records "
+            f"WHERE archived = 0 AND id IN ({placeholders})",
             ids,
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
+
+    def set_memory_archived(self, record_id: int, archived: bool) -> bool:
+        """Soft-delete (``archived=True``) or restore a memory record.
+
+        Returns ``False`` when no record with ``record_id`` exists (so the API
+        can answer 404) — there is no "unarchive a non-existent memory" case.
+        The row itself is never deleted; search and browse hide it via the
+        ``archived = 0`` filters above.
+        """
+        with self._write():
+            cur = self._conn.execute(
+                "UPDATE memory_records SET archived=? WHERE id=?",
+                (1 if archived else 0, record_id),
+            )
+            # Commit explicitly: the facade's other mutators do the same, and a
+            # request-scoped connection would otherwise roll the UPDATE back on
+            # close, silently losing the archive.
+            self._conn.commit()
+            return cur.rowcount > 0
 
     def list_memories(
         self,
@@ -1799,18 +1826,24 @@ class SqliteStorage:
         per_page: int = 50,
         source: str | None = None,
         type: str | None = None,
+        archived: int | None = 0,
     ) -> dict:
         """Return a paginated list of memory records (the browse view).
 
-        Optional ``source`` / ``type`` filters narrow the result set. ``topics``
-        is normalized from the comma-joined DB string to a list, matching the
-        shape the retrieval endpoint exposes. Newest first (created_at desc,
-        then id desc as a stable tiebreaker).
+        Optional ``source`` / ``type`` filters narrow the result set; ``archived``
+        defaults to ``0`` so browse shows live memories by default (pass ``1`` to
+        audit/restore the archive, ``None`` to see everything). ``topics`` is
+        normalized from the comma-joined DB string to a list, matching the shape
+        the retrieval endpoint exposes. Newest first (created_at desc, then id
+        desc as a stable tiebreaker).
         """
         page = max(1, page)
         per_page = max(1, min(per_page, 200))
         where: list[str] = []
         params: list = []
+        if archived is not None:
+            where.append("archived = ?")
+            params.append(archived)
         if source:
             where.append("source = ?")
             params.append(source)
@@ -1826,7 +1859,7 @@ class SqliteStorage:
         offset = (page - 1) * per_page
         rows = self._conn.execute(
             f"SELECT id, type, content, topics, confidence, source, session_id, "
-            f"event_id, created_at FROM memory_records{where_sql} "
+            f"event_id, created_at, archived FROM memory_records{where_sql} "
             f"ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
             params + [per_page, offset],
         ).fetchall()
@@ -1847,11 +1880,14 @@ class SqliteStorage:
         # browse-view source facet is always complete regardless of pagination or
         # the active filter. The current page may contain only one source (e.g.
         # the most recent 20 are all codex) and would otherwise hide the rest.
+        # Mirrors the active ``archived`` filter so the facet reflects what the
+        # current view can actually contain.
         distinct_sources = [
             r[0]
             for r in self._conn.execute(
                 "SELECT DISTINCT source FROM memory_records "
-                "WHERE source IS NOT NULL AND source != '' ORDER BY source"
+                "WHERE archived = ? AND source IS NOT NULL AND source != '' ORDER BY source",
+                (archived if archived is not None else 0,),
             ).fetchall()
         ]
         return {

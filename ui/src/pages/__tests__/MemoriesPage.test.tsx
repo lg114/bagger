@@ -5,14 +5,16 @@ import MemoriesPage from "@/pages/MemoriesPage";
 import type { Memory } from "@/lib/api";
 
 // Both API functions are mocked; types still resolve from the real module.
-const { mockSearchMemories, mockListMemories } = vi.hoisted(() => ({
+const { mockSearchMemories, mockListMemories, mockSetMemoryArchived } = vi.hoisted(() => ({
   mockSearchMemories: vi.fn(),
   mockListMemories: vi.fn(),
+  mockSetMemoryArchived: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   searchMemories: (...args: unknown[]) => mockSearchMemories(...args),
   listMemories: (...args: unknown[]) => mockListMemories(...args),
+  setMemoryArchived: (...args: unknown[]) => mockSetMemoryArchived(...args),
 }));
 
 function makeMemory(overrides: Partial<Memory> = {}): Memory {
@@ -26,6 +28,7 @@ function makeMemory(overrides: Partial<Memory> = {}): Memory {
     session_id: "s1",
     event_id: "e1",
     created_at: "2026-06-30T12:00:00+00:00",
+    archived: 0,
     ...overrides,
   };
 }
@@ -51,6 +54,7 @@ beforeEach(() => {
     data: [],
     meta: { page: 1, per_page: 20, total: 0, pages: 0 },
   });
+  mockSetMemoryArchived.mockResolvedValue({ id: 1, archived: true });
 });
 
 describe("MemoriesPage browse view", () => {
@@ -68,6 +72,7 @@ describe("MemoriesPage browse view", () => {
         perPage: 20,
         source: undefined,
         type: undefined,
+        archived: 0,
       }),
     );
   });
@@ -89,6 +94,7 @@ describe("MemoriesPage browse view", () => {
         perPage: 20,
         source: undefined,
         type: "fact",
+        archived: 0,
       }),
     );
   });
@@ -128,6 +134,7 @@ describe("MemoriesPage browse view", () => {
         perPage: 50,
         source: undefined,
         type: undefined,
+        archived: 0,
       }),
     );
   });
@@ -203,5 +210,67 @@ describe("MemoriesPage source facet (search)", () => {
     await waitFor(() =>
       expect(mockSearchMemories).toHaveBeenLastCalledWith("zvec", "hybrid", 20, undefined),
     );
+  });
+});
+
+describe("MemoriesPage archive / restore", () => {
+  it("archives a memory via PATCH and reloads the live browse list", async () => {
+    mockListMemories.mockResolvedValue({
+      data: [makeMemory({ id: 7, content: "keep me", source: "claude" })],
+      meta: { page: 1, per_page: 20, total: 1, pages: 1 },
+    });
+    mockSetMemoryArchived.mockResolvedValue({ id: 7, archived: true });
+
+    renderPage();
+
+    // Exact /^Archive$/i matches the row button, not the "Archived" view chip.
+    const archiveBtn = await screen.findByRole("button", { name: /^Archive$/i });
+    fireEvent.click(archiveBtn);
+
+    await waitFor(() => expect(mockSetMemoryArchived).toHaveBeenCalledWith(7, true));
+    // The live browse list reloads after the soft-delete lands.
+    await waitFor(() =>
+      expect(mockListMemories).toHaveBeenLastCalledWith({
+        page: 1,
+        perPage: 20,
+        source: undefined,
+        type: undefined,
+        archived: 0,
+      }),
+    );
+  });
+
+  it("switches to the archive view (archived=1) and restores a memory", async () => {
+    // First call (mount) returns a live row; subsequent calls return the archive.
+    mockListMemories.mockResolvedValueOnce({
+      data: [makeMemory({ id: 7 })],
+      meta: { page: 1, per_page: 20, total: 1, pages: 1 },
+    });
+    mockListMemories.mockResolvedValue({
+      data: [makeMemory({ id: 7, archived: 1 })],
+      meta: { page: 1, per_page: 20, total: 1, pages: 1, sources: ["claude"] },
+    });
+    mockSetMemoryArchived.mockResolvedValue({ id: 7, archived: false });
+
+    renderPage();
+
+    const archivedChip = await screen.findByRole("button", { name: /^Archived$/i });
+    fireEvent.click(archivedChip);
+
+    await waitFor(() =>
+      expect(mockListMemories).toHaveBeenLastCalledWith({
+        page: 1,
+        perPage: 20,
+        source: undefined,
+        type: undefined,
+        archived: 1,
+      }),
+    );
+
+    // The archived record offers Restore, which flips archived back to 0.
+    const restoreBtn = await screen.findByRole("button", { name: /^Restore$/i });
+    fireEvent.click(restoreBtn);
+
+    await waitFor(() => expect(mockSetMemoryArchived).toHaveBeenCalledWith(7, false));
   });
 });

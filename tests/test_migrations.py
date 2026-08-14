@@ -61,3 +61,42 @@ def test_apply_migrations_is_idempotent_on_fresh_db():
         )
         assert storage.get_event_count("sess-mig") == 1
         storage.close()
+
+
+def test_migration_v8_adds_archived_column_to_legacy_db():
+    """A pre-v8 database (memory_records without ``archived``) must be upgraded
+    in place: column added with default 0, user_version bumped to 8, and legacy
+    rows read back as live (not archived). The base SCHEMA already declares the
+    column for fresh DBs, so this only guards the upgrade path."""
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        db = Path(tmpdir) / "legacy.db"
+        conn = sqlite3.connect(db)
+        conn.row_factory = sqlite3.Row
+        # A faithful pre-v8 memory_records shape — every column v2..v7 added,
+        # but no ``archived``.
+        conn.execute(
+            "CREATE TABLE memory_records ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "type TEXT NOT NULL, content TEXT NOT NULL,"
+            "topics TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL DEFAULT 0.5,"
+            "source TEXT NOT NULL DEFAULT 'claude', session_id TEXT NOT NULL, event_id TEXT,"
+            "created_at TEXT NOT NULL, content_hash TEXT NOT NULL DEFAULT '',"
+            "merge_count INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL DEFAULT '',"
+            "relevance REAL NOT NULL DEFAULT 1.0)"
+        )
+        conn.execute("PRAGMA user_version = 7")
+        conn.commit()
+
+        assert _column_exists(conn, "memory_records", "archived") is False
+
+        apply_migrations(conn, backfill_event_edges=lambda: None)
+
+        assert _column_exists(conn, "memory_records", "archived") is True
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+        # Legacy rows must not suddenly be treated as archived.
+        conn.execute(
+            "INSERT INTO memory_records(type, content, source, session_id, created_at) "
+            "VALUES ('fact', 'legacy memory', 'claude', 's1', '2026-01-01T00:00:00')"
+        )
+        assert conn.execute("SELECT archived FROM memory_records").fetchone()[0] == 0
+        conn.close()

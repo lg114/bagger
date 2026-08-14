@@ -77,6 +77,10 @@ def apply_migrations(conn: sqlite3.Connection, backfill_event_edges) -> None:
         _apply_migration_v7(conn, backfill_event_edges)
         conn.execute("PRAGMA user_version = 7")
         conn.commit()
+    if version < 8:
+        _apply_migration_v8(conn)
+        conn.execute("PRAGMA user_version = 8")
+        conn.commit()
 
 
 def _apply_migration_v2(conn: sqlite3.Connection) -> None:
@@ -510,3 +514,17 @@ def _apply_migration_v7(conn: sqlite3.Connection, backfill_event_edges) -> None:
     )
     backfill_event_edges()
     conn.commit()
+
+
+def _apply_migration_v8(conn: sqlite3.Connection) -> None:
+    """Add the ``archived`` soft-delete flag to ``memory_records`` (Phase 3).
+
+    The base SCHEMA in ``sqlite.py`` already declares the column for fresh
+    databases; this migration brings pre-existing databases up to the same
+    shape so every read path can rely on ``archived`` existing. Soft-delete is
+    the non-destructive half of "memory management": archived records drop out
+    of browse (``list_memories``) and retrieval (vector/FTS searches) by
+    default but stay in the table, fully restorable.
+    """
+    if not _column_exists(conn, "memory_records", "archived"):
+        conn.execute("ALTER TABLE memory_records ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
