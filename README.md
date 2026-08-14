@@ -102,6 +102,8 @@ Memory retrieval modes:
 - `vector`: semantic nearest-neighbour search over embeddings
 - `hybrid`: combines FTS and vector rankings with reciprocal-rank fusion
 
+Memories are manageable, not just append-only: records can be archived (soft-deleted) or restored from the desktop app or API, and archived records are excluded from browsing and retrieval by default.
+
 Embeddings and consolidation use configurable OpenAI-compatible endpoints. The defaults target Zhipu AI's compatible API, but URL, model, and keys can all be overridden.
 
 ## REST API
@@ -117,7 +119,8 @@ Embeddings and consolidation use configurable OpenAI-compatible endpoints. The d
 | `GET /api/sessions/{id}/tree` | Conversation topology and lineage |
 | `GET /api/sessions/{id}/export?format=markdown` | Download a session as Markdown |
 | `GET /api/search?q=…` | Search raw conversation events |
-| `GET /api/memories` | Browse consolidated memories by source and type |
+| `GET /api/memories` | Browse consolidated memories, filtered by source, type, and archive state (`archived=0` live / `1` archived) |
+| `PATCH /api/memories/{id}` | Archive (`{"archived": true}`) or restore a memory — soft delete, keeps the row and its indexes |
 | `GET /api/memories/search?q=…&mode=…` | FTS, vector, or hybrid memory retrieval |
 | `GET /api/stats`, `/daily`, `/tools` | Aggregate, time-series, and tool-use statistics |
 | `POST /api/scan`, `POST /api/scan/full` | Start a background scan |
