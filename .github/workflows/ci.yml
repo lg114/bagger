@@ -117,7 +117,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build
-        uses: Swatinem/rust-action@v2
+        uses: Swatinem/rust-cache@v2
         with:
           workspaces: ui/src-tauri
 
