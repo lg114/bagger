@@ -8,7 +8,23 @@ bagger imports local coding-agent transcripts into a searchable SQLite database,
   <img src="docs/preview.png" alt="bagger desktop app" width="860" />
 </p>
 
+## Contents
+
+- [What it does](#what-it-does)
+- [Quick start](#quick-start)
+- [Data sources](#data-sources)
+- [CLI](#cli)
+- [Structured memory and retrieval](#structured-memory-and-retrieval)
+- [REST API](#rest-api)
+- [Desktop app](#desktop-app)
+- [Configuration](#configuration)
+- [Architecture](#architecture)
+- [Privacy and security](#privacy-and-security)
+- [Development](#development)
+
 ## What it does
+
+bagger turns local coding-agent transcripts into a searchable, replayable knowledge base. It is designed for developers who want to answer both “where was this said?” and “what did we learn or decide?” without uploading their entire history to a hosted service.
 
 - Imports append-only JSONL transcripts from Claude Code and Codex
 - Keeps sources isolated with `(source, id)` database identities
@@ -21,6 +37,8 @@ bagger imports local coding-agent transcripts into a searchable SQLite database,
 
 ## Quick start
 
+Requires Python 3.12 or newer for the CLI and API.
+
 ```bash
 # Install the CLI and API dependencies.
 pip install -e ".[web]"
@@ -32,10 +50,13 @@ bagger scan
 # Search or replay imported conversations.
 bagger search "token expiration"
 bagger replay <session-id-prefix>
+bagger export <session-id-prefix>
 
 # Run the local API.
 bagger serve
 ```
+
+By default, bagger creates `~/.bagger/bagger.db` and scans all registered sources. Add `--source claude` or `--source codex` to `scan` and `watch` to scope an operation.
 
 To run the desktop app in development:
 
@@ -56,6 +77,8 @@ Prerequisites for the desktop app are Python 3.12+, Node.js 22+, and Rust.
 | Codex | `$CODEX_HOME/sessions/` (defaults to `~/.codex/sessions/`) | Rollout JSONL session files |
 
 The parser registry auto-discovers concrete parsers in `bagger/parsers/`. Scan and watch operate across all registered sources by default; pass `--source claude` or `--source codex` to scope an operation.
+
+Source identities are isolated in the database through `(source, id)` keys, so sessions from different agents cannot collide.
 
 ## CLI
 
@@ -106,9 +129,13 @@ Memories are manageable, not just append-only: records can be archived (soft-del
 
 Embeddings and consolidation use configurable OpenAI-compatible endpoints. The defaults target Zhipu AI's compatible API, but URL, model, and keys can all be overridden.
 
+The database remains local unless you explicitly enable consolidation or remote embeddings. Only the content selected for those requests is sent to the configured provider.
+
 ## REST API
 
 `bagger serve` listens on `http://127.0.0.1:8723`; interactive docs are at `/docs`.
+
+The API binds to loopback by default. Only widen `cors_origins` for browser origins you trust, because scan endpoints can read local transcript folders.
 
 | Endpoint | Description |
 | --- | --- |
@@ -162,6 +189,8 @@ embedding_model = "embedding-3"
 # Override provider detection for a proxy or custom backend.
 source_alias = { "claude-mimo-proxy" = "xiaomi" }
 ```
+
+Environment variables take precedence over matching config values for API keys and provider settings. `BAGGER_LLM_API_KEY` is required by `consolidate` unless using `--dry-run` or `--mock`; vector and hybrid recall require an embedding provider, while FTS-only recall works offline.
 
 ## Architecture
 
