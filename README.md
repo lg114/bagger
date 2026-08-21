@@ -21,6 +21,8 @@ bagger imports local coding-agent transcripts into a searchable SQLite database,
 - [Architecture](#architecture)
 - [Privacy and security](#privacy-and-security)
 - [Development](#development)
+- [Roadmap](#roadmap)
+- [License](#license)
 
 ## What it does
 
@@ -87,7 +89,7 @@ Source identities are isolated in the database through `(source, id)` keys, so s
 | `bagger init` | Create `~/.bagger/` and initialize the database |
 | `bagger backup <path>` | Create an integrity-checked SQLite backup (refuses to overwrite) |
 | `bagger scan [--full] [--source …]` | Import sessions incrementally, or fully re-import them |
-| `bagger watch [--source …]` | Watch transcript folders and sync new events |
+| `bagger watch [--source …] [--debounce …] [--rescan …]` | Watch transcript folders and sync new events |
 | `bagger search <query>` | Search raw conversation events with FTS5/BM25 |
 | `bagger replay <session-id>` | Render a full conversation in the terminal |
 | `bagger export <session-id>` | Export a session as Markdown |
@@ -150,7 +152,9 @@ The API binds to loopback by default. Only widen `cors_origins` for browser orig
 | `GET /api/memories` | Browse consolidated memories, filtered by source, type, and archive state (`archived=0` live / `1` archived) |
 | `PATCH /api/memories/{id}` | Archive (`{"archived": true}`) or restore a memory — soft delete, keeps the row and its indexes |
 | `GET /api/memories/search?q=…&mode=…` | FTS, vector, or hybrid memory retrieval |
-| `GET /api/stats`, `/daily`, `/tools` | Aggregate, time-series, and tool-use statistics |
+| `GET /api/stats` | Aggregate statistics |
+| `GET /api/stats/daily` | Time-series statistics |
+| `GET /api/stats/tools` | Tool-use statistics |
 | `POST /api/scan`, `POST /api/scan/full` | Start a background scan |
 | `GET /api/scan/status` | Poll scan progress and outcome |
 
@@ -160,6 +164,12 @@ The desktop client uses Tauri, React, Vite, and Tailwind. It offers dashboards, 
 
 ```bash
 # Build the production sidecar, then the native installer.
+# Use a clean environment so development-only packages are not bundled.
+python -m venv .venv-bundle
+# Windows PowerShell:
+.\.venv-bundle\\Scripts\\Activate.ps1
+# macOS/Linux (use this instead on those platforms):
+# source .venv-bundle/bin/activate
 pip install -e ".[web,bundle]"
 python scripts/build-backend.py
 cd ui
