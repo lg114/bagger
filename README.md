@@ -187,6 +187,13 @@ bagger_dir = "D:/data/bagger"
 # Keep the local API constrained to trusted origins.
 cors_origins = ["http://127.0.0.1:8723", "http://localhost:8723"]
 
+# Optional API authentication / request guard.
+# api_token = "use-a-long-random-token"
+# max_request_bytes = 1000000
+
+# Redact common credential-shaped strings before remote calls (default: true).
+remote_redact_secrets = true
+
 # Consolidation LLM (or set BAGGER_LLM_API_KEY in the environment).
 llm_base_url = "https://open.bigmodel.cn/api/paas/v4"
 llm_model = "glm-4-flash"
@@ -244,6 +251,10 @@ ui/                 Tauri shell and React desktop application
 bagger is local-first: transcript content is read from local files and stored in `~/.bagger/` by default. It does not include telemetry or a cloud sync service. Source transcript files are never modified.
 
 The API binds to loopback by default, and CORS is an explicit loopback allow-list because scan endpoints can read local transcript folders. Only widen `cors_origins` for origins you trust. Consolidation and remote embeddings are optional network operations: they send the material selected for those requests to the configured provider.
+
+To expose the API beyond the local machine, set `BAGGER_API_TOKEN` (or `api_token` in config) and explicitly run `bagger serve --allow-network --host 0.0.0.0`. Requests must then include `Authorization: Bearer <token>`. Common credential-shaped strings are redacted before remote LLM and embedding requests by default; disable this only when you understand the implications.
+
+When using the desktop frontend with an authenticated API, provide the same token at build time with `VITE_API_TOKEN`. This embeds the token in the frontend bundle, so use it only for a trusted local package; it is not suitable as a secret for a publicly distributed web frontend.
 
 ## Development
 

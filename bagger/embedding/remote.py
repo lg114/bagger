@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 
 from bagger.embedding.base import Embedder
+from bagger.security import redact_secrets
 
 # Remote endpoints accept batches; chunk to stay well under request-size limits.
 REMOTE_BATCH = 64
@@ -28,11 +29,15 @@ class RemoteEmbedder(Embedder):
         api_key: str | None,
         model: str,
         timeout: float = 60.0,
+        redact: bool | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model_name = model
         self.timeout = timeout
+        from bagger.config import settings
+
+        self.redact = settings.remote_redact_secrets if redact is None else redact
         self.dim: int = 0
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
@@ -42,6 +47,8 @@ class RemoteEmbedder(Embedder):
                 "embedding_api_key in ~/.bagger/config.toml (falls back to the "
                 "consolidation LLM key). Remote embedding cannot proceed."
             )
+        if self.redact:
+            texts = [redact_secrets(text) for text in texts]
         body = {"model": self.model_name, "input": texts}
         req = urllib.request.Request(
             f"{self.base_url}/embeddings",

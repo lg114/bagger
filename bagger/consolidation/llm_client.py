@@ -32,6 +32,7 @@ from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 from bagger.config import settings
+from bagger.security import redact_secrets
 from bagger.consolidation.errors import (
     LLMResponseError,
     LLMTransportError,
@@ -132,6 +133,8 @@ class OpenAICompatibleClient:
     # -- request plumbing -------------------------------------------
 
     def _build_body(self, system_prompt: str, user_content: str, response_schema: dict) -> dict:
+        if settings.remote_redact_secrets:
+            user_content = redact_secrets(user_content)
         body: dict = {
             "model": self.model,
             "messages": [

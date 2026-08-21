@@ -53,7 +53,7 @@ export default function SessionDetailPage() {
     setExportDone(null);
   }, [id]);
 
-  function handleExport() {
+  async function handleExport() {
     if (!id || exporting) return;
     setExporting(true);
     setExportError(null);
@@ -62,9 +62,14 @@ export default function SessionDetailPage() {
     // observe completion, so we surface the expected filename + destination
     // as confirmation instead of leaving the user guessing where it went.
     const filename = `bagger-${session?.source ?? "session"}-${id.slice(0, 24)}.md`;
-    exportSessionMarkdown(id);
-    setExportDone(filename);
-    window.setTimeout(() => setExporting(false), 1200);
+    try {
+      await exportSessionMarkdown(id);
+      setExportDone(filename);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      window.setTimeout(() => setExporting(false), 1200);
+    }
   }
 
   // Loading

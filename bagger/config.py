@@ -10,6 +10,7 @@ Usage::
 
 from __future__ import annotations
 
+import os
 import tomllib
 from functools import lru_cache
 from pathlib import Path
@@ -59,6 +60,15 @@ class Settings(BaseModel):
     would let any website drive the user's local agent. Override in
     ``~/.bagger/config.toml`` only to whitelist origins you trust.
     """
+
+    api_token: str | None = None
+    """Optional Bearer token required by all ``/api`` routes."""
+
+    max_request_bytes: int = Field(default=1_000_000, gt=0)
+    """Maximum advertised HTTP request body size accepted by the API."""
+
+    remote_redact_secrets: bool = True
+    """Redact common credential-shaped strings before remote LLM/embedding calls."""
 
     # ── Consolidation / LLM (phase-1 structured memory extraction) ──
     # One OpenAI-compatible client covers every domestic provider (智谱 GLM,
@@ -117,8 +127,16 @@ def _load_settings() -> Settings:
         for key in ("bagger_dir",):
             if key in data:
                 data[key] = Path(data[key])
-        return Settings(**data)
-    return Settings()
+    else:
+        data = {}
+
+    # Environment variables are useful for secrets in CI and shell sessions;
+    # they take precedence over values persisted in config.toml.
+    if api_token := os.environ.get("BAGGER_API_TOKEN"):
+        data["api_token"] = api_token
+    if redact := os.environ.get("BAGGER_REMOTE_REDACT_SECRETS"):
+        data["remote_redact_secrets"] = redact.strip().lower() not in {"0", "false", "no"}
+    return Settings(**data)
 
 
 # Module-level singleton — reuse everywhere.  LRU-cached so the file is

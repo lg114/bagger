@@ -1,4 +1,5 @@
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8723/api";
+const API_TOKEN = import.meta.env.VITE_API_TOKEN;
 
 // ── Types ──────────────────────────────────────────────
 
@@ -89,7 +90,11 @@ async function fetchApi<T>(
       }
     });
   }
-  const res = await fetch(url.toString());
+  const res = API_TOKEN
+    ? await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${API_TOKEN}` },
+      })
+    : await fetch(url.toString());
   if (!res.ok) {
     throw new Error(`API error: ${res.status} ${res.statusText}`);
   }
@@ -97,7 +102,12 @@ async function fetchApi<T>(
 }
 
 async function postApi<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { method: "POST" });
+  const res = API_TOKEN
+    ? await fetch(`${API_BASE}${path}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${API_TOKEN}` },
+      })
+    : await fetch(`${API_BASE}${path}`, { method: "POST" });
   if (!res.ok) {
     throw new Error(`API error: ${res.status} ${res.statusText}`);
   }
@@ -107,7 +117,10 @@ async function postApi<T>(path: string): Promise<T> {
 async function patchApi<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {}),
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -251,8 +264,25 @@ export function getScanStatus(): Promise<ScanStatus> {
  * downloaded). A synchronous anchor click keeps the download inside the
  * gesture, so it always works.
  */
-export function exportSessionMarkdown(id: string, format = "markdown"): void {
+export async function exportSessionMarkdown(id: string, format = "markdown"): Promise<void> {
   const url = `${API_BASE}/sessions/${encodeURIComponent(id)}/export?format=${encodeURIComponent(format)}`;
+  if (API_TOKEN) {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${API_TOKEN}` },
+    });
+    if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`);
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = `bagger-${id.slice(0, 24)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+    return;
+  }
+
   const a = document.createElement("a");
   a.href = url;
   a.download = `bagger-${id.slice(0, 24)}.md`;

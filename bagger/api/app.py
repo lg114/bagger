@@ -1,8 +1,10 @@
+import hmac
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from bagger import __version__
 from bagger.api.routes import export, health, memories, search, sessions, stats, sync
@@ -31,6 +33,31 @@ def create_app() -> FastAPI:
         version=__version__,
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def security_boundary(request, call_next):
+        """Enforce optional API auth and a cheap request-size guard."""
+        if request.method != "OPTIONS" and request.url.path.startswith("/api/"):
+            if settings.api_token:
+                expected = f"Bearer {settings.api_token}"
+                supplied = request.headers.get("authorization", "")
+                if not hmac.compare_digest(supplied, expected):
+                    return JSONResponse(
+                        {"detail": "authentication required"},
+                        status_code=401,
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+            content_length = request.headers.get("content-length")
+            if content_length:
+                try:
+                    too_large = int(content_length) > settings.max_request_bytes
+                except ValueError:
+                    too_large = True
+                if too_large:
+                    return JSONResponse(
+                        {"detail": "request body too large"}, status_code=413
+                    )
+        return await call_next(request)
 
     # Lock CORS to configured (loopback) origins — never a wildcard.
     # The API can trigger real file scans (POST /api/scan), so an open policy

@@ -1,5 +1,6 @@
 """bagger CLI — AI Coding Agent Data Collector."""
 
+import ipaddress
 import logging
 import sqlite3
 from functools import wraps
@@ -836,14 +837,33 @@ def memories_stats(storage):
 @click.option("--port", default=8723, help="Listen port (default: 8723)")
 @click.option("--reload", "do_reload", is_flag=True, help="Auto-reload on code changes (dev mode)")
 @click.option("--no-open", is_flag=True, help="Do not open browser automatically")
+@click.option(
+    "--allow-network",
+    is_flag=True,
+    help="Allow non-loopback binding (requires BAGGER_API_TOKEN or api_token)",
+)
 @require_db()
-def serve(host, port, do_reload, no_open):
+def serve(host, port, do_reload, no_open, allow_network):
     """Start the Bagger web API and visual memory browser."""
     try:
         import uvicorn
     except ImportError:
         click.echo("  uvicorn not installed. Run: pip install bagger[web]", err=True)
         return
+
+    try:
+        loopback = host.lower() == "localhost" or ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = False
+    if not loopback:
+        if not allow_network:
+            raise click.ClickException(
+                "Refusing non-loopback binding. Pass --allow-network only when intentional."
+            )
+        if not settings.api_token:
+            raise click.ClickException(
+                "Non-loopback binding requires api_token or BAGGER_API_TOKEN."
+            )
 
     if not no_open:
         import webbrowser
