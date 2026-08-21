@@ -1,6 +1,7 @@
 """bagger CLI — AI Coding Agent Data Collector."""
 
 import logging
+import sqlite3
 from functools import wraps
 from pathlib import Path
 
@@ -65,6 +66,27 @@ def init():
     storage.close()
 
     click.echo(click.style(f"  {settings.bagger_dir} initialized", fg="green"))
+
+
+@cli.command()
+@click.argument("target", type=click.Path(path_type=Path, dir_okay=False))
+@require_db()
+@with_storage
+def backup(storage, target):
+    """Create an integrity-checked copy of the SQLite database.
+
+    TARGET must not already exist. This makes repeated scheduled backups
+    explicit and prevents an accidental overwrite of an older backup.
+    """
+    try:
+        storage.backup_to(target)
+    except FileExistsError:
+        raise click.ClickException(
+            f"Backup target already exists: {target}. Choose a new path."
+        ) from None
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(click.style(f"  Backup created: {target}", fg="green"))
 
 
 # ── scan ────────────────────────────────────────────────────

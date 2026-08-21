@@ -155,6 +155,15 @@ class Storage(SessionRepository, EventRepository, SearchIndex, VectorIndex, Prot
         """
         ...
 
+    def backup_to(self, target: str) -> None:
+        """Create a consistent SQLite backup at ``target``.
+
+        Implementations must not overwrite an existing target unless the
+        caller explicitly removes it first. This keeps the CLI backup command
+        safe to use in scheduled jobs.
+        """
+        ...
+
     def get_memory_records(self, ids: list[int]) -> list[dict]:
         """Return memory records by id (used to hydrate retrieval results).
 

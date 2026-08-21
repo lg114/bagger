@@ -85,6 +85,7 @@ Source identities are isolated in the database through `(source, id)` keys, so s
 | Command | Description |
 | --- | --- |
 | `bagger init` | Create `~/.bagger/` and initialize the database |
+| `bagger backup <path>` | Create an integrity-checked SQLite backup (refuses to overwrite) |
 | `bagger scan [--full] [--source …]` | Import sessions incrementally, or fully re-import them |
 | `bagger watch [--source …]` | Watch transcript folders and sync new events |
 | `bagger search <query>` | Search raw conversation events with FTS5/BM25 |

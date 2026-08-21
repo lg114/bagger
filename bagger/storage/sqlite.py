@@ -1377,6 +1377,38 @@ class SqliteStorage:
             self._conn.commit()
             self._bulk_count = 0
 
+    def backup_to(self, target: str | Path) -> None:
+        """Create a consistent, integrity-checked copy of the live database.
+
+        SQLite's online backup API is safe while readers/writers are active and
+        includes the WAL contents. Existing targets are rejected to avoid an
+        accidental destructive overwrite.
+        """
+        destination = Path(target).expanduser().resolve()
+        source = self.db_path.resolve()
+        if destination == source:
+            raise ValueError("backup destination must differ from the database")
+        if destination.exists():
+            raise FileExistsError(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        with self._write():
+            self.conn.commit()
+            target_conn = sqlite3.connect(str(destination))
+            try:
+                self.conn.backup(target_conn)
+                result = target_conn.execute("PRAGMA integrity_check").fetchone()[0]
+                if result != "ok":
+                    raise sqlite3.DatabaseError(f"backup integrity check failed: {result}")
+                target_conn.commit()
+            except Exception:
+                target_conn.close()
+                with contextlib.suppress(OSError):
+                    destination.unlink()
+                raise
+            else:
+                target_conn.close()
+
     # -- lifecycle ---------------------------------------------------
 
     def connect(self) -> None:

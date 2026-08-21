@@ -59,6 +59,28 @@ def test_insert_and_search():
         storage.close()
 
 
+def test_backup_to_creates_integrity_checked_copy_and_refuses_overwrite(tmp_path: Path):
+    db_path = tmp_path / "source.db"
+    backup_path = tmp_path / "backups" / "source.db"
+    storage = SqliteStorage(db_path)
+    storage.connect()
+    storage.insert_event(_make_event(event_id="backup-event", text="backup me"))
+
+    storage.backup_to(backup_path)
+    assert backup_path.exists()
+    with pytest.raises(FileExistsError):
+        storage.backup_to(backup_path)
+    with pytest.raises(ValueError):
+        storage.backup_to(db_path)
+    storage.close()
+
+    copied = SqliteStorage(backup_path)
+    copied.connect()
+    assert copied.get_event_count("sess-1") == 1
+    assert copied.check_integrity() == []
+    copied.close()
+
+
 def test_insert_ignore_duplicates():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db_path = Path(tmpdir) / "test.db"
