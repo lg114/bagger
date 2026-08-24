@@ -54,9 +54,7 @@ def create_app() -> FastAPI:
                 except ValueError:
                     too_large = True
                 if too_large:
-                    return JSONResponse(
-                        {"detail": "request body too large"}, status_code=413
-                    )
+                    return JSONResponse({"detail": "request body too large"}, status_code=413)
         return await call_next(request)
 
     # Lock CORS to configured (loopback) origins — never a wildcard.

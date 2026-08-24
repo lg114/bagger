@@ -9,9 +9,7 @@ _SECRET_PATTERNS = (
     re.compile(r"\b(?:sk|rk|pk)-[A-Za-z0-9_-]{16,}\b"),
     re.compile(r"\b(?:ghp|gho|github_pat|xox[baprs])-[A-Za-z0-9-]{12,}\b"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
-    re.compile(
-        r"(?i)\b(?:password|passwd|token|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+"
-    ),
+    re.compile(r"(?i)\b(?:password|passwd|token|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+"),
 )
 
 

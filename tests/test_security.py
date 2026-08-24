@@ -21,10 +21,10 @@ def test_redact_secrets_covers_common_credentials():
 def test_api_token_protects_api_routes(monkeypatch, tmp_path: Path):
     import bagger.config as config
 
-    monkeypatch.setattr(
-        config, "settings", Settings(bagger_dir=tmp_path, api_token="test-token")
-    )
+    monkeypatch.setattr(config, "settings", Settings(bagger_dir=tmp_path, api_token="test-token"))
     client = TestClient(create_app())
     assert client.get("/api/health").status_code == 401
-    assert client.get("/api/health", headers={"Authorization": "Bearer test-token"}).status_code == 200
+    assert (
+        client.get("/api/health", headers={"Authorization": "Bearer test-token"}).status_code == 200
+    )
     assert client.options("/api/health").status_code != 401
