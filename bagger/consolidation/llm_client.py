@@ -32,12 +32,12 @@ from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 from bagger.config import settings
-from bagger.security import redact_secrets
 from bagger.consolidation.errors import (
     LLMResponseError,
     LLMTransportError,
     LLMUnauthorizedError,
 )
+from bagger.security import redact_secrets
 
 __all__ = [
     "LLMClient",
