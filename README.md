@@ -35,7 +35,7 @@ bagger turns local coding-agent transcripts into a searchable, replayable knowle
 - Watches transcript folders and incrementally syncs new events
 - Extracts structured memories (facts, preferences, decisions, and lessons) with an OpenAI-compatible LLM
 - Retrieves memories with keyword, vector, or hybrid search
-- Provides a CLI, loopback-only FastAPI service, and native Tauri desktop app
+- Provides a CLI, loopback-by-default FastAPI service, and native Tauri desktop app
 
 ## Quick start
 
@@ -160,14 +160,14 @@ The API binds to loopback by default. Only widen `cors_origins` for browser orig
 
 ## Desktop app
 
-The desktop client uses Tauri, React, Vite, and Tailwind. It offers dashboards, conversation and project browsing, raw search, memory browsing/retrieval, analytics, import status, and settings. In development, Tauri starts the Python API with reload enabled; production bundles the API as a PyInstaller sidecar.
+The desktop client uses Tauri, React, Vite, and Tailwind. It offers dashboards, conversation and project browsing, raw search, memory browsing/retrieval, analytics, import status, and settings. In development, Tauri starts the Python API and enables reload on macOS/Linux; Windows development mode starts the API without reload to avoid extra console windows. Production bundles the API as a PyInstaller sidecar.
 
 ```bash
 # Build the production sidecar, then the native installer.
 # Use a clean environment so development-only packages are not bundled.
 python -m venv .venv-bundle
 # Windows PowerShell:
-.\.venv-bundle\\Scripts\\Activate.ps1
+.\.venv-bundle\Scripts\Activate.ps1
 # macOS/Linux (use this instead on those platforms):
 # source .venv-bundle/bin/activate
 pip install -e ".[web,bundle]"
@@ -175,6 +175,14 @@ python scripts/build-backend.py
 cd ui
 npm run tauri build
 ```
+
+The current production installer configuration targets Windows MSI. If PowerShell blocks the activation script, run the installation with the virtual-environment interpreter directly:
+
+```powershell
+.\.venv-bundle\Scripts\python.exe -m pip install -e ".[web,bundle]"
+```
+
+macOS/Linux packaging requires platform-specific Tauri bundle and sidecar configuration.
 
 ## Configuration
 
