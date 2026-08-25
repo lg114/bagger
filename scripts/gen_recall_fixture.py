@@ -24,14 +24,13 @@ from __future__ import annotations
 import json
 import os
 import random
+import sqlite3
 import sys
 from pathlib import Path
 
 DB = Path(os.path.expanduser("~/.bagger/bagger.db"))
 GOLDEN = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "recall_golden.jsonl"
 OUT = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "recall_memories.jsonl"
-
-import sqlite3
 
 CONN = sqlite3.connect(str(DB))
 CONN.row_factory = sqlite3.Row
@@ -53,13 +52,13 @@ def main() -> None:
     relevant_hashes = load_golden_hashes()
     print(f"golden references {len(relevant_hashes)} distinct content hashes")
 
+    placeholders = ",".join("?" * len(relevant_hashes))
     relevant_rows = CONN.execute(
-        """
+        f"""
         SELECT id, type, content, topics, confidence, source, session_id, created_at, content_hash
         FROM memory_records
-        WHERE content_hash IN (%s)
-        """
-        % ",".join("?" * len(relevant_hashes)),
+        WHERE content_hash IN ({placeholders})
+        """,
         tuple(relevant_hashes),
     ).fetchall()
     print(f"found {len(relevant_rows)} relevant records in local DB")
@@ -75,12 +74,11 @@ def main() -> None:
     # Random sampling gives the eval realistic lexical noise without leaking the
     # whole personal database.
     cand = CONN.execute(
-        """
+        f"""
         SELECT id, type, content, topics, confidence, source, session_id, created_at, content_hash
         FROM memory_records
-        WHERE content_hash NOT IN (%s) AND archived = 0
-        """
-        % ",".join("?" * len(relevant_hashes)),
+        WHERE content_hash NOT IN ({placeholders}) AND archived = 0
+        """,
         tuple(relevant_hashes),
     ).fetchall()
     rng = random.Random(20260825)  # deterministic sample
