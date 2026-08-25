@@ -13,6 +13,7 @@ reachable embedding provider (``settings.embedding_*`` / ``BAGGER_EMBEDDING_*``)
 A missing or failing provider surfaces as ``503`` with the underlying reason.
 """
 
+import contextlib
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -60,6 +61,11 @@ def search_memories(
             results = hs.search(q, mode=mode, limit=limit, source=source)
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e)) from e
+        # Query analytics (v9): accumulate the real query distribution for the
+        # golden eval set. Suppressed — logging must never fail a search, and
+        # test doubles may not implement log_query.
+        with contextlib.suppress(Exception):
+            storage.log_query(q, mode=mode, source=source, result_count=len(results))
 
     # Normalize the storage shape for the UI: topics is a comma-joined string in
     # the DB row, but the API contract exposes it as a list.

@@ -1,19 +1,27 @@
-{"query": "怎么选存储向量的数据库", "expect": ["Zvec", "Milvus"], "note": "向量存储选型（语义：选型 → Zvec/Milvus）"}
-{"query": "桌面应用体积太大怎么瘦身", "expect": ["sidecar", "Tauri"], "note": "打包体积（语义：瘦身 → sidecar/Tauri 进程模型）"}
-{"query": "不联网也能用的个人工具", "expect": ["本地优先", "Zvec"], "note": "本地优先哲学（语义：不联网 → 本地优先）"}
-{"query": "让滚动条不再占页面宽度", "expect": ["scrollbar-width", "::-webkit-scrollbar", "overlay"], "note": "悬浮滚动条（语义：不占宽度 → 覆盖式滚动条方案）"}
-{"query": "圆柱体上转动的文字特效怎么做", "expect": ["CylinderText", "preserve-3d", "rotateY"], "note": "3D 圆柱文本组件（语义：转动文字 → CSS3D 圆柱）"}
-{"query": "鼠标悬停的气泡提示被容器挡住看不见", "expect": ["portal", "裁剪", "tooltip"], "note": "tooltip 被滚动容器裁剪（语义：气泡提示 → tooltip/portal）"}
-{"query": "上传的表格文件检索时丢了表头结构", "expect": ["markdown 表格", "pandas"], "note": "Excel 表格分块破坏表头（语义：表格检索丢结构 → markdown/pandas）"}
-{"query": "用小片段检索再拿整篇喂给大模型", "expect": ["小 chunk", "大上下文", "parent_text"], "note": "父子分块 small-to-big（语义：小片段检索 → 父子 chunk）"}
-{"query": "流式输出时工具返回的内容混进了聊天记录", "expect": ["ToolMessage", "检索片段", "污染"], "note": "流式污染历史（语义：工具内容混入历史 → ToolMessage 过滤）"}
-{"query": "答案里同一来源标注太多遍怎么办", "expect": ["合并引用", "来源 chips"], "note": "引用重复标注（语义：标注太密 → 合并引用）"}
-{"query": "同名文档重新入库后新内容搜不到", "expect": ["ingest_batch_id", "旧向量", "重新入库"], "note": "重入库覆盖 bug（语义：重新上传搜不到 → batch id 保护）"}
-{"query": "开发服务器提示端口被占用怎么解决", "expect": ["10048", "端口"], "note": "端口冲突（语义：端口占用 → WinError 10048）"}
-{"query": "控制台中文变成乱码但文件没问题", "expect": ["UTF-8", "乱码"], "note": "终端编码（语义：显示乱码 → UTF-8 编码）"}
-{"query": "让智能体自动把对话存进记忆系统", "expect": ["Hook", "Capture", "自动捕获"], "note": "自动采集（语义：自动存对话 → Hook/Capture 层）"}
-{"query": "前端渲染用户内容时防止脚本注入", "expect": ["innerHTML", "XSS", "DOMPurify"], "note": "XSS 防护（语义：脚本注入 → innerHTML/DOMPurify）"}
-{"query": "安装依赖时解析树太深怎么处理", "expect": ["resolution-too-deep", "直接安装特定依赖"], "note": "依赖解析（语义：解析树太深 → 最小化安装）"}
-{"query": "跑测试时不想真的调用外部嵌入接口", "expect": ["StubEmbedder", "确定性"], "note": "测试替身嵌入器（语义：不调外部 → StubEmbedder）"}
-{"query": "后端报错希望前端拿到统一的格式", "expect": ["中间件", "405", "错误响应"], "note": "统一错误响应（语义：报错统一格式 → 中间件/405）"}
-{"query": "开发服务器在后台挂着挂着就没了", "expect": ["PowerShell Job", "Start-Process"], "note": "后台进程挂不住（语义：挂不住 → PowerShell Job/Start-Process 稳定性坑）"}
+# Golden retrieval-evaluation queries (consumed by scripts/eval_recall.py).
+# Format: {"query": "...", "expect_hashes": ["..."], "expect": ["substring"], "note": "..."}
+# expect_hashes = stable memory content fingerprints (CI-safe and authoritative);
+# expect_ids = local-only migration aid; expect = legacy substring fallback.
+# Grow this file from real usage: python scripts/eval_recall.py --dump-log
+
+{"query": "怎么选存储向量的数据库", "expect_hashes": ["9be7bfeb1a5391dc", "e7e282b63be1e17f", "c545a11f8747d743", "3267f5c0319b5c1c"], "expect": ["Zvec", "Milvus"], "note": "向量存储选型（语义：选型 → Zvec/Milvus）"}
+{"query": "桌面应用体积太大怎么瘦身", "expect_hashes": ["22881b4574f07bea"], "expect": ["sidecar", "Tauri"], "note": "打包体积（语义：瘦身 → sidecar/Tauri 进程模型）"}
+{"query": "不联网也能用的个人工具", "expect_hashes": ["07a9ef6bbbbb687c", "3fc3030c68ccb60d", "af666a17a215bd74", "9be7bfeb1a5391dc"], "expect": ["本地优先", "Zvec"], "note": "本地优先哲学（语义：不联网 → 本地优先）"}
+{"query": "让滚动条不再占页面宽度", "expect_hashes": ["e73f563697bff467", "e30e589672fd206f", "5ce8b054fdef2bf3", "3d0df005682664f6", "33a76fc175287e42"], "expect": ["scrollbar-width", "::-webkit-scrollbar", "overlay"], "note": "悬浮滚动条（语义：不占宽度 → 覆盖式滚动条方案）"}
+{"query": "圆柱体上转动的文字特效怎么做", "expect_hashes": ["72bc90ced139c492", "c42c780b5ba90263", "d811220d3d5fb0ef"], "expect": ["CylinderText", "preserve-3d", "rotateY"], "note": "3D 圆柱文本组件（语义：转动文字 → CSS3D 圆柱）"}
+{"query": "鼠标悬停的气泡提示被容器挡住看不见", "expect_hashes": ["4a25cfb01b5891e6", "a017f621008c604f", "ab4538bac34eb02c", "bf58baf895ce5ca4"], "expect": ["portal", "裁剪", "tooltip"], "note": "tooltip 被滚动容器裁剪（语义：气泡提示 → tooltip/portal）"}
+{"query": "上传的表格文件检索时丢了表头结构", "expect_hashes": ["752623a37f8a9314", "a548bd56d3311ca3", "52111b5ae8eb8efc", "3a5063e175cc7c8a"], "expect": ["markdown 表格", "pandas"], "note": "Excel 表格分块破坏表头（语义：表格检索丢结构 → markdown/pandas）"}
+{"query": "用小片段检索再拿整篇喂给大模型", "expect_hashes": ["dc70fc89d7ee2657", "1e4775479e528106", "5da56f8ad72985c4", "c8e802aa747f95b6"], "expect": ["小 chunk", "大上下文", "parent_text"], "note": "父子分块 small-to-big（语义：小片段检索 → 父子 chunk）"}
+{"query": "流式输出时工具返回的内容混进了聊天记录", "expect_hashes": ["e010e6dce10ea9df", "cb98844905b3482b"], "expect": ["ToolMessage", "检索片段", "污染"], "note": "流式污染历史（语义：工具内容混入历史 → ToolMessage 过滤）"}
+{"query": "答案里同一来源标注太多遍怎么办", "expect_hashes": ["00b34d4ac6c0ead8", "e8504425c3a4903b", "d5ee7c10ccec28f0"], "expect": ["合并引用", "来源 chips"], "note": "引用重复标注（语义：标注太密 → 合并引用）"}
+{"query": "同名文档重新入库后新内容搜不到", "expect_hashes": ["8f25e9773290c598", "15a0f43b93c1a10a", "2fede3f74bf6804a", "4b7570de6d7ae696"], "expect": ["ingest_batch_id", "旧向量", "重新入库"], "note": "重入库覆盖 bug（语义：重新上传搜不到 → batch id 保护）"}
+{"query": "开发服务器提示端口被占用怎么解决", "expect_hashes": ["2cb7ec6d44315562", "e1f69151e61d8ec0", "054168fdfb1f8886", "5d39741f36449703"], "expect": ["10048", "端口"], "note": "端口冲突（语义：端口占用 → WinError 10048）"}
+{"query": "控制台中文变成乱码但文件没问题", "expect_hashes": ["30dd7b943ff9adf0", "728b74fccb72f27d", "78a9c2d2093b9917", "d54993030aaea570", "1b9627447fe10918"], "expect": ["UTF-8", "乱码"], "note": "终端编码（语义：显示乱码 → UTF-8 编码）"}
+{"query": "让智能体自动把对话存进记忆系统", "expect_hashes": ["64b92b790f4c9a92", "26ca7c70cc5b5747", "03399893b4321a79", "6dc8dedd2ac58af5", "36498b83954d4522"], "expect": ["Hook", "Capture", "自动捕获"], "note": "自动采集（语义：自动存对话 → Hook/Capture 层）"}
+{"query": "前端渲染用户内容时防止脚本注入", "expect_hashes": ["f096364d13bbf973", "95fed922520fe28f", "7a13898ad04f4054", "21963a9ac2178822"], "expect": ["innerHTML", "XSS", "DOMPurify"], "note": "XSS 防护（语义：脚本注入 → innerHTML/DOMPurify）"}
+{"query": "安装依赖时解析树太深怎么处理", "expect_hashes": ["736bac8925a589a0"], "expect": ["resolution-too-deep", "直接安装特定依赖"], "note": "依赖解析（语义：解析树太深 → 最小化安装）"}
+{"query": "跑测试时不想真的调用外部嵌入接口", "expect_hashes": ["0415346115dac566", "69ee965ab4959432", "60e60038934eb042", "f68db3f0afa767ee"], "expect": ["StubEmbedder", "确定性"], "note": "测试替身嵌入器（语义：不调外部 → StubEmbedder）"}
+{"query": "后端报错希望前端拿到统一的格式", "expect_hashes": ["45bf5942fa71f1e9", "fd9294020a574c0c", "05f70a39093abd68", "24bddf88c578c14a", "8b5893de2b6648e5"], "expect": ["中间件", "405", "错误响应"], "note": "统一错误响应（语义：报错统一格式 → 中间件/405）"}
+{"query": "开发服务器在后台挂着挂着就没了", "expect_hashes": ["56327a6e777da2e2", "d3512f6c9f57a7b8", "fb192df257f90c16", "0155df9de2d22526"], "expect": ["PowerShell Job", "Start-Process"], "note": "后台进程挂不住（语义：挂不住 → PowerShell Job/Start-Process 稳定性坑）"}
+{"query": "怎么给数据库加全文搜索", "expect_hashes": ["a3f5137440fd2560", "afcf2f1c6c05242f"], "expect": ["FTS5", "全文搜索"], "note": "FTS5 全文搜索引擎（语义：全文搜索 → SQLite FTS5）"}
+{"query": "嵌入模型配置好了运行时想改怎么办", "expect_hashes": ["b7aae6b69fd318b0", "46159d250359dc64"], "expect": ["embedding", "配置", "API key"], "note": "运行时配置 embedding（语义：运行时改配置 → /config/embedding 端点）"}

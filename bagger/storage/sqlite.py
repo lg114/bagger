@@ -1098,7 +1098,7 @@ class SqliteSearchIndex:
         tokenized = self._tokenized_fts_query(query)
         safe = _escape_fts5_query(tokenized)
         sql = (
-            "SELECT m.id, m.type, m.content, m.topics, m.source, m.session_id, "
+            "SELECT m.id, m.type, m.content, m.topics, m.source, m.session_id, m.content_hash, "
             "snippet(memory_fts, 0, '<mark>', '</mark>', '...', 32) as snippet, "
             "bm25(memory_fts) as rank "
             "FROM memory_fts fts "
@@ -1827,7 +1827,7 @@ class SqliteStorage:
         placeholders = ",".join("?" * len(ids))
         rows = self._conn.execute(
             f"SELECT id, type, content, topics, confidence, source, session_id, "
-            f"event_id, created_at, archived FROM memory_records "
+            f"event_id, created_at, content_hash, archived FROM memory_records "
             f"WHERE archived = 0 AND id IN ({placeholders})",
             ids,
         ).fetchall()
@@ -1851,6 +1851,43 @@ class SqliteStorage:
             # close, silently losing the archive.
             self._conn.commit()
             return cur.rowcount > 0
+
+    def log_query(
+        self, query: str, mode: str, source: str | None = None, result_count: int | None = None
+    ) -> None:
+        """Append one row to ``query_log`` (search-query analytics, v9).
+
+        Written by the search API on every request so real query distribution
+        accumulates passively — the raw material for growing the golden eval
+        set (see ``scripts/eval_recall.py --dump-log``). Fire-and-forget:
+        callers suppress exceptions so logging can never fail a search.
+        """
+        with self._write():
+            self._conn.execute(
+                "INSERT INTO query_log(query, mode, source, result_count, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (query, mode, source, result_count, datetime.now(UTC).isoformat()),
+            )
+            # Explicit commit (request-scoped connection rolls back on close).
+            self._conn.commit()
+
+    def recent_queries(self, limit: int = 50) -> list[dict]:
+        """Most-used logged queries, deduplicated, for weak-labeling triage.
+
+        Returns ``[{query, uses, modes, last_used}]`` ordered by frequency.
+        Empty when the table is missing (pre-v9 database) — dump-log treats
+        that as "nothing logged yet" rather than an error.
+        """
+        try:
+            rows = self._conn.execute(
+                "SELECT query, COUNT(*) AS uses, GROUP_CONCAT(DISTINCT mode) AS modes, "
+                "MAX(created_at) AS last_used FROM query_log "
+                "GROUP BY query ORDER BY uses DESC, last_used DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [dict(r) for r in rows]
 
     def list_memories(
         self,
@@ -1891,7 +1928,7 @@ class SqliteStorage:
         offset = (page - 1) * per_page
         rows = self._conn.execute(
             f"SELECT id, type, content, topics, confidence, source, session_id, "
-            f"event_id, created_at, archived FROM memory_records{where_sql} "
+            f"event_id, created_at, content_hash, archived FROM memory_records{where_sql} "
             f"ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
             params + [per_page, offset],
         ).fetchall()

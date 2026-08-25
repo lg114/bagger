@@ -81,6 +81,10 @@ def apply_migrations(conn: sqlite3.Connection, backfill_event_edges) -> None:
         _apply_migration_v8(conn)
         conn.execute("PRAGMA user_version = 8")
         conn.commit()
+    if version < 9:
+        _apply_migration_v9(conn)
+        conn.execute("PRAGMA user_version = 9")
+        conn.commit()
 
 
 def _apply_migration_v2(conn: sqlite3.Connection) -> None:
@@ -528,3 +532,28 @@ def _apply_migration_v8(conn: sqlite3.Connection) -> None:
     """
     if not _column_exists(conn, "memory_records", "archived"):
         conn.execute("ALTER TABLE memory_records ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+
+
+def _apply_migration_v9(conn: sqlite3.Connection) -> None:
+    """Create the ``query_log`` table — raw material for the golden eval set.
+
+    Every ``/api/memories/search`` request appends one row (query, mode,
+    result count, timestamp). This is the "collect real queries" half of the
+    weak-labeling loop: ``scripts/eval_recall.py --dump-log`` distills it into
+    the queries worth judging by hand, which then grow
+    ``tests/fixtures/recall_golden.jsonl``. Append-only, never read on the
+    hot path, safe to truncate at any time.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS query_log (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            query        TEXT NOT NULL,
+            mode         TEXT NOT NULL,
+            source       TEXT,
+            result_count INTEGER,
+            created_at   TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_query_log_created ON query_log(created_at)")

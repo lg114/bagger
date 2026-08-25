@@ -92,7 +92,8 @@ def test_migration_v8_adds_archived_column_to_legacy_db():
         apply_migrations(conn, backfill_event_edges=lambda: None)
 
         assert _column_exists(conn, "memory_records", "archived") is True
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+        # v8 adds archived; v9 (query_log) rides along to the same latest version.
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
         # Legacy rows must not suddenly be treated as archived.
         conn.execute(
             "INSERT INTO memory_records(type, content, source, session_id, created_at) "
