@@ -39,6 +39,7 @@ from bagger.cjk import (
 from bagger.models.event import BlockType, MemoryEvent, Session
 from bagger.storage.base import VectorItem
 from bagger.storage.migrations import _column_exists, apply_migrations
+from bagger.storage.query_expansion import expand_terms
 
 logger = logging.getLogger(__name__)
 
@@ -1113,10 +1114,20 @@ class SqliteSearchIndex:
         carries the payload text a query actually describes, while topics is a
         short tag list whose matches alone are weaker evidence. Measured on
         the real corpus (~650 memories): R@10 0.62→0.66, nDCG@10 0.57→0.59.
+
+        Queries containing a phrase from ``query_expansion`` additionally get
+        that phrase's expansion tokens appended to the OR set (OR-expand,
+        decided 2026-08-26). Queries that trigger no expansion keep the exact
+        original token list — zero behavior change by construction.
         """
         if not self._memory_fts_enabled():
             return []
         tokenized = self._tokenized_memory_fts_query(query)
+        extra = expand_terms(query)
+        if extra:
+            tokens = tokenized.split()
+            tokens.extend(t for t in extra if t not in tokens)
+            tokenized = " ".join(tokens)
         safe = _escape_fts5_query(tokenized)
         sql = (
             "SELECT m.id, m.type, m.content, m.topics, m.source, m.session_id, m.content_hash, "
