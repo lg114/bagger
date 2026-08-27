@@ -4,11 +4,8 @@ import { type Window, getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Home,
   Search,
-  BarChart3,
+  MessagesSquare,
   RefreshCw,
-  Settings,
-  Folder,
-  Brain,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,17 +22,14 @@ function getWin(): Window | null {
   return cachedWin;
 }
 
+// MVP nav: scan → search → view sessions. Memories / Stats / Projects /
+// Settings are intentionally hidden (out of MVP scope).
 const navItems = {
   browse: [
-    { to: "/", icon: Home, label: "Dashboard" },
+    { to: "/", icon: Home, label: "Home" },
     { to: "/search", icon: Search, label: "Search" },
-    { to: "/memories", icon: Brain, label: "Memories" },
-    { to: "/projects", icon: Folder, label: "Projects" },
-  ],
-  manage: [
-    { to: "/stats", icon: BarChart3, label: "Analytics" },
+    { to: "/sessions", icon: MessagesSquare, label: "Sessions" },
     { to: "/import", icon: RefreshCw, label: "Scan" },
-    { to: "/settings", icon: Settings, label: "Settings" },
   ],
 } as const;
 
@@ -155,25 +149,18 @@ export default function Layout() {
           </div>
 
           {sidebarOpen ? (
-            /* Expanded: grouped nav */
-            <div className="flex-1 min-h-0 overflow-y-auto px-2.5 py-1 space-y-5">
-              {(["browse", "manage"] as const).map((group) => (
-                <div key={group}>
-                  <p className="text-[11px] uppercase tracking-wider text-tertiary px-2 mb-1.5 font-medium">
-                    {group === "browse" ? "Browse" : "Manage"}
-                  </p>
-                  <nav className="space-y-0.5">
-                    {navItems[group].map((item) => (
-                      <NavRow
-                        key={item.to}
-                        to={item.to}
-                        icon={item.icon}
-                        label={item.label}
-                      />
-                    ))}
-                  </nav>
-                </div>
-              ))}
+            /* Expanded: MVP nav (Home → Search → Sessions → Scan) */
+            <div className="flex-1 min-h-0 overflow-y-auto px-2.5 py-1">
+              <nav className="space-y-0.5">
+                {navItems.browse.map((item) => (
+                  <NavRow
+                    key={item.to}
+                    to={item.to}
+                    icon={item.icon}
+                    label={item.label}
+                  />
+                ))}
+              </nav>
             </div>
           ) : (
             /* Collapsed: icon spine */
@@ -185,30 +172,23 @@ export default function Layout() {
               >
                 <Search className="w-[18px] h-[18px]" strokeWidth={1.5} />
               </button>
-              {(["browse", "manage"] as const).map((group) => (
-                <div key={group} className="flex flex-col items-center gap-1 w-full">
-                  {navItems[group].map((item) => (
-                    <NavLink
-                      key={item.to}
-                      to={item.to}
-                      end={item.to === "/"}
-                      title={item.label}
-                      className={({ isActive }) =>
-                        cn(
-                          "p-2 rounded-md transition-colors duration-200",
-                          isActive
-                            ? "text-[var(--brand-500)]"
-                            : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
-                        )
-                      }
-                    >
-                      <item.icon className="w-[18px] h-[18px]" strokeWidth={1.5} />
-                    </NavLink>
-                  ))}
-                  {group === "browse" && (
-                    <div className="w-5 my-1 border-t border-[var(--border-subtle)]" />
-                  )}
-                </div>
+              {navItems.browse.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === "/"}
+                  title={item.label}
+                  className={({ isActive }) =>
+                    cn(
+                      "p-2 rounded-md transition-colors duration-200",
+                      isActive
+                        ? "text-[var(--brand-500)]"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                    )
+                  }
+                >
+                  <item.icon className="w-[18px] h-[18px]" strokeWidth={1.5} />
+                </NavLink>
               ))}
             </div>
           )}
