@@ -12,8 +12,8 @@ interface MetricCardProps {
 
 /**
  * Editorial KPI tile — accent dot + hairline label + display numeral.
- * Single source of truth for HomePage, StatsPage, and ImportPage so the
- * metric styling can't drift between pages.
+ * Single source of truth for the pages that show metrics so the
+ * styling can't drift.
  */
 export function MetricCard({ label, value, icon: Icon, color, isLoading = false }: MetricCardProps) {
   return (

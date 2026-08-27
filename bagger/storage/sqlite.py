@@ -1774,9 +1774,8 @@ class SqliteStorage:
         """Append one row to ``query_log`` (search-query analytics, v9).
 
         Written by the search API on every request so real query distribution
-        accumulates passively — the raw material for growing the golden eval
-        set (see ``scripts/eval_recall.py --dump-log``). Fire-and-forget:
-        callers suppress exceptions so logging can never fail a search.
+        accumulates passively. Fire-and-forget: callers suppress exceptions
+        so logging can never fail a search.
         """
         with self._write():
             self._conn.execute(

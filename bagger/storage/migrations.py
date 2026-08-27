@@ -521,14 +521,12 @@ def _apply_migration_v8(conn: sqlite3.Connection) -> None:
 
 
 def _apply_migration_v9(conn: sqlite3.Connection) -> None:
-    """Create the ``query_log`` table — raw material for the golden eval set.
+    """Create the ``query_log`` table — a record of memory search queries.
 
     Every ``/api/memories/search`` request appends one row (query, mode,
-    result count, timestamp). This is the "collect real queries" half of the
-    weak-labeling loop: ``scripts/eval_recall.py --dump-log`` distills it into
-    the queries worth judging by hand, which then grow
-    ``tests/fixtures/recall_golden.jsonl``. Append-only, never read on the
-    hot path, safe to truncate at any time.
+    result count, timestamp). Append-only, never read on the hot path, safe
+    to truncate at any time. (The eval tooling that consumed it was removed
+    with the recall subsystem; the table itself stays for future use.)
     """
     conn.execute(
         """

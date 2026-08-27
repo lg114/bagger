@@ -7,7 +7,7 @@ interface ErrorBlockProps {
 }
 
 /**
- * Centered inline error state. Shared by HomePage and StatsPage.
+ * Centered inline error state. Used by the main pages.
  * The warning icon uses an explicit opacity utility (not `text-warning/60`)
  * because `/<alpha>` modifiers don't apply to an oklch CSS variable.
  */
