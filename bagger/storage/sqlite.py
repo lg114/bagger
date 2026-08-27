@@ -233,6 +233,72 @@ def _tokenize_for_fts(text: str) -> str:
     return " ".join(tokens)
 
 
+def _make_snippet(text: str, tokens: list[str], window: int = 64) -> str:
+    """Build a highlighted snippet from the ORIGINAL event text.
+
+    The FTS table stores pre-tokenized text (jieba word tokens plus a
+    per-character CJK pass), so SQLite's ``snippet()`` would leak those helper
+    tokens into search results. Highlighting therefore runs here against the
+    raw ``events.content_text``, using the same token set the MATCH query used.
+
+    Returns a ``...``-padded window around the first hit with every hit wrapped
+    in ``<mark>`` (the UI renders those tags as clay highlights). Falls back to
+    the leading text when nothing matches — safe for the LIKE path.
+    """
+    if not text:
+        return ""
+    # Longest-first so a multi-char token wins over the single-char CJK pass
+    # when both match (e.g. "你好" before "你").
+    terms = sorted({t.strip() for t in tokens if t and t.strip()}, key=len, reverse=True)
+    if not terms:
+        return text[: window * 2]
+
+    lower = text.lower()
+    hits: list[tuple[int, int]] = []
+    for term in terms:
+        needle = term.lower()
+        start = 0
+        while True:
+            idx = lower.find(needle, start)
+            if idx < 0:
+                break
+            hits.append((idx, idx + len(term)))
+            start = idx + len(term)
+
+    if not hits:
+        return text[: window * 2]
+
+    # Merge overlapping/adjacent hits so terms like "你" inside "你好" never
+    # produce nested <mark> tags.
+    merged: list[tuple[int, int]] = []
+    for s, e in sorted(hits):
+        if merged and s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+
+    # Center the window on the first hit (the longest matching term).
+    first_start, first_end = merged[0]
+    begin = max(0, first_start - window // 2)
+    end = min(len(text), first_end + window // 2)
+    prefix = "..." if begin > 0 else ""
+    suffix = "..." if end < len(text) else ""
+
+    chunk = text[begin:end]
+    # Insert marks from the end so earlier offsets stay valid.
+    for s, e in sorted(merged, reverse=True):
+        if e <= begin or s >= end:
+            continue
+        chunk = (
+            chunk[: s - begin]
+            + "<mark>"
+            + chunk[s - begin : e - begin]
+            + "</mark>"
+            + chunk[e - begin :]
+        )
+    return prefix + chunk + suffix
+
+
 def _row_to_dict(row: sqlite3.Row) -> dict:
     """Convert a sqlite3.Row to a plain dict using column names."""
     return dict(row)
@@ -859,9 +925,13 @@ class SqliteSearchIndex:
         # content_text matches (the only indexed, searchable column). The prior
         # bm25(events_fts, 0.0, 10.0, 5.0) set the content_text (column 0) weight
         # to 0.0, so results were effectively ordered by rowid — i.e. no relevance.
+        #
+        # The snippet is NOT computed with SQLite's snippet(events_fts, ...):
+        # the FTS table stores pre-tokenized text (jieba tokens + a per-char CJK
+        # pass), so that would leak helper tokens into results. It is built in
+        # Python against the raw events.content_text (see _make_snippet).
         sql = (
             f"SELECT {EVENT_COLS}, "
-            f"snippet(events_fts, 0, '<mark>', '</mark>', '...', 32) as snippet, "
             f"bm25(events_fts) as rank "
             f"FROM events_fts fts "
             f"JOIN events e ON e.source = fts.source AND e.event_id = fts.event_id "
@@ -879,8 +949,13 @@ class SqliteSearchIndex:
         params.extend([limit, offset])
 
         rows = self._conn.execute(sql, params).fetchall()
+        data = []
+        for r in rows:
+            d = _row_to_dict(r)
+            d["snippet"] = _make_snippet(r["content_text"] or "", query.split())
+            data.append(d)
         return {
-            "data": [_row_to_dict(r) for r in rows],
+            "data": data,
             "meta": _pagination_meta(page, limit, total),
         }
 

@@ -15,7 +15,7 @@ from bagger.models.event import (
     Session,
 )
 from bagger.storage.migrations import apply_migrations
-from bagger.storage.sqlite import SqliteStorage
+from bagger.storage.sqlite import SqliteStorage, _make_snippet
 
 
 def _make_event(
@@ -205,6 +205,62 @@ def test_fts_search_returns_snippets():
         assert r["rank"] is not None
 
         storage.close()
+
+
+def test_snippet_uses_raw_text_not_tokenized_fts():
+    """Snippets must come from the original event text, not the FTS index.
+
+    The FTS table stores jieba tokens plus a per-character CJK pass (e.g. the
+    original "你好，你能做什么？" is indexed as "你好 ， 你 能 做 什么 ？
+    你 好 你 能 做 什 么"), so SQLite's snippet() leaks helper tokens into
+    results. Our snippet generator runs against events.content_text instead —
+    assert it stays a verbatim slice of the original with <mark> highlights.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        storage = SqliteStorage(db_path)
+        storage.connect()
+
+        event = _make_event(
+            event_id="e-cn-snippet",
+            text="你好，你能做什么？修复登录 token 过期问题",
+        )
+        storage.insert_event(event)
+
+        # CJK: snippet is the raw text, highlighted, with no jieba/char tokens.
+        results = storage.search("你")
+        assert len(results) >= 1
+        snippet = results[0]["snippet"]
+        assert snippet == "<mark>你</mark>好，<mark>你</mark>能做什么？修复登录 token 过期问题"
+        # Helper-token artifacts from the FTS table must never surface.
+        assert "做 什 么" not in snippet  # jieba tokens
+        assert " 登 录 " not in snippet  # per-char CJK pass
+
+        # Multi-word CJK: tokens highlighted against the raw text. Adjacent
+        # hits ("修复"+"登录" in "修复登录") may merge into one <mark>.
+        results = storage.search("登录 修复")
+        assert len(results) >= 1
+        snippet = results[0]["snippet"]
+        assert "登录" in snippet and "修复" in snippet
+        assert "<mark>" in snippet
+        assert "修 复" not in snippet  # jieba tokenization must not leak
+
+        storage.close()
+
+
+def test_make_snippet_windows_and_case():
+    """_make_snippet: ASCII matching is case-insensitive, long terms win, and
+    long texts get a padded window around the first hit."""
+    text = ("x " * 50) + ("Fix the authentication token refresh bug. " * 3)
+    out = _make_snippet(text, ["authentication"])
+    assert "<mark>authentication</mark>" in out
+    assert out.startswith("...") and out.endswith("...")
+
+    out2 = _make_snippet("Hello World", ["world"])
+    assert "<mark>World</mark>" in out2  # case-insensitive match, raw casing kept
+
+    out3 = _make_snippet("你好世界", ["你", "你好"])
+    assert out3 == "<mark>你好</mark>世界"  # overlapping terms merge, no nesting
 
 
 def test_fts_search_falls_back_to_like():

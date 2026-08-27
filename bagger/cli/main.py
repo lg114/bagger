@@ -6,6 +6,7 @@ replay/export a session.
 
 import ipaddress
 import logging
+import re
 import sqlite3
 from functools import wraps
 from pathlib import Path
@@ -149,6 +150,9 @@ def search(storage, query, session, limit):
         summary = r.get("session_summary", "(no summary)")
         ts = r["timestamp"][:19].replace("T", " ")
         snippet = r.get("snippet", r["content_text"][:200])
+        # The backend highlights with <mark> for the web UI; strip the tags
+        # so the terminal shows clean text.
+        snippet = re.sub(r"</?mark>", "", snippet)
 
         click.echo(
             click.style(f"  [{i}] ", fg="cyan")
