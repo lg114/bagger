@@ -124,6 +124,8 @@ def scan(storage, full, source):
                 fg="yellow",
             )
         )
+    if stats["sessions"] == 0 and stats["skipped"] == 0:
+        click.echo(click.style("  No transcripts found — nothing to import.", fg="yellow"))
 
 
 # ── search ──────────────────────────────────────────────────
@@ -137,10 +139,15 @@ def scan(storage, full, source):
 @with_storage
 def search(storage, query, session, limit):
     """Search conversation history with full-text search."""
+    if storage.get_stats()["total_sessions"] == 0:
+        click.echo(click.style("  Database is empty — run 'bagger scan' first.", fg="yellow"))
+        return
+
     results = storage.search(query, session_id=session, limit=limit)
 
     if not results:
         click.echo(f"  No results for: {query}")
+        click.echo(click.style("  Hint: try a more specific keyword (2+ characters).", dim=True))
         return
 
     click.echo(click.style(f"\n  Found {len(results)} result(s):\n", bold=True))

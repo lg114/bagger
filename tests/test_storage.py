@@ -262,6 +262,23 @@ def test_make_snippet_windows_and_case():
     out3 = _make_snippet("你好世界", ["你", "你好"])
     assert out3 == "<mark>你好</mark>世界"  # overlapping terms merge, no nesting
 
+    # Display-only cleanups: HTML entities decoded, system XML blocks collapsed.
+    out4 = _make_snippet("你说的这些 &#x20; 都做完了吗", ["做完了"])
+    assert "&#x20;" not in out4
+    assert "都<mark>做完了</mark>吗" in out4  # entity decoded, highlight intact
+
+    env_text = (
+        "<environment_context>\n  <current_date>2026-07-22</current_date>\n"
+        "</environment_context>\n请检查 README"
+    )
+    out5 = _make_snippet(env_text, ["检查"])
+    assert "environment_context" not in out5
+    assert "[环境上下文]" in out5
+    assert "<mark>检查</mark>" in out5  # highlighting still works after collapse
+
+    lone_open = "<ide_opened_file>This may o..."
+    assert _make_snippet(lone_open, ["zzz"]) == lone_open  # unclosed tag untouched
+
 
 def test_fts_search_falls_back_to_like():
     """search() auto-detects FTS and uses it; falls back to LIKE otherwise."""

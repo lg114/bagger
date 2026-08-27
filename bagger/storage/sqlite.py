@@ -22,8 +22,10 @@ etc.) are shared across repos and remain stateless.
 """
 
 import contextlib
+import html
 import json
 import logging
+import re
 import sqlite3
 import threading
 from collections.abc import Generator
@@ -233,6 +235,26 @@ def _tokenize_for_fts(text: str) -> str:
     return " ".join(tokens)
 
 
+# Claude/Codex transcripts embed system-injected XML blocks at the start of
+# user messages (<environment_context>, <recommended_plugins>, <ide_opened_file>).
+# They are part of the stored transcript (kept for replay/export fidelity) but
+# are pure noise in a search snippet — collapse them to a short placeholder so
+# the first screen shows real conversation. Pairs are matched greedily; a lone
+# opening tag (unclosed in the source data) is left untouched.
+_CONTEXT_TAG_PATTERNS = [
+    (re.compile(r"<environment_context>.*?</environment_context>", re.S), "[环境上下文]"),
+    (re.compile(r"<recommended_plugins>.*?</recommended_plugins>", re.S), "[推荐插件]"),
+    (re.compile(r"<ide_opened_file>.*?</ide_opened_file>", re.S), "[已打开文件]"),
+]
+
+
+def _collapse_context_tags(text: str) -> str:
+    """Replace known system-injected XML blocks with a short placeholder."""
+    for pattern, replacement in _CONTEXT_TAG_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def _make_snippet(text: str, tokens: list[str], window: int = 64) -> str:
     """Build a highlighted snippet from the ORIGINAL event text.
 
@@ -244,9 +266,15 @@ def _make_snippet(text: str, tokens: list[str], window: int = 64) -> str:
     Returns a ``...``-padded window around the first hit with every hit wrapped
     in ``<mark>`` (the UI renders those tags as clay highlights). Falls back to
     the leading text when nothing matches — safe for the LIKE path.
+
+    Two display-only cleanups run first, leaving the stored transcript and FTS
+    index untouched: HTML entities from tool output (``&#x20;`` etc.) are
+    decoded, and system-injected XML blocks (<environment_context> ...) are
+    collapsed to a short placeholder.
     """
     if not text:
         return ""
+    text = _collapse_context_tags(html.unescape(text))
     # Longest-first so a multi-char token wins over the single-char CJK pass
     # when both match (e.g. "你好" before "你").
     terms = sorted({t.strip() for t in tokens if t and t.strip()}, key=len, reverse=True)

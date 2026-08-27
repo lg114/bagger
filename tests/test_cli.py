@@ -190,6 +190,32 @@ def test_search_no_results(tmp_path: Path):
     assert "No results" in result.stdout
 
 
+def test_search_empty_db_hints_scan(tmp_path: Path):
+    """``bagger search`` on an initialized-but-empty DB should tell the user
+    to scan first, not confuse them with a generic 'no results'."""
+    _setup_env(tmp_path)
+    runner = _make_runner()
+
+    runner.invoke(cli, ["init"])  # no scan yet
+    result = runner.invoke(cli, ["search", "token"])
+    assert result.exit_code == 0
+    assert "Database is empty" in result.stdout
+    assert "bagger scan" in result.stdout
+
+
+def test_scan_no_transcripts_hints_nothing_found(tmp_path: Path):
+    """``bagger scan`` with no discoverable transcripts should say so
+    explicitly instead of silently reporting zero imports."""
+    _setup_env(tmp_path)
+    (tmp_path / ".claude" / "projects" / "abc-123-session.jsonl").unlink()
+    runner = _make_runner()
+
+    runner.invoke(cli, ["init"])
+    result = runner.invoke(cli, ["scan"])
+    assert result.exit_code == 0
+    assert "No transcripts found" in result.stdout
+
+
 # ── replay ─────────────────────────────────────────────────
 
 

@@ -101,7 +101,12 @@ def scan_all(
     # on exit). The incremental watcher does NOT use this and commits per file.
     with storage.bulk_write(commit_every=commit_every):
         for parser in parsers:
-            files = parser.discover_sessions()
+            try:
+                files = parser.discover_sessions()
+            except Exception as exc:  # noqa: BLE001 - surface per-source, keep scanning
+                stats["errors"] += 1
+                logger.error("Discovery failed for source '%s': %s", parser.source_name, exc)
+                continue
             warn = check_jieba_cjk_incoming(parser, files)
             if warn:
                 logger.warning("⚠️  %s", warn)

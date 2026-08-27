@@ -20,6 +20,13 @@ from bagger.storage.sqlite import (
 )
 
 
+def test_jieba_logger_is_silenced():
+    """The package __init__ must quiet jieba's DEBUG logging (it hard-wires
+    its own logger to DEBUG and prints "Building prefix dict ..." twice on
+    first dictionary load). Guard against regressions in that silence."""
+    assert logging.getLogger("jieba").level == logging.WARNING
+
+
 def _cjk_event() -> MemoryEvent:
     return MemoryEvent(
         event_id="e1",
