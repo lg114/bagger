@@ -67,37 +67,6 @@ class Settings(BaseModel):
     max_request_bytes: int = Field(default=1_000_000, gt=0)
     """Maximum advertised HTTP request body size accepted by the API."""
 
-    remote_redact_secrets: bool = True
-    """Redact common credential-shaped strings before remote LLM/embedding calls."""
-
-    # ── Consolidation / LLM (phase-1 structured memory extraction) ──
-    # One OpenAI-compatible client covers every domestic provider (智谱 GLM,
-    # DeepSeek, 阿里百炼, 硅基流动, 火山, Kimi) plus OpenAI itself. Defaults
-    # point at 智谱 GLM-4-Flash, which is permanently free for personal use.
-    llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
-    """OpenAI-compatible base URL for the consolidation LLM."""
-    llm_model: str = "glm-4-flash"
-    """Model name for consolidation extraction."""
-    llm_api_key: str | None = None
-    """API key; if None, falls back to the BAGGER_LLM_API_KEY env var."""
-
-    # ── Embedding (semantic / vector retrieval) ──
-    # One OpenAI-compatible /embeddings endpoint covers 智谱 embedding-3, OpenAI
-    # text-embedding-3, DeepSeek, 硅基流动, etc. Defaults point at 智谱, which
-    # already holds the consolidation LLM key — so no extra secret to provision.
-    # ``provider`` selects the backend: ``remote`` (network API) or ``fake``
-    # (deterministic hash vectors, zero-dependency, for tests/offline smoke).
-    embedding_provider: str = "remote"
-    """Backend for embedding vectors: ``remote`` or ``fake``."""
-    embedding_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
-    """OpenAI-compatible base URL for the embedding endpoint."""
-    embedding_api_key: str | None = None
-    """Embedding API key; resolves via ``BAGGER_EMBEDDING_API_KEY`` / ``llm_api_key``."""
-    embedding_model: str = "embedding-3"
-    """Model name sent to the embedding endpoint (remote) or label for fake."""
-    embedding_batch_size: int = 32
-    """Max texts per embedding request (remote API batches)."""
-
     # ── Derived paths (properties so they always reflect bagger_dir) ──
 
     @property
@@ -134,8 +103,6 @@ def _load_settings() -> Settings:
     # they take precedence over values persisted in config.toml.
     if api_token := os.environ.get("BAGGER_API_TOKEN"):
         data["api_token"] = api_token
-    if redact := os.environ.get("BAGGER_REMOTE_REDACT_SECRETS"):
-        data["remote_redact_secrets"] = redact.strip().lower() not in {"0", "false", "no"}
     return Settings(**data)
 
 

@@ -10,6 +10,9 @@ each operating on a shared ``sqlite3.Connection``::
         ├── SqliteEventRepository    (EventRepository Protocol)
         └── SqliteSearchIndex        (SearchIndex Protocol)
 
+Vector / semantic retrieval (the ``embeddings`` table and its ``VectorIndex``
+subsystem) was removed along with the consolidation and embedding backends.
+
 All three repos are thin wrappers around ``conn.execute()`` — they do not
 own the connection lifecycle. ``SqliteStorage.connect()`` creates the
 connection *and* the repos; ``.close()`` tears them all down.
@@ -18,12 +21,9 @@ Module-level helpers (``_row_to_dict``, ``_extract_text``, ``contains_cjk``,
 etc.) are shared across repos and remain stateless.
 """
 
-import array
 import contextlib
-import hashlib
 import json
 import logging
-import math
 import sqlite3
 import threading
 from collections.abc import Generator
@@ -37,7 +37,6 @@ from bagger.cjk import (
     jieba_available,
 )
 from bagger.models.event import BlockType, MemoryEvent, Session
-from bagger.storage.base import VectorItem
 from bagger.storage.migrations import _column_exists, apply_migrations
 from bagger.storage.query_expansion import conflict_words_for, expand_terms
 
@@ -176,18 +175,6 @@ CREATE TABLE IF NOT EXISTS memory_provenance (
 
 CREATE INDEX IF NOT EXISTS idx_memory_provenance_session
     ON memory_provenance(source, session_id);
-
--- Incremental processing cursor: which (source, session) has been consolidated
--- up to which event id. Mirrors the WatchState (session_id -> byte_offset) idea
--- but at the event granularity, so a re-run only processes new events.
-CREATE TABLE IF NOT EXISTS consolidation_state (
-    source TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    last_event_id INTEGER NOT NULL DEFAULT 0,  -- MAX(events.id) already processed
-    last_run_at TEXT NOT NULL,
-    record_count INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (source, session_id)
-);
 """
 
 FTS_SCHEMA = """
@@ -1228,131 +1215,6 @@ class SqliteSearchIndex:
         return len(rows)
 
 
-class SqliteVectorIndex:
-    """Pure-Python cosine vector store backed by the ``embeddings`` table.
-
-    Vectors are stored as float32 BLOBs (``array('f')``), normalized at write
-    time so a dot product with a normalized query equals cosine similarity.
-    No numpy dependency — at memory-record scale (hundreds–low-thousands) the
-    overhead is sub-millisecond.
-    """
-
-    OWNER_TABLES = {"memory": "memory_records"}
-
-    def __init__(self, conn: sqlite3.Connection):
-        self._conn = conn
-
-    # -- helpers --------------------------------------------------
-
-    @staticmethod
-    def _normalize(vec: list[float]) -> list[float]:
-        norm = math.sqrt(sum(x * x for x in vec)) or 1.0
-        return [x / norm for x in vec]
-
-    @staticmethod
-    def _pack(vec: list[float]) -> bytes:
-        return array.array("f", vec).tobytes()
-
-    @staticmethod
-    def _unpack(blob: bytes) -> list[float]:
-        a = array.array("f")
-        a.frombytes(blob)
-        return list(a)
-
-    @staticmethod
-    def _content_hash(text: str) -> str:
-        return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
-
-    # -- VectorIndex Protocol --------------------------------------
-
-    def upsert_vectors(self, items: list[VectorItem]) -> int:
-        now = datetime.now(UTC).isoformat()
-        count = 0
-        for it in items:
-            blob = self._pack(self._normalize(it.vector))
-            self._conn.execute(
-                "INSERT INTO embeddings "
-                "(owner_type, owner_id, model, dim, vector, content_hash, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(owner_type, owner_id, model) DO UPDATE SET "
-                "dim=excluded.dim, vector=excluded.vector, "
-                "content_hash=excluded.content_hash, created_at=excluded.created_at",
-                (
-                    it.owner_type,
-                    str(it.owner_id),
-                    it.model,
-                    it.dim,
-                    blob,
-                    it.content_hash,
-                    now,
-                ),
-            )
-            count += 1
-        self._conn.commit()
-        return count
-
-    def pending_for_embedding(self, owner_type: str, model: str) -> list[dict]:
-        if owner_type not in self.OWNER_TABLES:
-            raise ValueError(f"unknown owner_type: {owner_type!r}")
-        table = self.OWNER_TABLES[owner_type]
-        rows = self._conn.execute(
-            f"SELECT id, content, topics FROM {table} WHERE archived = 0"
-        ).fetchall()
-        have = {
-            r["owner_id"]: r["content_hash"]
-            for r in self._conn.execute(
-                "SELECT owner_id, content_hash FROM embeddings WHERE owner_type=? AND model=?",
-                (owner_type, model),
-            ).fetchall()
-        }
-        pending = []
-        for r in rows:
-            rid = str(r["id"])
-            if have.get(rid) != self._content_hash(r["content"]):
-                pending.append({"id": r["id"], "content": r["content"], "topics": r["topics"]})
-        return pending
-
-    def search_vectors(
-        self,
-        qv: list[float],
-        owner_type: str,
-        model: str,
-        limit: int = 20,
-        source: str | None = None,
-    ) -> list[dict]:
-        if owner_type not in self.OWNER_TABLES:
-            raise ValueError(f"unknown owner_type: {owner_type!r}")
-        q = self._normalize(qv)
-        sql = (
-            "SELECT e.owner_id, e.vector, e.dim FROM embeddings e "
-            "JOIN memory_records m ON m.id = CAST(e.owner_id AS INTEGER) "
-            "WHERE e.owner_type=? AND e.model=? AND m.archived = 0"
-        )
-        params: list = [owner_type, model]
-        if source:
-            sql += " AND m.source=?"
-            params.append(source)
-        rows = self._conn.execute(sql, params).fetchall()
-        scored = []
-        for r in rows:
-            v = self._unpack(r["vector"])
-            dot = sum(a * b for a, b in zip(q, v, strict=True))
-            scored.append((dot, r["owner_id"]))
-        scored.sort(reverse=True)
-        return [{"owner_id": oid, "score": s} for s, oid in scored[:limit]]
-
-    def vector_stats(self) -> dict:
-        rows = self._conn.execute(
-            "SELECT model, COUNT(*), MAX(dim) FROM embeddings GROUP BY model"
-        ).fetchall()
-        by_model = {r["model"]: r["COUNT(*)"] for r in rows}
-        return {
-            "total": sum(by_model.values()),
-            "by_model": by_model,
-            "dim": max((r["MAX(dim)"] for r in rows), default=0),
-        }
-
-
 # ===================================================================
 # Facade
 # ===================================================================
@@ -1373,7 +1235,6 @@ class SqliteStorage:
         self._sessions: SqliteSessionRepository | None = None
         self._events: SqliteEventRepository | None = None
         self._search: SqliteSearchIndex | None = None
-        self._vectors: SqliteVectorIndex | None = None
         # Serialize writes. The shared connection is opened with
         # ``check_same_thread=False`` and WAL mode keeps concurrent *reads* safe,
         # but SQLite still serializes *writes* at the file level — concurrent
@@ -1518,7 +1379,6 @@ class SqliteStorage:
         self._sessions = SqliteSessionRepository(self._conn, self._maybe_commit)
         self._events = SqliteEventRepository(self._conn, self._maybe_commit)
         self._search = SqliteSearchIndex(self._conn)
-        self._vectors = SqliteVectorIndex(self._conn)
 
         # Migrate: old FTS data was inserted raw (not tokenized) via the
         # legacy trigger.  Rebuild once on first connect, then skip.
@@ -1856,24 +1716,7 @@ class SqliteStorage:
         """Whether the FTS5 virtual table exists (consumed by health/doctor)."""
         return self._search._fts_enabled()  # type: ignore[union-attr]
 
-    # -- Vector / semantic delegation ----------------------------------
-
-    def search_memory_vectors(
-        self, qv: list[float], model: str, limit: int = 20, source: str | None = None
-    ) -> list[dict]:
-        return self._vectors.search_vectors(  # type: ignore[union-attr]
-            qv, "memory", model, limit=limit, source=source
-        )
-
-    def upsert_vectors(self, items: list[VectorItem]) -> int:
-        with self._write():
-            return self._vectors.upsert_vectors(items)  # type: ignore[union-attr]
-
-    def pending_for_embedding(self, owner_type: str, model: str) -> list[dict]:
-        return self._vectors.pending_for_embedding(owner_type, model)  # type: ignore[union-attr]
-
-    def vector_stats(self) -> dict:
-        return self._vectors.vector_stats()  # type: ignore[union-attr]
+    # -- Memory full-text delegation ----------------------------------
 
     def search_memory_fts(
         self, query: str, limit: int = 20, source: str | None = None

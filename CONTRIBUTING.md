@@ -9,7 +9,7 @@ how we write, review, and ship code. Read it once; follow it always.
 # Prerequisites: Python 3.12+, Node.js 22+, Rust (for Tauri builds)
 pip install -e ".[dev,web]"
 cd ui && npm install      # only if you touch the desktop app
-pytest tests/ -q          # 33 tests, should be green
+pytest tests/ -q          # full suite, should be green
 ```
 
 ## Code style
@@ -62,12 +62,12 @@ be rejected in review.
 ```
 bagger/
 ├── bagger/                # Python package
-│   ├── cli/               # Click commands (init, scan, watch, search, ...)
+│   ├── cli/               # Click commands (init, scan, search, ...)
 │   ├── api/               # FastAPI app + routes (health, sessions, search, stats, sync)
 │   ├── models/            # Pydantic data models (MemoryEvent, Session, WatchState)
 │   ├── parsers/           # Claude Code JSONL → MemoryEvent
 │   ├── storage/           # SQLite + FTS5 storage layer
-│   ├── services/          # Business logic (scanner, watcher, search, replay)
+│   ├── services/          # Business logic (scanner, search, replay)
 │   └── exporters/         # Export abstractions (base, jsonl)
 ├── tests/                 # pytest suite
 ├── scripts/               # Build helpers (PyInstaller sidecar bundling)

@@ -92,8 +92,9 @@ def test_migration_v8_adds_archived_column_to_legacy_db():
         apply_migrations(conn, backfill_event_edges=lambda: None)
 
         assert _column_exists(conn, "memory_records", "archived") is True
-        # v8 adds archived; v9 (query_log) rides along to the same latest version.
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
+        # v8 adds archived; v9 (query_log) and v10 (drop orphan vector/consolidation
+        # tables) ride along to the same latest version.
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
         # Legacy rows must not suddenly be treated as archived.
         conn.execute(
             "INSERT INTO memory_records(type, content, source, session_id, created_at) "
@@ -101,3 +102,79 @@ def test_migration_v8_adds_archived_column_to_legacy_db():
         )
         assert conn.execute("SELECT archived FROM memory_records").fetchone()[0] == 0
         conn.close()
+
+
+def test_migration_v10_drops_orphan_vector_and_consolidation_tables():
+    """A pre-v10 database carrying the orphaned ``consolidation_state`` and
+    ``embeddings`` tables (producers deleted with the consolidation/vector
+    subsystems) must have both dropped on upgrade, while the hidden-but-kept
+    memories tables survive untouched. Fresh DBs never create them."""
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        db = Path(tmpdir) / "legacy.db"
+        conn = sqlite3.connect(db)
+        conn.row_factory = sqlite3.Row
+        # A faithful pre-v8 memory_records shape (see test above) plus the two
+        # orphan tables v10 exists to remove.
+        conn.execute(
+            "CREATE TABLE memory_records ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "type TEXT NOT NULL, content TEXT NOT NULL,"
+            "topics TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL DEFAULT 0.5,"
+            "source TEXT NOT NULL DEFAULT 'claude', session_id TEXT NOT NULL, event_id TEXT,"
+            "created_at TEXT NOT NULL, content_hash TEXT NOT NULL DEFAULT '',"
+            "merge_count INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL DEFAULT '',"
+            "relevance REAL NOT NULL DEFAULT 1.0)"
+        )
+        conn.execute(
+            "CREATE TABLE consolidation_state ("
+            "id INTEGER PRIMARY KEY CHECK (id = 1), last_event_id TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE embeddings ("
+            "record_id INTEGER NOT NULL, model TEXT NOT NULL, dim INTEGER NOT NULL,"
+            "vector BLOB NOT NULL)"
+        )
+        conn.execute("CREATE INDEX idx_embeddings_model ON embeddings(model)")
+        # A faithful v7 DB already has memory_fts (created by v5).
+        conn.execute(
+            "CREATE VIRTUAL TABLE memory_fts USING fts5("
+            "content, topics, record_id UNINDEXED, source UNINDEXED, tokenize='unicode61')"
+        )
+        conn.execute("PRAGMA user_version = 7")
+        conn.commit()
+
+        apply_migrations(conn, backfill_event_edges=lambda: None)
+
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
+        # Both orphan tables (and the vector index) are gone.
+        remaining = {
+            r["name"]
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')")
+        }
+        assert "consolidation_state" not in remaining
+        assert "embeddings" not in remaining
+        assert "idx_embeddings_model" not in remaining
+        # The memories feature is hidden, not removed — its tables stay.
+        assert "memory_records" in remaining
+        assert "memory_fts" in remaining
+        # Re-running migrations on the upgraded DB is a no-op (idempotent).
+        apply_migrations(conn, backfill_event_edges=lambda: None)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
+        conn.close()
+
+
+def test_migration_v10_fresh_db_never_creates_orphan_tables():
+    """Fresh databases must not carry the orphan tables at all — v10's
+    ``DROP TABLE IF EXISTS`` guards are no-ops there."""
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        storage = SqliteStorage(Path(tmpdir) / "fresh.db")
+        storage.connect()
+        tables = {
+            r["name"]
+            for r in storage.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert "consolidation_state" not in tables
+        assert "embeddings" not in tables
+        assert "memory_records" in tables
+        storage.close()

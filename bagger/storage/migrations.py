@@ -85,6 +85,10 @@ def apply_migrations(conn: sqlite3.Connection, backfill_event_edges) -> None:
         _apply_migration_v9(conn)
         conn.execute("PRAGMA user_version = 9")
         conn.commit()
+    if version < 10:
+        _apply_migration_v10(conn)
+        conn.execute("PRAGMA user_version = 10")
+        conn.commit()
 
 
 def _apply_migration_v2(conn: sqlite3.Connection) -> None:
@@ -323,31 +327,13 @@ def _apply_migration_v4(conn: sqlite3.Connection) -> None:
 
 
 def _apply_migration_v5(conn: sqlite3.Connection) -> None:
-    """Introduce vector embeddings + memory full-text index (semantic search).
+    """Introduce the ``memory_records`` full-text index (BM25 search).
 
-    ``embeddings`` stores float32 vectors as BLOBs keyed by
-    (owner_type, owner_id, model) so swapping models leaves old vectors in
-    place (rollback / A/B friendly); dimensions are per-row because models differ.
-    ``memory_fts`` is the BM25 half of hybrid search over ``memory_records``.
-    It is populated from Python (jieba pre-tokenization) via
-    ``Storage.index_memory_record`` / ``EmbedService``, because SQLite triggers
-    cannot run the Python tokenizer.
+    ``memory_fts`` is the full-text index over ``memory_records``. It is
+    populated from Python (jieba pre-tokenization) via
+    ``Storage.index_memory_record`` because SQLite triggers cannot run the
+    Python tokenizer.
     """
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS embeddings (
-            owner_type   TEXT NOT NULL,
-            owner_id     TEXT NOT NULL,
-            model        TEXT NOT NULL,
-            dim          INTEGER NOT NULL,
-            vector       BLOB NOT NULL,
-            content_hash TEXT NOT NULL,
-            created_at   TEXT NOT NULL,
-            PRIMARY KEY (owner_type, owner_id, model)
-        )
-        """
-    )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(owner_type, model)")
     conn.execute(
         "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5("
         "content, topics, record_id UNINDEXED, source UNINDEXED, "
@@ -557,3 +543,21 @@ def _apply_migration_v9(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_query_log_created ON query_log(created_at)")
+    conn.commit()
+
+
+def _apply_migration_v10(conn: sqlite3.Connection) -> None:
+    """Drop the orphaned ``consolidation_state`` and ``embeddings`` tables.
+
+    Both were left behind by subsystems that are now gone: ``consolidation_state``
+    tracked the deleted consolidation pipeline's incremental cursor, and
+    ``embeddings`` was the vector store for the deleted semantic/hybrid search
+    (``embed.py`` / ``hybrid_search.py``). Neither has a producer or consumer
+    anymore, so they are dropped outright. ``memory_records`` / ``memory_fts`` /
+    ``memory_provenance`` are intentionally retained — the memories feature is
+    hidden, not removed.
+    """
+    conn.execute("DROP TABLE IF EXISTS consolidation_state")
+    conn.execute("DROP TABLE IF EXISTS embeddings")
+    conn.execute("DROP INDEX IF EXISTS idx_embeddings_model")
+    conn.commit()
