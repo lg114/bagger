@@ -1,8 +1,7 @@
 """bagger CLI — AI Coding Agent Data Collector.
 
 MVP surface: scan local AI conversation transcripts, search them, and
-replay/export a session. Advanced capabilities (embedding, consolidation,
-hybrid/semantic recall, live watcher) are intentionally out of scope.
+replay/export a session.
 """
 
 import ipaddress

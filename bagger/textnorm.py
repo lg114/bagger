@@ -1,14 +1,14 @@
 """Shared text-normalization primitives.
 
 A leaf module, in the same spirit as ``bagger.cjk``: pure functions with no
-project dependencies, so both the storage layer (schema migrations that backfill
-content hashes) and the consolidation layer (duplicate detection) can import
-them without creating a cycle or a reverse dependency.
+project dependencies, so the storage layer (schema migrations that backfill
+content hashes) can import them without creating a cycle or a reverse
+dependency.
 
 The layering rule in CONTRIBUTING.md is ``cli/api -> services -> parsers/storage
--> models``. ``storage`` must never import ``consolidation``; putting the hash
-function here is what makes migration v6 able to backfill fingerprints while
-keeping exactly one definition of "what counts as the same content".
+-> models``. Putting the hash function here is what makes migration v6 able to
+backfill fingerprints while keeping exactly one definition of "what counts as
+the same content".
 """
 
 from __future__ import annotations

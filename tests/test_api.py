@@ -702,5 +702,3 @@ def test_scan_endpoint_runs_in_background(monkeypatch):
             status2 = client.get("/api/scan/status").json()
             assert status2["done"] is True
             assert status2["result"]["skipped"] == 1
-
-

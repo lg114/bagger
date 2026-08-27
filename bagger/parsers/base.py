@@ -37,7 +37,7 @@ class Parser(ABC):
     """Abstract parser for AI coding tool transcripts.
 
     Each concrete parser handles one tool (Claude Code, Cursor, etc.).
-    Scanner and watcher depend on this interface, not on specific parsers.
+    Scanner and sync pipeline depend on this interface, not on specific parsers.
     """
 
     @property
@@ -51,11 +51,10 @@ class Parser(ABC):
         source cannot be watched incrementally (e.g. discovery spans many
         unrelated roots).
 
-        The watcher (``bagger.services.watcher``) uses this to install a
-        filesystem observer on the correct directory instead of re-scanning
-        every poll cycle. Concrete parsers that know their single base dir
+        Used by the sync pipeline (``bagger.services.sync``) to scope where
+        transcripts live. Concrete parsers that know their single base dir
         (Claude Code's ``~/.claude/projects``) override this; parsers whose
-        discovery is ad-hoc return ``None`` and the watcher falls back to a
+        discovery is ad-hoc return ``None`` and the scanner falls back to a
         periodic full re-scan.
 
         This is a concrete method (not abstract) so existing parsers keep
