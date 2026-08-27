@@ -39,7 +39,7 @@ from bagger.cjk import (
 from bagger.models.event import BlockType, MemoryEvent, Session
 from bagger.storage.base import VectorItem
 from bagger.storage.migrations import _column_exists, apply_migrations
-from bagger.storage.query_expansion import expand_terms
+from bagger.storage.query_expansion import conflict_words_for, expand_terms
 
 logger = logging.getLogger(__name__)
 
@@ -311,6 +311,24 @@ def _tokenize_for_fts(text: str) -> str:
 def _row_to_dict(row: sqlite3.Row) -> dict:
     """Convert a sqlite3.Row to a plain dict using column names."""
     return dict(row)
+
+
+def _demote_conflict(rows: list[dict], conflict_words: tuple[str, ...]) -> list[dict]:
+    """Move docs containing any conflict/antonym word to the end of the list.
+
+    Within the kept (clean) and demoted (dirty) partitions the original BM25
+    order is preserved, so only the antonym docs are reordered — everything
+    else keeps its score-based rank. Pure function over the row list.
+    """
+    clean: list[dict] = []
+    dirty: list[dict] = []
+    for r in rows:
+        text = f"{r.get('content') or ''} {r.get('topics') or ''}"
+        if any(w in text for w in conflict_words):
+            dirty.append(r)
+        else:
+            clean.append(r)
+    return clean + dirty
 
 
 def _pagination_meta(page: int, per_page: int, total: int) -> dict:
@@ -1117,18 +1135,34 @@ class SqliteSearchIndex:
 
         Queries containing a phrase from ``query_expansion`` additionally get
         that phrase's expansion tokens appended to the OR set (OR-expand,
-        decided 2026-08-26). Queries that trigger no expansion keep the exact
-        original token list — zero behavior change by construction.
+        decided 2026-08-26). When that expansion fires, any recalled doc whose
+        text contains a conflict/antonym word for the triggered phrase
+        (MEMORY_QUERY_CONFLICTS, decided 2026-08-27) is demoted to the end of
+        the result list — this stops antonym docs (e.g. "本地沙箱…联网检查受限"
+        for the query "不联网") from being pushed to rank 1 by the expansion
+        token alone, while preserving BM25 order for everything else.
+        When demotion is active the query over-fetches (LIMIT = limit*2) and
+        slices back to ``limit`` after reordering, so a demoted antonym tail
+        can never starve a clean relevant doc that the original LIMIT would
+        have cut off. Queries that trigger no expansion keep the exact original
+        token list and LIMIT — zero behavior change by construction.
         """
         if not self._memory_fts_enabled():
             return []
         tokenized = self._tokenized_memory_fts_query(query)
         extra = expand_terms(query)
+        conflict: tuple[str, ...] | None = None
         if extra:
+            conflict = conflict_words_for(query)
             tokens = tokenized.split()
             tokens.extend(t for t in extra if t not in tokens)
             tokenized = " ".join(tokens)
         safe = _escape_fts5_query(tokenized)
+        # Over-fetch when conflict demotion is active: demoting antonym docs to
+        # the tail must not starve clean docs the original LIMIT would have cut
+        # off (e.g. antonyms occupy ranks 1-3, the relevant clean doc is at rank
+        # 11). Non-expansion queries keep LIMIT=limit — zero behavior change.
+        sql_limit = limit * 2 if conflict else limit
         sql = (
             "SELECT m.id, m.type, m.content, m.topics, m.source, m.session_id, m.content_hash, "
             "snippet(memory_fts, 0, '<mark>', '</mark>', '...', 32) as snippet, "
@@ -1142,8 +1176,15 @@ class SqliteSearchIndex:
             sql += " AND fts.source = ?"
             params.append(source)
         sql += " ORDER BY rank LIMIT ?"
-        params.append(limit)
-        return [_row_to_dict(r) for r in self._conn.execute(sql, params).fetchall()]
+        params.append(sql_limit)
+        rows = [_row_to_dict(r) for r in self._conn.execute(sql, params).fetchall()]
+        # Conflict demotion: docs containing an antonym signal move to the end,
+        # preserving BM25 order otherwise. Only active after expansion has fired
+        # (``conflict`` set). The final slice enforces the requested ``limit``
+        # after demotion so over-fetched antonyms never pad the result.
+        if conflict:
+            rows = _demote_conflict(rows, conflict)[:limit]
+        return rows
 
     def index_memory_record(self, rec_id: int, content: str, topics: str, source: str) -> None:
         """Insert/update one memory record into memory_fts (jieba-pre-tokenized)."""

@@ -35,6 +35,16 @@ MEMORY_QUERY_SYNONYMS: dict[str, tuple[str, ...]] = {
     "不联网": ("本地",),
 }
 
+# Conflict / antonym lexicon (gc-signed 2026-08-27). For a phrase that
+# triggers expansion, these words signal the *opposite* of the query intent.
+# When present in a recalled doc they mark it as an antonym and it is demoted
+# (moved to the end of the result list) so it cannot be pushed to rank 1 by
+# the expansion token alone. Curated by hand against the real corpus; every
+# entry must be validated with scripts/exp_rerank.py before being added.
+MEMORY_QUERY_CONFLICTS: dict[str, tuple[str, ...]] = {
+    "不联网": ("联网检查", "受限", "沙箱"),
+}
+
 
 def expand_terms(
     query: str,
@@ -54,3 +64,19 @@ def expand_terms(
                 if token not in out:
                     out.append(token)
     return out
+
+
+def conflict_words_for(
+    query: str,
+    table: dict[str, tuple[str, ...]] | None = None,
+) -> tuple[str, ...] | None:
+    """Return conflict/antonym words for a phrase found verbatim in ``query``.
+
+    Returns ``None`` when no expansion phrase is present, so queries that
+    trigger no expansion are never touched. Pure function: no I/O.
+    """
+    source = MEMORY_QUERY_CONFLICTS if table is None else table
+    for phrase, words in source.items():
+        if phrase in query:
+            return words
+    return None

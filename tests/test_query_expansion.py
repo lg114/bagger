@@ -1,14 +1,22 @@
-"""Tests for memory-FTS query expansion (OR-expand-narrow, decided 2026-08-26).
+"""Tests for memory-FTS query expansion (OR-expand-narrow, decided 2026-08-26)
+and the conflict down-weight that fixes expansion-induced mis-ranking
+(decided 2026-08-27).
 
 Contracts under test:
 
 1. ``expand_terms`` fires on full-phrase matches only — token-level
    substrings (``联网`` inside ``不联网``) must NOT trigger expansion;
-2. queries with no matching phrase keep the exact original behavior
+2. ``conflict_words_for`` returns the antonym lexicon only for a triggered
+   phrase (``不联网``), else ``None`` — so non-expansion queries are never
+   demoted;
+3. queries with no matching phrase keep the exact original behavior
    (patching the expansion to return nothing must not change results);
-3. the two target lexical-gap queries recall docs that use the expansion
+4. the two target lexical-gap queries recall docs that use the expansion
    vocabulary but never the queried word itself (``瘦身`` → ``sidecar`` /
-   ``打包``, ``不联网`` → ``本地``).
+   ``打包``, ``不联网`` → ``本地``);
+5. the conflict lexicon demotes antonym docs (``本地沙箱…联网检查受限``) to
+   the end of the result list, so they cannot be pushed to rank 1 by the
+   expansion token alone, while the relevant local-first doc ranks first.
 """
 
 from __future__ import annotations
@@ -18,8 +26,13 @@ import pytest
 from bagger.embedding.fake import FakeEmbedder
 from bagger.services.embed import EmbedService
 from bagger.storage import query_expansion as qe
-from bagger.storage.query_expansion import MEMORY_QUERY_SYNONYMS, expand_terms
-from bagger.storage.sqlite import SqliteStorage, _tokenize_for_fts
+from bagger.storage.query_expansion import (
+    MEMORY_QUERY_CONFLICTS,
+    MEMORY_QUERY_SYNONYMS,
+    conflict_words_for,
+    expand_terms,
+)
+from bagger.storage.sqlite import SqliteStorage
 from bagger.textnorm import content_fingerprint
 
 pytest.importorskip("jieba")
@@ -77,6 +90,16 @@ def test_expand_terms_deduplicates_across_phrases():
 
 def test_default_table_is_the_decided_narrow_table():
     assert MEMORY_QUERY_SYNONYMS == {"瘦身": ("sidecar", "打包"), "不联网": ("本地",)}
+
+
+def test_conflict_words_for_triggers_on_phrase():
+    assert conflict_words_for("不联网也能用的个人工具") == ("联网检查", "受限", "沙箱")
+    assert conflict_words_for("桌面应用体积太大怎么瘦身") is None
+    assert conflict_words_for("怎么选存储向量的数据库") is None
+
+
+def test_default_conflict_table_is_signed():
+    assert MEMORY_QUERY_CONFLICTS == {"不联网": ("联网检查", "受限", "沙箱")}
 
 
 # --- integration: search_memory_fts ----------------------------------------
@@ -143,23 +166,18 @@ def test_unrelated_query_results_unchanged_without_expansion(storage, monkeypatc
     assert qe.expand_terms(query) == []
 
 
-def test_antonym_noise_documented_behavior(storage):
-    """Known trade-off, measured on the real corpus (2026-08-26): the antonym
-    doc (``本地沙箱…联网检查受限``) was already in the baseline top-10 for the
-    不联网 query (it matches the raw ``联网`` query token at rank 4); expansion
-    re-ranks it up (to rank 1) while pulling the true local-first doc from
-    rank 9 to rank 2. This test pins the defensible invariants:
-
-    1. the relevant local-first doc is recalled in the top-5 (the whole point
-       of the expansion — baseline had it at rank 9);
-    2. the antonym is NOT newly introduced by the expansion: it already
-       matches the raw query tokens without any expansion tokens.
+def test_conflict_downweight_demotes_antonym_below_relevant(storage):
+    """Conflict lexicon (不联网 -> 联网检查/受限/沙箱) must sink the antonym
+    doc below the genuinely relevant local-first doc, even when the antonym
+    would otherwise rank first on raw BM25 (it matches the raw ``联网`` token).
+    This is the fix for the expansion-induced mis-ranking reported 2026-08-27.
     """
     _seed(
         storage,
         [
-            ("fact", "所有数据存本地 SQLite 不需要任何网络服务", "本地", "claude", "s1"),
+            ("fact", "所有数据存本地优先 SQLite 不需要任何网络服务", "本地", "claude", "s1"),
             ("fact", "本地沙箱环境里联网检查受限的排查记录", "环境", "claude", "s2"),
+            ("fact", "黄鹤楼登高见闻", "travel", "claude", "s3"),
         ],
     )
     EmbedService(storage, FakeEmbedder(model="fake")).backfill(reindex_fts=True)
@@ -167,14 +185,87 @@ def test_antonym_noise_documented_behavior(storage):
     query = "不联网也能用的个人工具"
     hits = storage.search_memory_fts(query, limit=10)
     contents = [h["content"] for h in hits]
-    local_first = "所有数据存本地 SQLite 不需要任何网络服务"
+    local_first = "所有数据存本地优先 SQLite 不需要任何网络服务"
+    antonym = "本地沙箱环境里联网检查受限的排查记录"
 
-    # 1. relevant doc recalled in top-5.
-    assert local_first in contents[:5], "expansion must recall the local-first doc"
+    # Relevant doc must outrank the antonym (and sit at rank 1).
+    assert contents[0] == local_first, "relevant doc must outrank the antonym"
+    assert contents.index(local_first) < contents.index(antonym), (
+        "conflict lexicon must demote the antonym below the relevant doc"
+    )
+    # Antonym is sunk to the end of the list.
+    assert contents[-1] == antonym, "antonym must be sunk to the end of the list"
 
-    # 2. antonym matches the raw query token (联网) without expansion tokens.
-    raw_tokens = set(storage._search._tokenized_memory_fts_query(query).split())
-    antonym_tokens = set(_tokenize_for_fts("本地沙箱环境里联网检查受限的排查记录").split())
-    assert raw_tokens & antonym_tokens, (
-        "antonym doc must match raw query tokens (pre-existing noise, not new)"
+
+def test_conflict_downweight_only_fires_on_expansion(storage):
+    """A query containing conflict words (受限/沙箱) but NOT the expansion
+    phrase (不联网) must NOT be demoted — demotion is gated on expansion
+    triggering, so unrelated queries keep their exact BM25 order."""
+    _seed(
+        storage,
+        [
+            ("fact", "本地沙箱环境里联网检查受限的排查记录", "环境", "claude", "s1"),
+            ("fact", "黄鹤楼登高见闻", "travel", "claude", "s2"),
+        ],
+    )
+    EmbedService(storage, FakeEmbedder(model="fake")).backfill(reindex_fts=True)
+
+    query = "沙箱环境受限怎么排查"
+    hits = storage.search_memory_fts(query, limit=10)
+    contents = [h["content"] for h in hits]
+    # No 不联网 phrase -> no expansion -> no demotion; antonym stays by BM25.
+    assert contents[0] == "本地沙箱环境里联网检查受限的排查记录", (
+        "non-expansion query must not be demoted"
+    )
+
+
+def test_conflict_overfetch_rescues_clean_doc_beyond_limit(storage, monkeypatch):
+    """Regression for the over-fetch boundary (gc, 2026-08-27).
+
+    When antonym docs occupy the top of the raw BM25 order, the original LIMIT
+    would cut off a clean relevant doc sitting just past it — demoting the
+    antonyms to the tail can't help if the clean doc was never fetched. With
+    conflict demotion the query over-fetches (LIMIT = limit*2) so the demoted
+    antonym tail can't starve that clean doc.
+
+    This corpus is tuned so the clean doc ranks 4th by raw BM25 (matches only
+    the expansion token 本地 once, long doc) while 3 antonym docs rank above it
+    (they also match the raw 联网 token + conflict words). The antonym-only
+    LIMIT=3 path must NOT surface the clean doc; the over-fetch path must.
+    """
+    _seed(
+        storage,
+        [
+            ("fact", "本地沙箱联网检查受限", "环境", "claude", "sd0"),
+            ("fact", "本地沙箱联网检查受限排查", "环境", "claude", "sd1"),
+            ("fact", "本地沙箱里联网检查受限环境", "环境", "claude", "sd2"),
+            (
+                "fact",
+                "项目所有数据存本地 SQLite 数据库做持久化存储架构设计",
+                "本地",
+                "claude",
+                "sc",
+            ),
+        ],
+    )
+    EmbedService(storage, FakeEmbedder(model="fake")).backfill(reindex_fts=True)
+
+    query = "不联网也能用的个人工具"
+    clean = "项目所有数据存本地 SQLite 数据库做持久化存储架构设计"
+
+    # Simulate the pre-fix behavior: no conflict table => LIMIT=limit, no
+    # demotion. The clean doc (rank 4 by raw BM25) stays cut off at LIMIT=3.
+    import bagger.storage.sqlite as sqlite_mod
+
+    monkeypatch.setattr(sqlite_mod, "conflict_words_for", lambda q, table=None: None)
+    raw = storage.search_memory_fts(query, limit=3)
+    monkeypatch.undo()
+    assert clean not in [h["content"] for h in raw], (
+        "without over-fetch the clean doc beyond LIMIT must stay cut off"
+    )
+
+    # With conflict demotion (over-fetch active) the clean doc is rescued.
+    over = storage.search_memory_fts(query, limit=3)
+    assert clean in [h["content"] for h in over[:3]], (
+        "over-fetch must rescue the clean doc past the original LIMIT"
     )
