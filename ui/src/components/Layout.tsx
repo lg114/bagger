@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 import { type Window, getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Home,
@@ -106,7 +106,6 @@ function NavRow({ to, icon: Icon, label }: { to: string; icon: LucideIcon; label
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const navigate = useNavigate();
 
   return (
     <div className="flex flex-col h-screen">
@@ -165,13 +164,6 @@ export default function Layout() {
           ) : (
             /* Collapsed: icon spine */
             <div className="flex-1 min-h-0 overflow-y-auto py-2 space-y-1 flex flex-col items-center">
-              <button
-                onClick={() => navigate("/search")}
-                className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors duration-200"
-                title="Search"
-              >
-                <Search className="w-[18px] h-[18px]" strokeWidth={1.5} />
-              </button>
               {navItems.browse.map((item) => (
                 <NavLink
                   key={item.to}

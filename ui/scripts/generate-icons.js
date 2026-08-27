@@ -8,7 +8,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, "..");
 const srcSvg = fs.readFileSync(path.join(root, "src", "assets", "logo.svg"), "utf-8");
-// Replace currentColor with white for rasterization (background will be dark).
+// Use a solid dark background so the white mark remains visible on both
+// light and dark Windows taskbars. Transparent white icons disappear on the
+// default light taskbar and look like a missing application icon.
 const svgWhite = srcSvg.replace(/currentColor/g, "#ffffff");
 
 const outDir = path.join(root, "src-tauri", "icons");
@@ -18,7 +20,10 @@ fs.mkdirSync(publicDir, { recursive: true });
 
 async function renderPng(size, outPath) {
   await sharp(Buffer.from(svgWhite))
-    .resize(size, size, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .resize(size, size, {
+      fit: "contain",
+      background: { r: 20, g: 26, b: 38, alpha: 1 },
+    })
     .png({ compressionLevel: 9 })
     .toFile(outPath);
   console.log(`generated ${outPath}`);

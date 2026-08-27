@@ -3,12 +3,12 @@
 
 use std::fs::File;
 use std::io::Write;
+#[cfg(not(windows))]
+use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
-#[cfg(not(windows))]
-use std::net::TcpStream;
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -37,8 +37,8 @@ const BACKEND_PORT: u16 = 8723;
 
 #[derive(Clone)]
 enum BackendMode {
-    Sidecar,      // Bundled exe in resource dir
-    HostPython,   // Host Python + pip install (dev mode)
+    Sidecar,    // Bundled exe in resource dir
+    HostPython, // Host Python + pip install (dev mode)
 }
 
 /// Detect mode by checking if a real sidecar binary (>1MB) exists.
@@ -49,9 +49,16 @@ fn detect_backend_mode(app: &tauri::AppHandle) -> BackendMode {
         let name = format!("bagger-server-{}{}", TARGET_TRIPLE, EXE_EXT);
         let path = dir.join("binaries").join(&name);
         // Real PyInstaller bundles are 30-40MB; placeholders are tiny.
-        if path.exists() && path.metadata().map(|m| m.len() > 1_000_000).unwrap_or(false) {
-            println!("Detected sidecar binary ({} bytes) - production mode",
-                     path.metadata().map(|m| m.len()).unwrap_or(0));
+        if path.exists()
+            && path
+                .metadata()
+                .map(|m| m.len() > 1_000_000)
+                .unwrap_or(false)
+        {
+            println!(
+                "Detected sidecar binary ({} bytes) - production mode",
+                path.metadata().map(|m| m.len()).unwrap_or(0)
+            );
             return BackendMode::Sidecar;
         }
     }
@@ -85,10 +92,12 @@ fn open_backend_log() -> Option<File> {
 fn home_dir() -> PathBuf {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
-        .or_else(|_| std::env::var("HOMEDRIVE").map(|d| {
-            let path = std::env::var("HOMEPATH").unwrap_or_default();
-            format!("{}{}", d, path)
-        }))
+        .or_else(|_| {
+            std::env::var("HOMEDRIVE").map(|d| {
+                let path = std::env::var("HOMEPATH").unwrap_or_default();
+                format!("{}{}", d, path)
+            })
+        })
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."))
 }
@@ -101,7 +110,9 @@ fn spawn_backend(app: &tauri::AppHandle, mode: &BackendMode) -> Option<Child> {
     match mode {
         BackendMode::Sidecar => {
             // Resolve sidecar path from resource directory
-            let resource_dir = app.path().resource_dir()
+            let resource_dir = app
+                .path()
+                .resource_dir()
                 .expect("resource directory not available");
             let sidecar_name = format!("bagger-server-{}{}", TARGET_TRIPLE, EXE_EXT);
             let sidecar_path = resource_dir.join("binaries").join(&sidecar_name);
@@ -126,9 +137,7 @@ fn spawn_backend(app: &tauri::AppHandle, mode: &BackendMode) -> Option<Child> {
         BackendMode::HostPython => {
             // In dev mode, redirect stderr to ~/.bagger/backend.log
             // so startup errors are visible instead of silently swallowed.
-            let stderr_dest: Stdio = open_backend_log()
-                .map(Stdio::from)
-                .unwrap_or(Stdio::null());
+            let stderr_dest: Stdio = open_backend_log().map(Stdio::from).unwrap_or(Stdio::null());
 
             // --reload makes uvicorn spawn a child subprocess for hot-reloading.
             // On Windows, that child creates a visible console window even though
@@ -139,9 +148,14 @@ fn spawn_backend(app: &tauri::AppHandle, mode: &BackendMode) -> Option<Child> {
             #[cfg(not(windows))]
             let reload_args: &[&str] = &["--reload"];
 
-            // Strategy 1: bagger CLI
-            let mut cmd = Command::new("bagger");
-            cmd.args(["serve", "--port", &port, "--no-open"])
+            // Always invoke the Python module directly in development.
+            //
+            // Do not run the bare `bagger` command here: on Windows it can
+            // resolve to the packaged desktop executable instead of the
+            // Python CLI. That executable starts Tauri again, which starts
+            // another `bagger` process, causing an endless stream of windows.
+            let mut cmd = Command::new("python");
+            cmd.args(["-m", "bagger", "serve", "--port", &port, "--no-open"])
                 .args(reload_args)
                 .stdout(Stdio::null())
                 .stderr(stderr_dest);
@@ -149,18 +163,20 @@ fn spawn_backend(app: &tauri::AppHandle, mode: &BackendMode) -> Option<Child> {
 
             match cmd.spawn() {
                 Ok(c) => {
-                    println!("Bagger backend started via CLI (dev, PID: {})", c.id());
+                    println!(
+                        "Bagger backend started via python -m (dev, PID: {})",
+                        c.id()
+                    );
                     Some(c)
                 }
-                Err(_) => {
-                    // Strategy 2: python -m bagger (fallback for pip install -e)
-                    // Re-open log for second attempt
-                    let stderr_dest2: Stdio = open_backend_log()
-                        .map(Stdio::from)
-                        .unwrap_or(Stdio::null());
+                Err(e) => {
+                    // Try the Windows Python launcher if `python` is not on PATH.
+                    // Re-open the log for the second attempt.
+                    let stderr_dest2: Stdio =
+                        open_backend_log().map(Stdio::from).unwrap_or(Stdio::null());
 
-                    let mut cmd = Command::new("python");
-                    cmd.args(["-m", "bagger", "serve", "--port", &port, "--no-open"])
+                    let mut cmd = Command::new("py");
+                    cmd.args(["-3", "-m", "bagger", "serve", "--port", &port, "--no-open"])
                         .args(reload_args)
                         .stdout(Stdio::null())
                         .stderr(stderr_dest2);
@@ -168,15 +184,15 @@ fn spawn_backend(app: &tauri::AppHandle, mode: &BackendMode) -> Option<Child> {
 
                     match cmd.spawn() {
                         Ok(c) => {
-                            println!("Bagger backend started via python -m (dev, PID: {})", c.id());
+                            println!("Bagger backend started via py -3 -m (dev, PID: {})", c.id());
                             Some(c)
                         }
-                        Err(e) => {
+                        Err(py_launcher_error) => {
                             // Write the error to the log file too
                             if let Some(mut log) = open_backend_log() {
                                 let msg = format!(
-                                    "Development mode failed: {}\nInstall bagger: pip install -e \".[web]\"\n",
-                                    e
+                                    "Development mode failed: {} (python attempt: {})\nInstall bagger: pip install -e \".[web]\"\n",
+                                    py_launcher_error, e
                                 );
                                 log.write_all(msg.as_bytes()).ok();
                             }
@@ -206,7 +222,9 @@ fn monitor_backend_health(app: &tauri::AppHandle, mode: &BackendMode) {
     let url = format!("http://127.0.0.1:{}/api/health", BACKEND_PORT);
     let hint = match mode {
         BackendMode::Sidecar => "The bundled binary may be corrupted. Check ~/.bagger/backend.log.",
-        BackendMode::HostPython => "Make sure `pip install -e \".[web]\"` has been run. Check ~/.bagger/backend.log.",
+        BackendMode::HostPython => {
+            "Make sure `pip install -e \".[web]\"` has been run. Check ~/.bagger/backend.log."
+        }
     };
 
     // Initial health check: poll for up to 6 seconds
@@ -247,9 +265,15 @@ fn start_backend_watcher(app: &tauri::AppHandle, mode: &BackendMode) {
         loop {
             std::thread::sleep(Duration::from_secs(30));
             if ureq::get(&url).call().is_err() {
-                println!("Backend crashed! Attempting restart (attempt {})", restart_attempts + 1);
+                println!(
+                    "Backend crashed! Attempting restart (attempt {})",
+                    restart_attempts + 1
+                );
                 if let Some(mut log) = open_backend_log() {
-                    let msg = format!("Backend crash detected. Restart attempt {}.\n", restart_attempts + 1);
+                    let msg = format!(
+                        "Backend crash detected. Restart attempt {}.\n",
+                        restart_attempts + 1
+                    );
                     log.write_all(msg.as_bytes()).ok();
                 }
 
@@ -272,7 +296,10 @@ fn start_backend_watcher(app: &tauri::AppHandle, mode: &BackendMode) {
                 for _i in 0..30 {
                     std::thread::sleep(Duration::from_millis(200));
                     if ureq::get(&url).call().is_ok() {
-                        println!("Backend recovered after restart (attempt {})", restart_attempts + 1);
+                        println!(
+                            "Backend recovered after restart (attempt {})",
+                            restart_attempts + 1
+                        );
                         recovered = true;
                         break;
                     }
@@ -285,7 +312,8 @@ fn start_backend_watcher(app: &tauri::AppHandle, mode: &BackendMode) {
                     if restart_attempts >= 3 {
                         eprintln!("Backend failed to restart 3 times. Giving up.");
                         if let Some(mut log) = open_backend_log() {
-                            log.write_all(b"Backend restart failed 3 times. Giving up.\n").ok();
+                            log.write_all(b"Backend restart failed 3 times. Giving up.\n")
+                                .ok();
                         }
                         return; // Stop watching
                     }
