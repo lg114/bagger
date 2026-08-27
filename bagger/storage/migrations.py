@@ -11,9 +11,6 @@ crash rolls back the open transaction and a re-run starts clean.
 
 import contextlib
 import sqlite3
-from datetime import UTC, datetime
-
-from bagger.textnorm import content_fingerprint
 
 # Tables whose schema may be introspected by migrations. ``_column_exists``
 # interpolates ``table`` into a PRAGMA statement (PRAGMA does not accept bind
@@ -27,8 +24,6 @@ KNOWN_TABLES: frozenset[str] = frozenset(
         "tool_uses",
         "event_edges",
         "events_fts",
-        "memory_records",
-        "memory_provenance",
     }
 )
 
@@ -88,6 +83,10 @@ def apply_migrations(conn: sqlite3.Connection, backfill_event_edges) -> None:
     if version < 10:
         _apply_migration_v10(conn)
         conn.execute("PRAGMA user_version = 10")
+        conn.commit()
+    if version < 11:
+        _apply_migration_v11(conn)
+        conn.execute("PRAGMA user_version = 11")
         conn.commit()
 
 
@@ -327,152 +326,20 @@ def _apply_migration_v4(conn: sqlite3.Connection) -> None:
 
 
 def _apply_migration_v5(conn: sqlite3.Connection) -> None:
-    """Introduce the ``memory_records`` full-text index (BM25 search).
+    """No-op. (Historical: created ``memory_fts`` for the memory subsystem.)
 
-    ``memory_fts`` is the full-text index over ``memory_records``. It is
-    populated from Python (jieba pre-tokenization) via
-    ``Storage.index_memory_record`` because SQLite triggers cannot run the
-    Python tokenizer.
+    The memories feature was fully removed (2026-08-27): the schema tables are
+    dropped by migration v11 and fresh databases never create them. The
+    function remains as a version-chain placeholder so ``user_version``
+    progression stays contiguous for databases upgraded from before v5.
     """
-    conn.execute(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5("
-        "content, topics, record_id UNINDEXED, source UNINDEXED, "
-        "tokenize='unicode61')"
-    )
-    conn.commit()
 
 
 def _apply_migration_v6(conn: sqlite3.Connection) -> None:
-    """Make ``memory_records`` de-duplicable: fingerprints + provenance.
-
-    Before this migration, consolidation could only ever *append*: re-running
-    with ``--full`` duplicated every record, and the same fact confirmed in ten
-    sessions produced ten rows. The fix has three parts.
-
-    1. ``content_hash`` — a type-scoped fingerprint of the normalized content,
-       backed by a UNIQUE index. This turns "have I already stored this?" from
-       a full-table LIKE scan into an index probe, and makes the no-duplicates
-       invariant enforced by the database rather than hoped for in Python.
-    2. ``memory_provenance`` — the reason a UNIQUE constraint is safe. Collapsing
-       ten rows into one would destroy nine (source, session, event) trails;
-       this table keeps all of them, so a merged memory is still auditable back
-       to every transcript that confirmed it.
-    3. ``merge_count`` / ``updated_at`` — how many extractions back a record and
-       when it was last reinforced. ``merge_count`` doubles as a cheap
-       corroboration signal for ranking.
-
-    Legacy rows are backfilled, and any pre-existing exact duplicates are
-    collapsed here (keeping the lowest id, summing counts, unioning topics)
-    *before* the UNIQUE index is created — otherwise the index would fail to
-    build on a database that predates the invariant.
-
-    Runs inside a single transaction: a crash mid-migration rolls back and a
-    re-run starts clean.
-    """
-    add = "ALTER TABLE memory_records ADD COLUMN"
-    for column, ddl in (
-        ("content_hash", f"{add} content_hash TEXT NOT NULL DEFAULT ''"),
-        ("merge_count", f"{add} merge_count INTEGER NOT NULL DEFAULT 1"),
-        ("updated_at", f"{add} updated_at TEXT NOT NULL DEFAULT ''"),
-    ):
-        if not _column_exists(conn, "memory_records", column):
-            conn.execute(ddl)
-
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS memory_provenance (
-            record_id   INTEGER NOT NULL,
-            source      TEXT NOT NULL,
-            session_id  TEXT NOT NULL,
-            -- '' rather than NULL: NULLs are distinct in a composite primary
-            -- key, so a nullable column would let the same (record, session)
-            -- be inserted repeatedly.
-            event_id    TEXT NOT NULL DEFAULT '',
-            observed_at TEXT NOT NULL,
-            PRIMARY KEY (record_id, source, session_id, event_id),
-            FOREIGN KEY (record_id) REFERENCES memory_records(id) ON DELETE CASCADE
-        )
-        """
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_memory_provenance_session "
-        "ON memory_provenance(source, session_id)"
-    )
-
-    rows = conn.execute(
-        "SELECT id, type, content, topics, confidence, source, session_id, event_id, "
-        "created_at, merge_count, relevance, content_hash FROM memory_records ORDER BY id"
-    ).fetchall()
-
-    now = datetime.now(UTC).isoformat()
-    groups: dict[str, list[sqlite3.Row]] = {}
-    hash_updates: list[tuple[str, str, int]] = []
-    for row in rows:
-        digest = row["content_hash"] or content_fingerprint(row["type"], row["content"])
-        if digest != row["content_hash"]:
-            hash_updates.append((digest, row["created_at"] or now, row["id"]))
-        groups.setdefault(digest, []).append(row)
-
-    if hash_updates:
-        conn.executemany(
-            "UPDATE memory_records SET content_hash=?, updated_at=? WHERE id=?",
-            hash_updates,
-        )
-
-    provenance: list[tuple[int, str, str, str, str]] = []
-    obsolete: list[int] = []
-    for members in groups.values():
-        keeper = members[0]  # lowest id — rows were selected ORDER BY id
-        for member in members:
-            provenance.append(
-                (
-                    keeper["id"],
-                    member["source"],
-                    member["session_id"],
-                    member["event_id"] or "",
-                    member["created_at"] or now,
-                )
-            )
-        if len(members) == 1:
-            continue
-        topics: list[str] = []
-        seen: set[str] = set()
-        for member in members:
-            for topic in (member["topics"] or "").split(","):
-                marker = topic.strip().casefold()
-                if topic.strip() and marker not in seen:
-                    seen.add(marker)
-                    topics.append(topic.strip())
-        conn.execute(
-            "UPDATE memory_records SET topics=?, confidence=?, merge_count=?, "
-            "relevance=?, created_at=?, updated_at=? WHERE id=?",
-            (
-                ",".join(topics),
-                max(float(m["confidence"] or 0.0) for m in members),
-                sum(int(m["merge_count"] or 1) for m in members),
-                max(float(m["relevance"] or 1.0) for m in members),
-                min((m["created_at"] or now) for m in members),
-                now,
-                keeper["id"],
-            ),
-        )
-        obsolete.extend(m["id"] for m in members[1:])
-
-    if provenance:
-        conn.executemany(
-            "INSERT OR IGNORE INTO memory_provenance "
-            "(record_id, source, session_id, event_id, observed_at) VALUES (?, ?, ?, ?, ?)",
-            provenance,
-        )
-    if obsolete:
-        conn.executemany("DELETE FROM memory_records WHERE id=?", [(rid,) for rid in obsolete])
-
-    conn.execute("UPDATE memory_records SET updated_at=created_at WHERE updated_at=''")
-    # Created last: the collapse above guarantees the column is unique by now.
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_records_hash ON memory_records(content_hash)"
-    )
-    conn.commit()
+    """No-op. (Historical: made ``memory_records`` de-duplicable via
+    content_hash + provenance tables. The memories feature was fully
+    removed 2026-08-27; the schema is dropped by migration v11 and fresh
+    databases never create it. Remains as a version-chain placeholder.)"""
 
 
 def _apply_migration_v7(conn: sqlite3.Connection, backfill_event_edges) -> None:
@@ -507,41 +374,17 @@ def _apply_migration_v7(conn: sqlite3.Connection, backfill_event_edges) -> None:
 
 
 def _apply_migration_v8(conn: sqlite3.Connection) -> None:
-    """Add the ``archived`` soft-delete flag to ``memory_records`` (Phase 3).
-
-    The base SCHEMA in ``sqlite.py`` already declares the column for fresh
-    databases; this migration brings pre-existing databases up to the same
-    shape so every read path can rely on ``archived`` existing. Soft-delete is
-    the non-destructive half of "memory management": archived records drop out
-    of browse (``list_memories``) and retrieval (vector/FTS searches) by
-    default but stay in the table, fully restorable.
-    """
-    if not _column_exists(conn, "memory_records", "archived"):
-        conn.execute("ALTER TABLE memory_records ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+    """No-op. (Historical: added the ``archived`` soft-delete flag to
+    ``memory_records``. The memories feature was fully removed 2026-08-27;
+    the schema is dropped by migration v11 and fresh databases never
+    create it. Remains as a version-chain placeholder.)"""
 
 
 def _apply_migration_v9(conn: sqlite3.Connection) -> None:
-    """Create the ``query_log`` table — a record of memory search queries.
-
-    Every ``/api/memories/search`` request appends one row (query, mode,
-    result count, timestamp). Append-only, never read on the hot path, safe
-    to truncate at any time. (The eval tooling that consumed it was removed
-    with the recall subsystem; the table itself stays for future use.)
-    """
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS query_log (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            query        TEXT NOT NULL,
-            mode         TEXT NOT NULL,
-            source       TEXT,
-            result_count INTEGER,
-            created_at   TEXT NOT NULL
-        )
-        """
-    )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_query_log_created ON query_log(created_at)")
-    conn.commit()
+    """No-op. (Historical: created the ``query_log`` table for memory
+    search analytics. The memories feature was fully removed 2026-08-27;
+    the table is dropped by migration v11 and fresh databases never
+    create it. Remains as a version-chain placeholder.)"""
 
 
 def _apply_migration_v10(conn: sqlite3.Connection) -> None:
@@ -551,11 +394,29 @@ def _apply_migration_v10(conn: sqlite3.Connection) -> None:
     tracked the deleted consolidation pipeline's incremental cursor, and
     ``embeddings`` was the vector store for the deleted semantic/hybrid search
     (``embed.py`` / ``hybrid_search.py``). Neither has a producer or consumer
-    anymore, so they are dropped outright. ``memory_records`` / ``memory_fts`` /
-    ``memory_provenance`` are intentionally retained — the memories feature is
-    hidden, not removed.
+    anymore, so they are dropped outright. (The memories tables themselves were
+    later dropped by migration v11.)
     """
     conn.execute("DROP TABLE IF EXISTS consolidation_state")
     conn.execute("DROP TABLE IF EXISTS embeddings")
     conn.execute("DROP INDEX IF EXISTS idx_embeddings_model")
+    conn.commit()
+
+
+def _apply_migration_v11(conn: sqlite3.Connection) -> None:
+    """Drop the memories feature's schema tables (full removal, 2026-08-27).
+
+    The memories subsystem (consolidation pipeline, embedding/vector search,
+    recall eval, and the Memories UI) was physically deleted from the codebase.
+    These four tables — ``memory_records`` / ``memory_fts`` /
+    ``memory_provenance`` / ``query_log`` — were its only remaining footprint
+    in the database. They are dropped outright, so an upgraded legacy database
+    ends up schema-identical to a fresh one. ``DROP TABLE IF EXISTS`` makes the
+    migration a no-op on fresh databases (which never create them, since
+    migrations v5/v6/v8/v9 are now placeholders).
+    """
+    conn.execute("DROP TABLE IF EXISTS memory_records")
+    conn.execute("DROP TABLE IF EXISTS memory_fts")
+    conn.execute("DROP TABLE IF EXISTS memory_provenance")
+    conn.execute("DROP TABLE IF EXISTS query_log")
     conn.commit()

@@ -63,17 +63,19 @@ def test_apply_migrations_is_idempotent_on_fresh_db():
         storage.close()
 
 
-def test_migration_v8_adds_archived_column_to_legacy_db():
-    """A pre-v8 database (memory_records without ``archived``) must be upgraded
-    in place: column added with default 0, user_version bumped to 8, and legacy
-    rows read back as live (not archived). The base SCHEMA already declares the
-    column for fresh DBs, so this only guards the upgrade path."""
+def test_migration_v11_drops_all_memories_tables_from_legacy_db():
+    """A legacy database carrying the full memories footprint — the feature
+    tables (``memory_records`` / ``memory_fts`` / ``memory_provenance`` /
+    ``query_log``) plus the earlier orphaned ``consolidation_state`` /
+    ``embeddings`` tables — must end up schema-identical to a fresh one after
+    upgrade: every one of them dropped, ``user_version`` at 11, and the core
+    tables intact."""
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         db = Path(tmpdir) / "legacy.db"
         conn = sqlite3.connect(db)
         conn.row_factory = sqlite3.Row
-        # A faithful pre-v8 memory_records shape — every column v2..v7 added,
-        # but no ``archived``.
+        # A faithful pre-v8 memory_records shape (columns v2..v7 added, no
+        # ``archived`` — v8 was a no-op on upgrade).
         conn.execute(
             "CREATE TABLE memory_records ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -84,47 +86,21 @@ def test_migration_v8_adds_archived_column_to_legacy_db():
             "merge_count INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL DEFAULT '',"
             "relevance REAL NOT NULL DEFAULT 1.0)"
         )
-        conn.execute("PRAGMA user_version = 7")
-        conn.commit()
-
-        assert _column_exists(conn, "memory_records", "archived") is False
-
-        apply_migrations(conn, backfill_event_edges=lambda: None)
-
-        assert _column_exists(conn, "memory_records", "archived") is True
-        # v8 adds archived; v9 (query_log) and v10 (drop orphan vector/consolidation
-        # tables) ride along to the same latest version.
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
-        # Legacy rows must not suddenly be treated as archived.
+        # A faithful v5-era memory_fts and the v9 query_log.
         conn.execute(
-            "INSERT INTO memory_records(type, content, source, session_id, created_at) "
-            "VALUES ('fact', 'legacy memory', 'claude', 's1', '2026-01-01T00:00:00')"
+            "CREATE VIRTUAL TABLE memory_fts USING fts5("
+            "content, topics, record_id UNINDEXED, source UNINDEXED, tokenize='unicode61')"
         )
-        assert conn.execute("SELECT archived FROM memory_records").fetchone()[0] == 0
-        conn.close()
-
-
-def test_migration_v10_drops_orphan_vector_and_consolidation_tables():
-    """A pre-v10 database carrying the orphaned ``consolidation_state`` and
-    ``embeddings`` tables (producers deleted with the consolidation/vector
-    subsystems) must have both dropped on upgrade, while the hidden-but-kept
-    memories tables survive untouched. Fresh DBs never create them."""
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-        db = Path(tmpdir) / "legacy.db"
-        conn = sqlite3.connect(db)
-        conn.row_factory = sqlite3.Row
-        # A faithful pre-v8 memory_records shape (see test above) plus the two
-        # orphan tables v10 exists to remove.
         conn.execute(
-            "CREATE TABLE memory_records ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "type TEXT NOT NULL, content TEXT NOT NULL,"
-            "topics TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL DEFAULT 0.5,"
-            "source TEXT NOT NULL DEFAULT 'claude', session_id TEXT NOT NULL, event_id TEXT,"
-            "created_at TEXT NOT NULL, content_hash TEXT NOT NULL DEFAULT '',"
-            "merge_count INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL DEFAULT '',"
-            "relevance REAL NOT NULL DEFAULT 1.0)"
+            "CREATE TABLE memory_provenance ("
+            "memory_id INTEGER NOT NULL, event_id TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'claude')"
         )
+        conn.execute(
+            "CREATE TABLE query_log ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, query TEXT NOT NULL, mode TEXT NOT NULL,"
+            "source TEXT, result_count INTEGER, created_at TEXT NOT NULL)"
+        )
+        # The two orphan tables v10 exists to remove.
         conn.execute(
             "CREATE TABLE consolidation_state ("
             "id INTEGER PRIMARY KEY CHECK (id = 1), last_event_id TEXT)"
@@ -135,37 +111,37 @@ def test_migration_v10_drops_orphan_vector_and_consolidation_tables():
             "vector BLOB NOT NULL)"
         )
         conn.execute("CREATE INDEX idx_embeddings_model ON embeddings(model)")
-        # A faithful v7 DB already has memory_fts (created by v5).
-        conn.execute(
-            "CREATE VIRTUAL TABLE memory_fts USING fts5("
-            "content, topics, record_id UNINDEXED, source UNINDEXED, tokenize='unicode61')"
-        )
         conn.execute("PRAGMA user_version = 7")
         conn.commit()
 
         apply_migrations(conn, backfill_event_edges=lambda: None)
 
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
-        # Both orphan tables (and the vector index) are gone.
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
         remaining = {
             r["name"]
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')")
         }
-        assert "consolidation_state" not in remaining
-        assert "embeddings" not in remaining
-        assert "idx_embeddings_model" not in remaining
-        # The memories feature is hidden, not removed — its tables stay.
-        assert "memory_records" in remaining
-        assert "memory_fts" in remaining
+        # The entire memories footprint is gone, orphan tables included.
+        for gone in (
+            "memory_records",
+            "memory_fts",
+            "memory_provenance",
+            "query_log",
+            "consolidation_state",
+            "embeddings",
+            "idx_embeddings_model",
+        ):
+            assert gone not in remaining
         # Re-running migrations on the upgraded DB is a no-op (idempotent).
         apply_migrations(conn, backfill_event_edges=lambda: None)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
         conn.close()
 
 
-def test_migration_v10_fresh_db_never_creates_orphan_tables():
-    """Fresh databases must not carry the orphan tables at all — v10's
-    ``DROP TABLE IF EXISTS`` guards are no-ops there."""
+def test_migration_v11_fresh_db_never_creates_memories_tables():
+    """Fresh databases must not carry any memories-subsystem table — the v10/v11
+    ``DROP TABLE IF EXISTS`` guards are no-ops there, and a fresh DB is already
+    schema-identical to an upgraded legacy one."""
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         storage = SqliteStorage(Path(tmpdir) / "fresh.db")
         storage.connect()
@@ -173,8 +149,17 @@ def test_migration_v10_fresh_db_never_creates_orphan_tables():
             r["name"]
             for r in storage.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
-        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 10
-        assert "consolidation_state" not in tables
-        assert "embeddings" not in tables
-        assert "memory_records" in tables
+        assert storage.conn.execute("PRAGMA user_version").fetchone()[0] == 11
+        for gone in (
+            "memory_records",
+            "memory_fts",
+            "memory_provenance",
+            "query_log",
+            "consolidation_state",
+            "embeddings",
+        ):
+            assert gone not in tables
+        # Core tables survive as before.
+        for kept in ("sessions", "events", "tool_uses", "event_edges", "events_fts"):
+            assert kept in tables
         storage.close()

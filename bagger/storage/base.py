@@ -73,8 +73,6 @@ class SearchIndex(Protocol):
     def rebuild_fts_index(self) -> int: ...
     def fts_enabled(self) -> bool: ...
 
-    """Whether the FTS5 virtual table exists. Public: consumed by health/doctor."""
-
 
 @runtime_checkable
 class Storage(SessionRepository, EventRepository, SearchIndex, Protocol):
@@ -120,39 +118,5 @@ class Storage(SessionRepository, EventRepository, SearchIndex, Protocol):
         Implementations must not overwrite an existing target unless the
         caller explicitly removes it first. This keeps the CLI backup command
         safe to use in scheduled jobs.
-        """
-        ...
-
-    def get_memory_records(self, ids: list[int]) -> list[dict]:
-        """Return memory records by id (used to hydrate retrieval results).
-
-        Archived records are excluded — retrieval must never surface a
-        soft-deleted memory.
-        """
-        ...
-
-    def set_memory_archived(self, record_id: int, archived: bool) -> bool:
-        """Soft-delete (``archived=True``) or restore one memory record.
-
-        Returns ``False`` if no record with ``record_id`` exists. The row is
-        never physically removed; browse/retrieval hide it via ``archived=0``.
-        """
-        ...
-
-    def list_memories(
-        self,
-        page: int = 1,
-        per_page: int = 50,
-        source: str | None = None,
-        type: str | None = None,
-        archived: int | None = 0,
-    ) -> dict:
-        """Return a paginated list of memory records (the browse view).
-
-        Optional ``source`` / ``type`` filters narrow the result set; ``archived``
-        defaults to ``0`` (live memories only) — pass ``1`` for the archive or
-        ``None`` for everything. ``topics`` is normalized from the comma-joined
-        DB string to a list so the shape matches the retrieval endpoint. Returns
-        ``{"data": [...], "meta": {"page", "per_page", "total", "pages"}}``.
         """
         ...

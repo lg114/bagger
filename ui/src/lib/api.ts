@@ -114,21 +114,6 @@ async function postApi<T>(path: string): Promise<T> {
   return res.json();
 }
 
-async function patchApi<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...(API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    throw new Error(`API error: ${res.status} ${res.statusText}`);
-  }
-  return res.json();
-}
-
 // ── Endpoints ──────────────────────────────────────────
 
 export function getHealth(): Promise<Health> {
@@ -290,74 +275,4 @@ export async function exportSessionMarkdown(id: string, format = "markdown"): Pr
   document.body.appendChild(a);
   a.click();
   a.remove();
-}
-
-// ── Memories (semantic / hybrid retrieval) ─────────────
-
-export type MemoryMode = "hybrid" | "vector" | "fts";
-
-export interface Memory {
-  id: number;
-  type: string; // fact | preference | decision | lesson
-  content: string;
-  topics: string[];
-  confidence: number;
-  source?: string;
-  session_id: string;
-  event_id: string | null;
-  created_at: string;
-  // Soft-delete flag: 0 = live (default), 1 = archived (hidden from browse
-  // and retrieval unless explicitly requested).
-  archived: number;
-  // Retrieval-only: absent in the browse (list) view, present in search results.
-  fused_score?: number;
-}
-
-export interface MemorySearchResponse {
-  query: string;
-  mode: MemoryMode;
-  count: number;
-  results: Memory[];
-}
-
-export interface MemoryListResponse {
-  data: Memory[];
-  meta: { page: number; per_page: number; total: number; pages: number; sources: string[] };
-}
-
-export function searchMemories(
-  query: string,
-  mode: MemoryMode = "hybrid",
-  limit = 20,
-  source?: string,
-): Promise<MemorySearchResponse> {
-  return fetchApi<MemorySearchResponse>("/memories/search", {
-    q: query,
-    mode,
-    limit,
-    source,
-  });
-}
-
-export function listMemories(params?: {
-  page?: number;
-  perPage?: number;
-  source?: string;
-  type?: string;
-  archived?: number; // 0 = live only (default), 1 = archived only
-}): Promise<MemoryListResponse> {
-  return fetchApi<MemoryListResponse>("/memories", {
-    page: params?.page,
-    per_page: params?.perPage,
-    source: params?.source,
-    type: params?.type,
-    archived: params?.archived,
-  });
-}
-
-export function setMemoryArchived(
-  id: number,
-  archived: boolean,
-): Promise<{ id: number; archived: boolean }> {
-  return patchApi<{ id: number; archived: boolean }>(`/memories/${id}`, { archived });
 }

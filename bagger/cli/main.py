@@ -415,7 +415,7 @@ def rebuild_index(storage):
 )
 @require_db()
 def serve(host, port, do_reload, no_open, allow_network):
-    """Start the Bagger web API and visual memory browser."""
+    """Start the Bagger web API and dashboard UI."""
     try:
         import uvicorn
     except ImportError:
