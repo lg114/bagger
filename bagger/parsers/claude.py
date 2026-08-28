@@ -98,12 +98,24 @@ class ClaudeParser(_Parser):
 
 
 def _parse_file(path: Path) -> list[MemoryEvent]:
-    """Parse a full JSONL file into MemoryEvent objects."""
+    """Parse a full JSONL file into MemoryEvent objects.
+
+    Reads in binary and decodes line-by-line so a single corrupt or
+    undecodable line only costs that line — a text-mode open would raise
+    ``UnicodeDecodeError`` on the first bad byte and lose the whole session's
+    remaining events. Unlike ``iter_complete_lines`` this KEEPS a trailing
+    line without a newline terminator (a complete file may simply lack it);
+    a genuinely half-written line fails ``json.loads`` and is skipped anyway.
+    """
     events: list[MemoryEvent] = []
 
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
+    with open(path, "rb") as f:
+        for raw_line in f:
+            try:
+                line = raw_line.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                logger.warning("Skipping undecodable line in %s", path)
+                continue
             if not line:
                 continue
             try:
@@ -111,8 +123,9 @@ def _parse_file(path: Path) -> list[MemoryEvent]:
             except json.JSONDecodeError:
                 continue
 
-            entry_type = raw.get("type")
-            if entry_type not in ("user", "assistant"):
+            if not isinstance(raw, dict):
+                continue
+            if raw.get("type") not in ("user", "assistant"):
                 continue
 
             event = _parse_entry(raw)
@@ -131,29 +144,35 @@ def _read_complete_lines(path: Path, offset: int) -> list[str]:
     would never be retried. Detecting "file grew past what we read" means the
     final line is incomplete; drop it and let the next poll (or the full
     re-parse on restart) pick it up once it's flushed.
+
+    Reads in binary mode so a corrupt byte costs only its own line (a text-mode
+    read would raise and fail the whole file on every poll).
     """
     import json as _json
 
     file_size = path.stat().st_size
-    with open(path, encoding="utf-8") as f:
+    with open(path, "rb") as f:
         f.seek(offset)
         raw = f.read()
-        bytes_read = f.tell() - offset
+        bytes_read = len(raw)
     # If we didn't reach EOF, the tail is a half-written line — discard it.
     if bytes_read < (file_size - offset):
-        last_nl = raw.rfind("\n")
-        raw = raw[:last_nl] if last_nl != -1 else ""
+        last_nl = raw.rfind(b"\n")
+        raw = raw[:last_nl] if last_nl != -1 else b""
 
     lines = []
-    for line in raw.splitlines():
-        line = line.strip()
+    for raw_line in raw.split(b"\n"):
+        try:
+            line = raw_line.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            continue
         if not line:
             continue
         try:
             parsed = _json.loads(line)
         except _json.JSONDecodeError:
             continue
-        if parsed.get("type") in ("user", "assistant"):
+        if isinstance(parsed, dict) and parsed.get("type") in ("user", "assistant"):
             lines.append(parsed)
     return lines
 
@@ -171,37 +190,52 @@ def _parse_new_lines(path: Path, offset: int) -> list[MemoryEvent]:
 
 
 def _extract_summary(path: Path) -> str:
-    """Extract session summary from the first line of a JSONL file."""
-    with open(path, encoding="utf-8") as f:
-        first_line = f.readline().strip()
+    """Extract session summary from the first line of a JSONL file.
+
+    All reads are binary + per-line decode so a corrupt byte degrades to
+    "(no summary)" instead of raising (which would fail the whole file's sync
+    after its events were already inserted).
+    """
+    try:
+        with open(path, "rb") as f:
+            first_line = f.readline().decode("utf-8", errors="replace").strip()
+    except OSError:
+        return "(no summary)"
     if not first_line:
         return "(no summary)"
     try:
         data = json.loads(first_line)
     except json.JSONDecodeError:
-        return "(no summary)"
+        data = None
 
-    if data.get("type") == "summary":
+    if isinstance(data, dict) and data.get("type") == "summary":
         summary = data.get("summary", "")
         if summary:
             return _truncate(summary, 120)
 
     # Fallback: try first user message
     try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                data = json.loads(line.strip())
-                if data.get("type") == "user":
-                    content = data.get("message", {}).get("content", "")
-                    if isinstance(content, str):
-                        return _truncate(content, 120)
-                    if isinstance(content, list) and content:
-                        first_block = content[0]
-                        text = first_block.get("text", "")
-                        if text:
-                            return _truncate(text, 120)
-                    break
-    except (OSError, json.JSONDecodeError) as exc:
+        with open(path, "rb") as f:
+            for raw_line in f:
+                try:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if not isinstance(data, dict) or data.get("type") != "user":
+                    continue
+                content = data.get("message", {}).get("content", "")
+                if isinstance(content, str):
+                    return _truncate(content, 120)
+                if isinstance(content, list) and content:
+                    first_block = content[0]
+                    text = first_block.get("text", "")
+                    if text:
+                        return _truncate(text, 120)
+                break
+    except OSError as exc:
         logger.warning("Could not extract summary from %s: %s", path, exc)
 
     return "(no summary)"

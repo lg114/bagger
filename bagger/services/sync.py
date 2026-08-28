@@ -181,11 +181,20 @@ class SyncService:
         for ev in events:
             ev.source = source
 
+        # Which of these events are already in the DB (and therefore already
+        # written to the JSONL backup on an earlier sync)? Queried pre-insert
+        # so the backup below only receives genuinely-new events.
+        already_backed_up = self.storage.existing_event_ids(source, [e.event_id for e in events])
+
         new_count = self.storage.insert_events(events)
         # keep event_edges in lock-step with events — same file
         # processing unit, both incremental watch and full re-scan flow here.
         self.storage.upsert_event_edges(events)
-        self._export_events(events)
+        # Export only genuinely-new events: a full re-scan re-parses every
+        # file, and re-exporting already-backed-up events would grow the
+        # JSONL backup by N lines on every `scan --full`. Snapshot must be
+        # taken BEFORE insert_events upserts make every key "existing".
+        self._export_events([e for e in events if e.event_id not in already_backed_up])
 
         if upsert_always or new_count > 0:
             upsert_session_from_events(

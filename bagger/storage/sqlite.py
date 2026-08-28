@@ -43,6 +43,11 @@ from bagger.storage.migrations import _column_exists, apply_migrations
 
 logger = logging.getLogger(__name__)
 
+# Chunk size for IN (...) lists built at runtime (FTS dedupe deletes,
+# existing-key lookups). Stays well under SQLite's host-parameter limit so
+# older builds (999 vars) are respected too.
+_SQL_PARAM_CHUNK = 500
+
 # ── Schema ──────────────────────────────────────────────────
 
 SCHEMA = """
@@ -618,10 +623,10 @@ class SqliteEventRepository:
         """
         raw_text = _extract_text(event)
         fts_text = _tokenize_for_fts(raw_text)
-        self._conn.execute(
-            "DELETE FROM events_fts WHERE event_id = ? AND source = ?",
-            (event.event_id, event.source),
-        )
+        # Route through _delete_fts_rows: the per-row DELETE below would be a
+        # full FTS scan (UNINDEXED columns), which gets expensive as the table
+        # grows even for the watcher's one-event-at-a-time inserts.
+        self._delete_fts_rows([(fts_text, event.session_id, event.event_id, event.source)])
         self._conn.execute(
             "INSERT INTO events_fts(content_text, session_id, event_id, source) "
             "VALUES (?, ?, ?, ?)",
@@ -684,10 +689,7 @@ class SqliteEventRepository:
                 tu_rows,
             )
         if fts_rows:
-            self._conn.executemany(
-                "DELETE FROM events_fts WHERE event_id = ? AND source = ?",
-                [(r[2], r[3]) for r in fts_rows],
-            )
+            self._delete_fts_rows(fts_rows)
             self._conn.executemany(
                 "INSERT INTO events_fts(content_text, session_id, event_id, source) "
                 "VALUES (?, ?, ?, ?)",
@@ -696,6 +698,47 @@ class SqliteEventRepository:
         self._commit()
         after = self._conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         return after - before
+
+    def _delete_fts_rows(self, fts_rows: list[tuple]) -> None:
+        """Delete events_fts rows for the ``(event_id, source)`` pairs in ``fts_rows``.
+
+        ``fts_rows`` tuples are ``(content_text, session_id, event_id, source)``.
+        All events_fts columns except ``content_text`` are UNINDEXED, so a
+        per-row ``DELETE ... WHERE event_id = ? AND source = ?`` is a full FTS
+        scan *per event* — O(N²) on a large import (measured ~40s for 10k
+        events). Batching into one chunked ``IN (...)`` delete keeps the same
+        semantics with one scan per chunk instead of per row.
+        """
+        by_source: dict[str, list[str]] = {}
+        for row in fts_rows:
+            by_source.setdefault(row[3], []).append(row[2])
+        for source, ids in by_source.items():
+            for i in range(0, len(ids), _SQL_PARAM_CHUNK):
+                chunk = ids[i : i + _SQL_PARAM_CHUNK]
+                placeholders = ",".join("?" * len(chunk))
+                self._conn.execute(
+                    f"DELETE FROM events_fts WHERE source = ? AND event_id IN ({placeholders})",
+                    (source, *chunk),
+                )
+
+    def existing_event_ids(self, source: str, event_ids: list[str]) -> set[str]:
+        """Return the subset of ``event_ids`` already stored for ``source``.
+
+        Served by the UNIQUE(source, event_id) index, so it stays cheap even
+        for large batches. Callers use it to avoid re-exporting events that
+        were already written to a backup on a previous sync.
+        """
+        found: set[str] = set()
+        unique = list(dict.fromkeys(event_ids))
+        for i in range(0, len(unique), _SQL_PARAM_CHUNK):
+            chunk = unique[i : i + _SQL_PARAM_CHUNK]
+            placeholders = ",".join("?" * len(chunk))
+            rows = self._conn.execute(
+                f"SELECT event_id FROM events WHERE source = ? AND event_id IN ({placeholders})",
+                (source, *chunk),
+            ).fetchall()
+            found.update(r[0] for r in rows)
+        return found
 
     def get_session_events(self, session_id: str, source: str | None = None) -> list[dict]:
         if source is not None:
@@ -1535,6 +1578,9 @@ class SqliteStorage:
     def insert_events(self, events: list[MemoryEvent]) -> int:
         with self._write():
             return self._events.insert_events(events)  # type: ignore[union-attr]
+
+    def existing_event_ids(self, source: str, event_ids: list[str]) -> set[str]:
+        return self._events.existing_event_ids(source, event_ids)  # type: ignore[union-attr]
 
     def get_session_events(self, session_id: str, source: str | None = None) -> list[dict]:
         return self._events.get_session_events(session_id, source)  # type: ignore[union-attr]

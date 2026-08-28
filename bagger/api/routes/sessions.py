@@ -2,11 +2,61 @@
 
 import json
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from bagger.api.dependencies import get_storage
 
 router = APIRouter()
+
+
+def _dumps_tree(roots: list[dict]) -> str:
+    """Iteratively serialize the session tree forest as a JSON array.
+
+    The stdlib json encoder recurses once per nesting level and is bounded by
+    the interpreter's *C* recursion limit, which ``sys.setrecursionlimit``
+    cannot raise — a long linear session (>~1000 events in one parent chain)
+    would raise RecursionError. This explicit-stack walk emits equivalent JSON
+    (same separators as Starlette's JSONResponse) with no recursion at all:
+    scalar fields are encoded with flat ``json.dumps`` calls and the
+    ``children`` nesting is assembled from stack-driven fragments.
+    """
+    parts: list[str] = []
+    # Stack entries: ("nodes", list) → children array; ("node", dict) → one
+    # tree node; ("raw", str) → pre-encoded fragment or punctuation.
+    stack: list = [("nodes", roots)]
+    while stack:
+        kind, val = stack.pop()
+        if kind == "raw":
+            parts.append(val)
+        elif kind == "nodes":
+            parts.append("[")
+            stack.append(("raw", "]"))
+            for i in range(len(val) - 1, -1, -1):
+                stack.append(("node", val[i]))
+                if i > 0:
+                    stack.append(("raw", ","))
+        else:  # ("node", dict)
+            children = val.get("children") or []
+            if children:
+                # Open this node's object without its closing brace, then
+                # splice in "children": [...] — the stack unwinds in order.
+                flat = {k: v for k, v in val.items() if k != "children"}
+                inner = ",".join(
+                    f"{json.dumps(k, ensure_ascii=False, separators=(',', ':'))}:"
+                    f"{json.dumps(v, ensure_ascii=False, separators=(',', ':'))}"
+                    for k, v in flat.items()
+                )
+                stack.append(("raw", "}"))
+                stack.append(("nodes", children))
+                # Comma only when scalar fields precede "children" (never empty
+                # here in practice, but a children-only node must not emit
+                # a leading comma).
+                stack.append(("raw", "{" + inner + ("," if inner else "") + '"children":'))
+            else:
+                flat = dict(val)
+                flat["children"] = []
+                stack.append(("raw", json.dumps(flat, ensure_ascii=False, separators=(",", ":"))))
+    return "".join(parts)
 
 
 @router.get("/sessions")
@@ -97,7 +147,7 @@ def get_session_tree(
     source: str | None = Query(
         None, description="Originating tool (claude, codex, …). Scopes the topology to that tool."
     ),
-) -> dict:
+) -> Response:
     """Get the session topology as a nested forest.
 
     Returns the event tree (branches, compactions, resumptions) derived from
@@ -111,4 +161,9 @@ def get_session_tree(
                 raise HTTPException(status_code=404, detail="Session not found")
             session_id = session["id"]
         tree = storage.get_session_tree(session_id, source=source)
-    return {"data": tree}
+
+    # A long linear session nests 1000+ levels deep; serialize here with the
+    # iterative encoder (see _dumps_tree) instead of letting FastAPI's
+    # recursive json.dumps blow the C recursion limit.
+    payload = '{"data":' + _dumps_tree(tree) + "}"
+    return Response(content=payload, media_type="application/json")
