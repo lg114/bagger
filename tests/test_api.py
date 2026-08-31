@@ -335,6 +335,48 @@ def test_export_session_scopes_by_source():
         assert "claude question" not in codex.text
 
 
+def test_sources_endpoint_returns_all_distinct_sources():
+    """/api/sources is a true facet: every source in the store, not just page 1."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        storage = _override_db(td)
+        # Many sessions per source so neither fits on a single page of 50.
+        for i in range(60):
+            storage.upsert_session(Session(session_id=f"c{i}", summary=f"C{i}", source="claude"))
+        for i in range(60):
+            storage.upsert_session(Session(session_id=f"x{i}", summary=f"X{i}", source="codex"))
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        client = TestClient(create_app())
+        resp = client.get("/api/sources")
+        assert resp.status_code == 200
+        assert set(resp.json()["sources"]) == {"claude", "codex"}
+
+
+def test_sources_endpoint_scopes_by_project():
+    """/api/sources?project=... narrows the facet to that project's sources."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        storage = _override_db(td)
+        storage.upsert_session(
+            Session(session_id="a", summary="A", source="claude", project_path="/p1")
+        )
+        storage.upsert_session(
+            Session(session_id="b", summary="B", source="codex", project_path="/p2")
+        )
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        client = TestClient(create_app())
+        p1 = client.get("/api/sources?project=" + "/p1").json()["sources"]
+        assert p1 == ["claude"]
+        p2 = client.get("/api/sources?project=" + "/p2").json()["sources"]
+        assert p2 == ["codex"]
+
+
 def test_export_session_unsupported_format():
     with tempfile.TemporaryDirectory() as tmpdir:
         td = Path(tmpdir)

@@ -143,6 +143,12 @@ export function getSession(id: string, source?: string): Promise<Session> {
   return fetchApi<Session>(`/sessions/${id}${qs}`);
 }
 
+/** Canonical list of every distinct source in the store (the source facet). */
+export function getSources(project?: string): Promise<string[]> {
+  const qs = project ? `?project=${encodeURIComponent(project)}` : "";
+  return fetchApi<{ sources: string[] }>(`/sources${qs}`).then((r) => r.sources);
+}
+
 export function getSessionEvents(
   id: string,
   source?: string,

@@ -4,6 +4,7 @@ import {
   getSessions,
   getSession,
   getSessionEvents,
+  getSources,
   search,
   getStats,
   getDailyStats,
@@ -87,6 +88,29 @@ describe("getSessions", () => {
     await getSessions();
     const url = mockFetch.mock.calls[0][0] as string;
     expect(url).not.toContain("source=");
+  });
+});
+
+// ── getSources ───────────────────────────────────────────
+
+describe("getSources", () => {
+  it("returns the full source facet unscoped", async () => {
+    mockApiResponse({ sources: ["claude", "codex"] });
+
+    const sources = await getSources();
+    expect(sources).toEqual(["claude", "codex"]);
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("/sources");
+    expect(url).not.toContain("project=");
+  });
+
+  it("passes the project scope when given", async () => {
+    mockApiResponse({ sources: ["claude"] });
+
+    const sources = await getSources("/p1");
+    expect(sources).toEqual(["claude"]);
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("project=");
   });
 });
 

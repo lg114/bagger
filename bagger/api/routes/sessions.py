@@ -83,6 +83,20 @@ def list_sessions(
     return result
 
 
+@router.get("/sources")
+def list_sources(project: str | None = Query(None, description="Optional project scope")) -> dict:
+    """Canonical list of every distinct source present in the store.
+
+    Drives the source facet in the UI so users can filter by AI tool (claude,
+    codex, …) even when that source's sessions don't appear on the first page
+    of results.     An optional ``project`` scope narrows the facet to that project's
+    sessions, keeping it consistent with the filtered Conversations list.
+    """
+    with get_storage() as storage:
+        sources = storage.distinct_sources(project=project)
+    return {"sources": sources}
+
+
 @router.get("/sessions/{session_id}")
 def get_session(
     session_id: str,

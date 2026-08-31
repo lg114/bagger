@@ -532,6 +532,26 @@ class SqliteSessionRepository:
             "meta": _pagination_meta(page, per_page, total),
         }
 
+    def distinct_sources(self, project: str | None = None) -> list[str]:
+        """Canonical list of every distinct non-empty source in the store.
+
+        Powers the source facet in the UI: unlike the per-page source set the
+        frontend used to derive, this reflects *all* sources regardless of which
+        page is currently loaded (or which source filter is active).         An optional
+        ``project`` scope narrows the facet to that project's sessions so it stays
+        consistent with the filtered session list on the Conversations page.
+        """
+        where, where_params = self._project_filter(project)
+        if where:
+            sql = (
+                f"SELECT DISTINCT source FROM sessions{where} "
+                "AND source IS NOT NULL AND source != ''"
+            )
+        else:
+            sql = "SELECT DISTINCT source FROM sessions WHERE source IS NOT NULL AND source != ''"
+        rows = self._conn.execute(sql, where_params).fetchall()
+        return sorted(r[0] for r in rows if r[0])
+
     def get_event_count(self, session_id: str, source: str | None = None) -> int:
         if source is not None:
             row = self._conn.execute(
@@ -1565,6 +1585,9 @@ class SqliteStorage:
         return self._sessions.list_sessions_paginated(  # type: ignore[union-attr]
             page, per_page, sort, order, project, source
         )
+
+    def distinct_sources(self, project: str | None = None) -> list[str]:
+        return self._sessions.distinct_sources(project)  # type: ignore[union-attr]
 
     def get_event_count(self, session_id: str, source: str | None = None) -> int:
         return self._sessions.get_event_count(session_id, source)  # type: ignore[union-attr]

@@ -1,6 +1,7 @@
 import { useSearchParams } from "react-router-dom";
 import { MessageSquare, AlertCircle, X } from "lucide-react";
 import { useSessions } from "@/hooks/useSessions";
+import { useSources } from "@/hooks/useSources";
 import { SessionRow, SessionRowSkeleton } from "@/components/SessionRow";
 import { sourceDotColor } from "@/components/SourceBadge";
 import { EmptyState } from "@/components/EmptyState";
@@ -23,14 +24,16 @@ export default function SessionsPage() {
   // Server-side filtering: the backend scopes both the returned rows AND
   // meta.total to the project/source, so the count header matches.
   const { data, isLoading, error } = useSessions(page, sort, project ?? undefined, source ?? undefined);
+  const { data: facetSources } = useSources(project ?? undefined);
 
   const sessions = data?.data ?? [];
   const meta = data?.meta;
 
-  // Distinct sources present on the current page, plus the active source so it
-  // stays selectable even when a page holds only one source.
+  // Canonical source facet from the backend (every distinct source, regardless
+  // of the current page), kept consistent with the active project scope and
+  // unioned with the active source so it always stays selectable.
   const sourceOptions = Array.from(
-    new Set([...sessions.map((s) => s.source).filter(Boolean), ...(source ? [source] : [])] as string[]),
+    new Set([...(facetSources ?? []), ...(source ? [source] : [])] as string[]),
   ).sort();
 
   const goToPage = (p: number) => {

@@ -1,6 +1,7 @@
 import { useSearchParams } from "react-router-dom";
 import { Search as SearchIcon, AlertCircle, Clock } from "lucide-react";
 import { useSearch } from "@/hooks/useSearch";
+import { useSources } from "@/hooks/useSources";
 import SearchBar from "@/components/SearchBar";
 import SearchResults from "@/components/SearchResults";
 import { sourceDotColor } from "@/components/SourceBadge";
@@ -14,16 +15,14 @@ export default function SearchPage() {
   const source = searchParams.get("source");
 
   const { data, isLoading, error } = useSearch(query, page, source ?? undefined);
+  const { data: facetSources } = useSources();
   const results = data?.data ?? [];
   const meta = data?.meta;
 
-  // Distinct sources present on the current page, plus the active source so it
-  // stays selectable even when a page holds only one source.
+  // Canonical source facet from the backend (every distinct source across the
+  // store), unioned with the active source so it always stays selectable.
   const sourceOptions = Array.from(
-    new Set([
-      ...results.map((r) => r.source).filter(Boolean),
-      ...(source ? [source] : []),
-    ] as string[]),
+    new Set([...(facetSources ?? []), ...(source ? [source] : [])] as string[]),
   ).sort();
 
   const handleSearch = (q: string) => {
