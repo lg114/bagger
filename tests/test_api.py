@@ -279,6 +279,56 @@ def test_export_session_markdown():
         assert "🤖 Assistant" in body
 
 
+def test_export_session_scopes_by_source():
+    """Two tools sharing a session ID must export the correct conversation.
+
+    Regression: the export route ignored ``source`` and could export the
+    wrong tool's session when Claude and Codex collide on the same ID.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        storage = _override_db(td)
+
+        # Same session_id, different source → different conversations.
+        storage.upsert_session(Session(session_id="dup", summary="Claude one", source="claude"))
+        storage.upsert_session(Session(session_id="dup", summary="Codex two", source="codex"))
+        storage.insert_events(
+            [
+                _make_event(
+                    event_id="c1", session_id="dup", role=Role.USER,
+                    text="claude question", source="claude",
+                ),
+                _make_event(
+                    event_id="x1", session_id="dup", role=Role.USER,
+                    text="codex question", source="codex",
+                ),
+            ]
+        )
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        client = TestClient(create_app())
+
+        # Without source the backend falls back to un-scoped lookup (legacy).
+        unscoped = client.get("/api/sessions/dup/export")
+        assert unscoped.status_code == 200
+
+        # With source=claude we must get the Claude conversation only.
+        claude = client.get("/api/sessions/dup/export?source=claude")
+        assert claude.status_code == 200
+        assert "Claude one" in claude.text
+        assert "claude question" in claude.text
+        assert "codex question" not in claude.text
+
+        # With source=codex we must get the Codex conversation only.
+        codex = client.get("/api/sessions/dup/export?source=codex")
+        assert codex.status_code == 200
+        assert "Codex two" in codex.text
+        assert "codex question" in codex.text
+        assert "claude question" not in codex.text
+
+
 def test_export_session_unsupported_format():
     with tempfile.TemporaryDirectory() as tmpdir:
         td = Path(tmpdir)
@@ -702,3 +752,45 @@ def test_scan_endpoint_runs_in_background(monkeypatch):
             status2 = client.get("/api/scan/status").json()
             assert status2["done"] is True
             assert status2["result"]["skipped"] == 1
+
+
+def test_scan_lock_prevents_concurrent_scans():
+    """The in-process scan lock is atomic: only one scan may run at a time.
+
+    A second trigger (incremental or full) while a scan is in flight must be
+    rejected so overlapping scans can't race on the DB / watch state.
+    """
+    from bagger.api.scan_state import ScanStateStore
+
+    store = ScanStateStore()
+    # First trigger claims the single slot.
+    assert store.try_acquire(full=False) is True
+    assert store.is_running() is True
+    # Concurrent triggers are rejected regardless of kind.
+    assert store.try_acquire(full=False) is False
+    assert store.try_acquire(full=True) is False
+    # Once this scan finishes, a new one (even a full rescan) can start.
+    store.mark_done({"sessions": 1, "events": 1, "skipped": 0, "errors": 0})
+    assert store.is_running() is False
+    assert store.try_acquire(full=True) is True
+
+
+def test_trigger_scan_409_when_already_running():
+    """POST /api/scan (and /api/scan/full) returns 409 while a scan runs."""
+    from fastapi.testclient import TestClient
+
+    from bagger.api.scan_state import scan_state
+
+    # Pretend a scan is already in flight (no task will release it here).
+    scan_state.try_acquire(False)
+    try:
+        client = TestClient(create_app())
+        r1 = client.post("/api/scan")
+        assert r1.status_code == 409
+        # A full rescan must also be refused while the incremental is running.
+        r2 = client.post("/api/scan/full")
+        assert r2.status_code == 409
+        # Status still reports the in-flight scan; nothing new was started.
+        assert client.get("/api/scan/status").json()["running"] is True
+    finally:
+        scan_state.mark_done({"sessions": 0, "events": 0, "skipped": 0, "errors": 0})

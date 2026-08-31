@@ -330,4 +330,21 @@ describe("exportSessionMarkdown", () => {
     expect(anchor.href).toContain("/sessions/a%2Fb%25c/export");
     appendSpy.mockRestore();
   });
+
+  it("includes the source param when provided (multi-tool scoping)", () => {
+    const appendSpy = vi.spyOn(document.body, "appendChild");
+    exportSessionMarkdown("sess-9", "markdown", "codex");
+    const anchor = appendSpy.mock.calls[0][0] as HTMLAnchorElement;
+    expect(anchor.href).toContain("/sessions/sess-9/export");
+    expect(anchor.href).toContain("source=codex");
+    appendSpy.mockRestore();
+  });
+
+  it("omits the source param when not provided", () => {
+    const appendSpy = vi.spyOn(document.body, "appendChild");
+    exportSessionMarkdown("sess-9");
+    const anchor = appendSpy.mock.calls[0][0] as HTMLAnchorElement;
+    expect(anchor.href).not.toContain("source=");
+    appendSpy.mockRestore();
+  });
 });

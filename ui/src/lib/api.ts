@@ -253,8 +253,14 @@ export function getScanStatus(): Promise<ScanStatus> {
  * downloaded). A synchronous anchor click keeps the download inside the
  * gesture, so it always works.
  */
-export async function exportSessionMarkdown(id: string, format = "markdown"): Promise<void> {
-  const url = `${API_BASE}/sessions/${encodeURIComponent(id)}/export?format=${encodeURIComponent(format)}`;
+export async function exportSessionMarkdown(
+  id: string,
+  format = "markdown",
+  source?: string,
+): Promise<void> {
+  const params = new URLSearchParams({ format });
+  if (source) params.set("source", source);
+  const url = `${API_BASE}/sessions/${encodeURIComponent(id)}/export?${params.toString()}`;
   if (API_TOKEN) {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${API_TOKEN}` },
@@ -264,7 +270,7 @@ export async function exportSessionMarkdown(id: string, format = "markdown"): Pr
     const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = objectUrl;
-    a.download = `bagger-${id.slice(0, 24)}.md`;
+    a.download = `bagger-${source ?? "session"}-${id.slice(0, 24)}.md`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -274,7 +280,7 @@ export async function exportSessionMarkdown(id: string, format = "markdown"): Pr
 
   const a = document.createElement("a");
   a.href = url;
-  a.download = `bagger-${id.slice(0, 24)}.md`;
+  a.download = `bagger-${source ?? "session"}-${id.slice(0, 24)}.md`;
   a.rel = "noopener";
   document.body.appendChild(a);
   a.click();

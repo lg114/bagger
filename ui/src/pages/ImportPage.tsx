@@ -50,11 +50,18 @@ export default function ImportPage() {
     setMode(kind);
     setError(null);
     try {
-      // Trigger returns immediately; the actual scan runs in the background.
-      if (kind === "incremental") {
-        await triggerScan();
-      } else {
-        await triggerFullScan();
+      try {
+        // Trigger returns immediately; the actual scan runs in the background.
+        if (kind === "incremental") {
+          await triggerScan();
+        } else {
+          await triggerFullScan();
+        }
+      } catch (e) {
+        // A 409 means a scan is already running (e.g. in another tab/client).
+        // Don't treat it as a failure — just attach to the in-progress scan.
+        const st = await getScanStatus().catch(() => null);
+        if (!st?.running) throw e;
       }
       const result = await pollUntilDone();
       setLastResult(result);

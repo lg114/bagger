@@ -13,10 +13,15 @@ router = APIRouter()
 def export_session(
     session_id: str,
     fmt: str = Query("markdown", alias="format", description="Export format (markdown)"),
+    source: str | None = Query(
+        None, description="Originating tool (claude, codex, …). Scopes the export to that tool."
+    ),
 ) -> PlainTextResponse:
     """Render a session as a downloadable document (Markdown by default).
 
     Supports prefix matching for ``session_id`` like the other session routes.
+    ``source`` scopes the lookup to a specific tool so that two tools sharing
+    the same session ID export the correct conversation.
     Returns ``text/markdown`` with a ``Content-Disposition`` filename hint.
     """
     if fmt not in SUPPORTED_FORMATS:
@@ -26,14 +31,14 @@ def export_session(
         )
 
     with get_storage() as storage:
-        session = storage.get_session(session_id)
+        session = storage.get_session(session_id, source=source)
         if session is None:
-            session = storage.find_session_by_prefix(session_id)
+            session = storage.find_session_by_prefix(session_id, source=source)
             if session is None:
                 raise HTTPException(status_code=404, detail="Session not found")
             session_id = session["id"]
 
-        events = storage.get_session_events(session_id)
+        events = storage.get_session_events(session_id, source=source)
 
         # Resolve a browser-friendly filename: source + short id, no path chars.
         safe_id = session_id.replace("/", "_")[:24]

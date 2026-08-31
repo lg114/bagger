@@ -144,7 +144,7 @@ export default function SessionDetailPage() {
     // as confirmation instead of leaving the user guessing where it went.
     const filename = `bagger-${session?.source ?? "session"}-${id.slice(0, 24)}.md`;
     try {
-      await exportSessionMarkdown(id);
+      await exportSessionMarkdown(id, "markdown", source);
       setExportDone(filename);
     } catch (err) {
       setExportError(err instanceof Error ? err.message : "Export failed");
