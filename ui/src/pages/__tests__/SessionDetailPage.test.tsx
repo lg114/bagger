@@ -51,7 +51,10 @@ function renderPage(initial = "/sessions/abc?source=codex") {
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetSession.mockResolvedValue(makeSession("claude"));
-  mockGetSessionEvents.mockResolvedValue({ data: [], meta: { total: 0 } });
+  mockGetSessionEvents.mockResolvedValue({
+    data: [],
+    meta: { page: 1, per_page: 50, total: 0, pages: 1 },
+  });
   mockGetSessionTree.mockResolvedValue({ data: [] });
 });
 
@@ -60,7 +63,7 @@ describe("SessionDetailPage multi-source", () => {
     renderPage("/sessions/abc?source=codex");
 
     await waitFor(() => expect(mockGetSession).toHaveBeenCalledWith("abc", "codex"));
-    expect(mockGetSessionEvents).toHaveBeenCalledWith("abc", "codex");
+    expect(mockGetSessionEvents).toHaveBeenCalledWith("abc", "codex", 1, 50);
     expect(mockGetSessionTree).toHaveBeenCalledWith("abc", "codex");
   });
 

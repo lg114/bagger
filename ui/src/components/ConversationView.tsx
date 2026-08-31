@@ -1,12 +1,22 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from "react";
-import { ChevronDown, Search, ChevronUp, ChevronDown as ArrowDown, X } from "lucide-react";
+import { ChevronDown, Search, ChevronUp, ChevronDown as ArrowDown, X, Loader2 } from "lucide-react";
 import MessageBubble from "./MessageBubble";
 import type { Event } from "@/lib/api";
 
-const BATCH_SIZE = 50;
-
 interface ConversationViewProps {
   events: Event[];
+  /** True when the backend has more pages of events not yet loaded. */
+  hasMore: boolean;
+  /** Fetching the next page is in flight. */
+  loadingMore: boolean;
+  /** Fetching all remaining pages is in flight. */
+  loadingAll: boolean;
+  /** Total number of events in the session (from pagination meta). */
+  total: number;
+  /** Request the next page of events from the server. */
+  onLoadMore: () => void;
+  /** Request every remaining page at once. */
+  onLoadAll: () => void;
   /** Controlled by the parent (SessionDetailPage) — opens the search bar. */
   searchOpen: boolean;
   /** Called when Ctrl+F is pressed (toggle search visibility). */
@@ -15,9 +25,19 @@ interface ConversationViewProps {
   onCloseSearch: () => void;
 }
 
-export default function ConversationView({ events, searchOpen, onToggleSearch, onCloseSearch }: ConversationViewProps) {
+export default function ConversationView({
+  events,
+  hasMore,
+  loadingMore,
+  loadingAll,
+  total,
+  onLoadMore,
+  onLoadAll,
+  searchOpen,
+  onToggleSearch,
+  onCloseSearch,
+}: ConversationViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
-  const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
 
   // ------ Search state ------
   const [searchQuery, setSearchQuery] = useState("");
@@ -77,35 +97,21 @@ export default function ConversationView({ events, searchOpen, onToggleSearch, o
     }
   }, [activeMatchId]);
 
-  // When events change (new session loaded), reset to first batch
+  // When events change (new session loaded), close search + reset query
   const firstEventId = events[0]?.event_id;
   useEffect(() => {
-    setVisibleCount(BATCH_SIZE);
     onCloseSearch();
     setSearchQuery("");
   }, [firstEventId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-scroll when loading more
+  // Scroll to the newest batch when more events arrive.
+  const prevCount = useRef(events.length);
   useEffect(() => {
-    if (visibleCount > BATCH_SIZE && !activeMatchId) {
+    if (events.length > prevCount.current && !activeMatchId) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [visibleCount, activeMatchId]);
-
-  const visibleEvents = useMemo(
-    () => events.slice(0, visibleCount),
-    [events, visibleCount],
-  );
-
-  const remaining = events.length - visibleCount;
-
-  const loadMore = () => {
-    setVisibleCount((prev) => Math.min(prev + BATCH_SIZE, events.length));
-  };
-
-  const showAll = () => {
-    setVisibleCount(events.length);
-  };
+    prevCount.current = events.length;
+  }, [events.length, activeMatchId]);
 
   const navigateMatch = useCallback(
     (dir: 1 | -1) => () => {
@@ -119,6 +125,9 @@ export default function ConversationView({ events, searchOpen, onToggleSearch, o
     },
     [matchIds.length],
   );
+
+  const remaining = Math.max(0, total - events.length);
+  const busy = loadingMore || loadingAll;
 
   return (
     <div className="space-y-5 pb-6">
@@ -169,7 +178,7 @@ export default function ConversationView({ events, searchOpen, onToggleSearch, o
       )}
 
       {/* Messages */}
-      {visibleEvents.map((event, i) => {
+      {events.map((event, i) => {
         const isMatch = matchIds.includes(event.event_id);
         const isActive = event.event_id === activeMatchId;
         return (
@@ -181,7 +190,7 @@ export default function ConversationView({ events, searchOpen, onToggleSearch, o
               else matchRefs.current.delete(event.event_id);
             }}
             className="animate-fade-in-up"
-            style={{ animationDelay: `${i * 30}ms` }}
+            style={{ animationDelay: `${Math.min(i, 20) * 30}ms` }}
           >
             <MessageBubble
               event={event}
@@ -192,24 +201,38 @@ export default function ConversationView({ events, searchOpen, onToggleSearch, o
         );
       })}
 
-      {remaining > 0 && (
+      {/* Load more / load all — fetches the next page(s) from the server */}
+      {hasMore ? (
         <div className="flex flex-wrap items-center justify-center gap-3 py-4">
           <div className="flex-1 h-px bg-border min-w-[3rem]" />
           <button
-            onClick={loadMore}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-element border border-border text-xs font-mono text-muted-foreground hover:text-primary hover:border-primary/35 transition-all duration-200"
+            onClick={onLoadMore}
+            disabled={busy}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-element border border-border text-xs font-mono text-muted-foreground hover:text-primary hover:border-primary/35 transition-all duration-200 disabled:opacity-50 disabled:cursor-default"
           >
-            <ChevronDown className="w-3.5 h-3.5" />
-            Show {Math.min(BATCH_SIZE, remaining)} more ({remaining} remaining)
+            {loadingMore ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5" />
+            )}
+            {loadingMore ? "Loading…" : `Load more${remaining > 0 ? ` (${remaining} remaining)` : ""}`}
           </button>
           <button
-            onClick={showAll}
-            className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors duration-200"
+            onClick={onLoadAll}
+            disabled={busy}
+            className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors duration-200 disabled:opacity-50 disabled:cursor-default"
+            title="Fetch every remaining event in this session"
           >
-            All &darr;
+            {loadingAll ? "Loading all…" : "Load all ↓"}
           </button>
           <div className="flex-1 h-px bg-border min-w-[3rem]" />
         </div>
+      ) : (
+        events.length > 0 && (
+          <p className="text-center text-xs text-muted-foreground/60 py-4 font-mono">
+            End of conversation · {total} events
+          </p>
+        )
       )}
 
       <div ref={bottomRef} />

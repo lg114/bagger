@@ -107,12 +107,49 @@ describe("getSession", () => {
 
 describe("getSessionEvents", () => {
   it("returns events for a session", async () => {
-    const data = { data: [{ event_id: "e1", content_blocks: [] }], meta: { total: 1 } };
+    const data = {
+      data: [{ event_id: "e1", content_blocks: [] }],
+      meta: { page: 1, per_page: 50, total: 1, pages: 1 },
+    };
     mockApiResponse(data);
 
     const result = await getSessionEvents("abc");
     expect(result.data).toHaveLength(1);
     expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining("/sessions/abc/events"));
+  });
+
+  it("passes page and per_page params for pagination", async () => {
+    mockApiResponse({
+      data: [],
+      meta: { page: 2, per_page: 50, total: 120, pages: 3 },
+    });
+
+    await getSessionEvents("abc", undefined, 2, 50);
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("page=2");
+    expect(url).toContain("per_page=50");
+  });
+
+  it("passes source param for multi-tool scoping", async () => {
+    mockApiResponse({
+      data: [],
+      meta: { page: 1, per_page: 50, total: 0, pages: 0 },
+    });
+
+    await getSessionEvents("abc", "codex", 1, 50);
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("source=codex");
+  });
+
+  it("omits source param when not provided", async () => {
+    mockApiResponse({
+      data: [],
+      meta: { page: 1, per_page: 50, total: 0, pages: 0 },
+    });
+
+    await getSessionEvents("abc");
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).not.toContain("source=");
   });
 });
 

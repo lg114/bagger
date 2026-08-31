@@ -1,9 +1,9 @@
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Calendar, Folder, MessageSquare, Hash, AlertCircle, Search, Download } from "lucide-react";
 import { getSession, getSessionEvents, getSessionTree, exportSessionMarkdown } from "@/lib/api";
-import type { TreeNode } from "@/lib/api";
+import type { TreeNode, PaginatedMeta } from "@/lib/api";
 import SessionTree from "@/components/SessionTree";
 import { SourceBadge } from "@/components/SourceBadge";
 import { formatDateShort, formatTokens } from "@/lib/utils";
@@ -24,12 +24,6 @@ export default function SessionDetailPage() {
     enabled: !!id,
   });
 
-  const { data: eventsData, isLoading: evtLoading, error: evtError } = useQuery({
-    queryKey: ["sessions", id, source, "events"],
-    queryFn: () => getSessionEvents(id!, source),
-    enabled: !!id,
-  });
-
   const [view, setView] = useState<"transcript" | "topology">("transcript");
 
   const { data: treeData, isLoading: treeLoading } = useQuery({
@@ -39,9 +33,96 @@ export default function SessionDetailPage() {
   });
   const tree: TreeNode[] = treeData?.data ?? [];
 
-  const events: Event[] = eventsData?.data ?? [];
-  const isLoading = sessLoading || evtLoading;
-  const error = sessError || evtError;
+  // ── Conversation events: paginated, loaded incrementally ──
+  // The backend paginates /sessions/{id}/events (page / per_page). We load
+  // page 1 up front and append further pages on demand via loadMore / loadAll
+  // so long sessions can be read end-to-end.
+  const PAGE_SIZE = 50;
+
+  const [events, setEvents] = useState<Event[]>([]);
+  const [eventsMeta, setEventsMeta] = useState<PaginatedMeta | null>(null);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventsError, setEventsError] = useState<unknown>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingAll, setLoadingAll] = useState(false);
+  // Synchronous guard so two rapid clicks can't fire the same page fetch twice
+  // (state-based guards lag a render behind the synchronous click handler).
+  const fetchInFlight = useRef(false);
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    setEventsLoading(true);
+    setEventsError(null);
+    setEvents([]);
+    setEventsMeta(null);
+    getSessionEvents(id, source, 1, PAGE_SIZE)
+      .then((resp) => {
+        if (cancelled) return;
+        setEvents(resp.data);
+        setEventsMeta(resp.meta);
+      })
+      .catch((err) => {
+        if (!cancelled) setEventsError(err);
+      })
+      .finally(() => {
+        if (!cancelled) setEventsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, source]);
+
+  const hasMore = eventsMeta != null && eventsMeta.page < eventsMeta.pages;
+
+  const loadMore = useCallback(async () => {
+    if (!id || !eventsMeta || eventsMeta.page >= eventsMeta.pages) return;
+    if (fetchInFlight.current) return;
+    fetchInFlight.current = true;
+    setLoadingMore(true);
+    try {
+      const next = eventsMeta.page + 1;
+      const resp = await getSessionEvents(id, source, next, PAGE_SIZE);
+      setEvents((prev) => [...prev, ...resp.data]);
+      setEventsMeta(resp.meta);
+    } catch (err) {
+      setEventsError(err);
+    } finally {
+      setLoadingMore(false);
+      fetchInFlight.current = false;
+    }
+  }, [id, source, eventsMeta]);
+
+  const loadAll = useCallback(async () => {
+    if (!id || !eventsMeta || eventsMeta.page >= eventsMeta.pages) return;
+    if (fetchInFlight.current) return;
+    fetchInFlight.current = true;
+    setLoadingAll(true);
+    try {
+      // Walk every remaining page from the current cursor, accumulating all
+      // events. Reuses the page count reported by the backend each response.
+      let cursor = eventsMeta;
+      let all = [...events];
+      while (cursor.page < cursor.pages) {
+        const next = cursor.page + 1;
+        const resp = await getSessionEvents(id, source, next, PAGE_SIZE);
+        all = [...all, ...resp.data];
+        cursor = resp.meta;
+      }
+      setEvents(all);
+      setEventsMeta(cursor);
+    } catch (err) {
+      setEventsError(err);
+    } finally {
+      setLoadingAll(false);
+      fetchInFlight.current = false;
+    }
+  }, [id, source, events, eventsMeta]);
+
+  const totalEvents = eventsMeta?.total ?? events.length;
+
+  const isLoading = sessLoading || eventsLoading;
+  const error = sessError || eventsError;
 
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -182,6 +263,12 @@ export default function SessionDetailPage() {
             ) : (
               <ConversationView
                 events={events}
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                loadingAll={loadingAll}
+                total={totalEvents}
+                onLoadMore={loadMore}
+                onLoadAll={loadAll}
                 searchOpen={searchOpen}
                 onToggleSearch={() => setSearchOpen((v) => !v)}
                 onCloseSearch={() => setSearchOpen(false)}
@@ -239,7 +326,12 @@ export default function SessionDetailPage() {
                 <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Messages</span>
                 <p className="text-sm font-mono font-semibold text-foreground/80 mt-0.5 flex items-center gap-1">
                   <MessageSquare className="w-3 h-3 text-primary/40" />
-                  {events.length}
+                  {totalEvents}
+                  {events.length < totalEvents && (
+                    <span className="text-[10px] text-muted-foreground/70 font-normal">
+                      ({events.length} loaded)
+                    </span>
+                  )}
                 </p>
               </div>
               <div>

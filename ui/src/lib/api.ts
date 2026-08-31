@@ -146,11 +146,15 @@ export function getSession(id: string, source?: string): Promise<Session> {
 export function getSessionEvents(
   id: string,
   source?: string,
-): Promise<{ data: Event[]; meta: { total: number } }> {
-  const qs = source ? `?source=${encodeURIComponent(source)}` : "";
-  return fetchApi<{ data: Event[]; meta: { total: number } }>(
-    `/sessions/${id}/events${qs}`,
-  );
+  page = 1,
+  perPage = 50,
+): Promise<PaginatedResponse<Event>> {
+  const params: Record<string, string | number | undefined> = {
+    page,
+    per_page: perPage,
+  };
+  if (source) params.source = source;
+  return fetchApi<PaginatedResponse<Event>>(`/sessions/${id}/events`, params);
 }
 
 export interface TreeNode {
