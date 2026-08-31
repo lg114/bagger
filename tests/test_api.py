@@ -295,12 +295,18 @@ def test_export_session_scopes_by_source():
         storage.insert_events(
             [
                 _make_event(
-                    event_id="c1", session_id="dup", role=Role.USER,
-                    text="claude question", source="claude",
+                    event_id="c1",
+                    session_id="dup",
+                    role=Role.USER,
+                    text="claude question",
+                    source="claude",
                 ),
                 _make_event(
-                    event_id="x1", session_id="dup", role=Role.USER,
-                    text="codex question", source="codex",
+                    event_id="x1",
+                    session_id="dup",
+                    role=Role.USER,
+                    text="codex question",
+                    source="codex",
                 ),
             ]
         )
