@@ -155,6 +155,43 @@ jobs:
           retention-days: 14
 
   # ──────────────────────────────────────────────
+  # Job 3b: Windows installer smoke test
+  #   Installs the freshly-built MSI on a real Windows runner, then verifies
+  #   the publishable-quality gates pytest/vitest can't cover: silent install,
+  #   app launch + stay-alive, in-place upgrade (reinstall) path, and clean
+  #   exit with no orphan process. Runs wherever the Tauri build runs.
+  # ──────────────────────────────────────────────
+  tauri-smoke:
+    name: Tauri Installer Smoke Test (Windows)
+    runs-on: windows-latest
+    needs: [tauri]
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download MSI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bagger-windows-msi
+          path: msi
+
+      - name: Locate MSI
+        id: msi
+        shell: bash
+        run: |
+          msi=$(ls msi/*.msi | head -n1)
+          echo "path=$msi" >> "$GITHUB_OUTPUT"
+
+      - name: Run installer smoke test
+        shell: pwsh
+        run: pwsh scripts/tauri-smoke.ps1 -MsiPath "${{ steps.msi.outputs.path }}"
+
+  # ──────────────────────────────────────────────
   # Job 4: Publish a version tag as a GitHub Release
   #   Release builds are deliberately tag-only; pull requests and ordinary
   #   main-branch pushes receive CI/artifacts without publishing a release.
@@ -162,7 +199,7 @@ jobs:
   release:
     name: Publish Windows Release
     runs-on: ubuntu-latest
-    needs: tauri
+    needs: [tauri, tauri-smoke]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write

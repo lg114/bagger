@@ -377,6 +377,196 @@ def test_sources_endpoint_scopes_by_project():
         assert p2 == ["codex"]
 
 
+# ── Long-session E2E (1000+ events) ──────────────────────
+
+
+def test_long_session_paginates_all_events():
+    """A 1000+ event session must be fully reachable across paginated pages.
+
+    Real Claude/Codex sessions routinely exceed 1000 events; the UI streams
+    them in pages instead of loading everything at once. This locks in the
+    end-to-end contract: every event is retrievable, in order, with no gaps
+    or duplication — the exact failure mode that used to clip long sessions at
+    page 1.
+    """
+    import math
+    from datetime import timedelta
+
+    N = 1200
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        td = Path(tmpdir)
+        storage = _override_db(td)
+        sid = "long-sess"
+        base = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+        events = [
+            MemoryEvent(
+                event_id=f"e{i:05d}",
+                session_id=sid,
+                timestamp=base + timedelta(seconds=i),
+                role=Role.USER,
+                content_blocks=[ContentBlock(block_type=BlockType.TEXT, text=f"event {i}")],
+                source="claude",
+            )
+            for i in range(N)
+        ]
+        storage.insert_events(events)
+        storage.upsert_session(
+            Session(session_id=sid, summary="Long session", message_count=N, source="claude")
+        )
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        client = TestClient(create_app())
+
+        # Detail reports the true (large) message count.
+        detail = client.get(f"/api/sessions/{sid}", params={"source": "claude"}).json()
+        assert detail["message_count"] == N
+
+        # Walk every page at per_page=100 → 12 pages for 1200 events.
+        per_page = 100
+        seen: list[str] = []
+        page = 1
+        while True:
+            resp = client.get(
+                f"/api/sessions/{sid}/events",
+                params={"source": "claude", "page": page, "per_page": per_page},
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            meta = body["meta"]
+            assert meta["page"] == page
+            assert meta["per_page"] == per_page
+            assert meta["total"] == N
+            assert meta["pages"] == math.ceil(N / per_page)
+            rows = body["data"]
+            if not rows:
+                break
+            seen.extend(r["event_id"] for r in rows)
+            if meta["page"] >= meta["pages"]:
+                break
+            page += 1
+
+        # All 1200 events retrieved, exactly once, in timestamp order.
+        assert len(seen) == N
+        assert len(set(seen)) == N
+        assert seen == [f"e{i:05d}" for i in range(N)]
+
+
+# ── Multi-source same-id: detail / export / search ───────
+
+
+def test_multisource_same_id_detail_export_search():
+    """A shared session id across tools must resolve per-source for detail,
+    export, AND search — never leak the wrong tool's data.
+
+    This is the consolidated regression for the multi-tool ambiguity fix:
+    claude and codex can emit the same session id, so every read path must
+    honor the ``source`` parameter. (The export half is covered separately in
+    test_export_session_scopes_by_source; this binds all three together.)
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        td = Path(tmpdir)
+        storage = _override_db(td)
+        storage.upsert_session(Session(session_id="dup", summary="Claude one", source="claude"))
+        storage.upsert_session(Session(session_id="dup", summary="Codex two", source="codex"))
+        storage.insert_events(
+            [
+                _make_event(event_id="c1", session_id="dup", text="CLAUDEMARKER alpha", source="claude"),
+                _make_event(event_id="x1", session_id="dup", text="CODEXMARKER beta", source="codex"),
+            ]
+        )
+        storage.close()
+
+        from fastapi.testclient import TestClient
+
+        client = TestClient(create_app())
+
+        # Detail: each source returns its own session row.
+        claude_detail = client.get("/api/sessions/dup", params={"source": "claude"}).json()
+        assert claude_detail["summary"] == "Claude one"
+        codex_detail = client.get("/api/sessions/dup", params={"source": "codex"}).json()
+        assert codex_detail["summary"] == "Codex two"
+
+        # Export: source-scoped render contains only that tool's text.
+        claude_export = client.get("/api/sessions/dup/export", params={"source": "claude"}).text
+        assert "CLAUDEMARKER" in claude_export
+        assert "CODEXMARKER" not in claude_export
+        codex_export = client.get("/api/sessions/dup/export", params={"source": "codex"}).text
+        assert "CODEXMARKER" in codex_export
+        assert "CLAUDEMARKER" not in codex_export
+
+        # Search: source filter bounds hits to that tool.
+        claude_hits = client.get("/api/search", params={"q": "CLAUDEMARKER", "source": "claude"}).json()
+        assert claude_hits["meta"]["total"] == 1
+        assert "CLAUDEMARKER" in claude_hits["data"][0]["content_text"]
+        codex_hits = client.get("/api/search", params={"q": "CLAUDEMARKER", "source": "codex"}).json()
+        assert codex_hits["meta"]["total"] == 0
+        # Un-scoped search still finds the unique claude term exactly once.
+        unscoped = client.get("/api/search", params={"q": "CLAUDEMARKER"}).json()
+        assert unscoped["meta"]["total"] == 1
+
+
+# ── Concurrent scan re-trigger ────────────────────────────
+
+
+def test_concurrent_scan_triggers_only_one(monkeypatch):
+    """Burst-firing POST /api/scan from many threads must launch exactly one
+    scan: the first wins, the rest get 409, and scan_all runs only once.
+
+    The single-threaded tests (test_scan_lock_prevents_concurrent_scans,
+    test_trigger_scan_409_when_already_running) prove the lock is atomic, but
+    only a real concurrent burst exercises the race the lock exists to stop.
+    """
+    import threading
+    import time
+
+    from fastapi.testclient import TestClient
+
+    import bagger.config as config
+    from bagger.api import routes
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        config.settings = Settings(bagger_dir=Path(tmpdir))
+
+        counter = {"n": 0}
+        gate = threading.Lock()
+
+        def slow_scan(*a, **k):
+            with gate:
+                counter["n"] += 1
+            time.sleep(0.4)  # keep the lock held across the whole burst
+            return {"sessions": 1, "events": 1, "skipped": 0, "errors": 0}
+
+        monkeypatch.setattr(routes.sync, "scan_all", slow_scan)
+
+        app = create_app()
+        with TestClient(app) as client:
+            statuses: list[int] = []
+            barrier = threading.Barrier(8)
+
+            def fire():
+                barrier.wait()  # release all threads at the same instant
+                statuses.append(client.post("/api/scan").status_code)
+
+            threads = [threading.Thread(target=fire) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            # Wait out the single in-flight scan.
+            for _ in range(100):
+                if client.get("/api/scan/status").json()["running"] is False:
+                    break
+                time.sleep(0.05)
+
+        # Exactly one scan ran; the other seven were refused.
+        assert counter["n"] == 1, counter
+        assert statuses.count(200) == 1, statuses
+        assert statuses.count(409) == 7, statuses
+
+
 def test_export_session_unsupported_format():
     with tempfile.TemporaryDirectory() as tmpdir:
         td = Path(tmpdir)
