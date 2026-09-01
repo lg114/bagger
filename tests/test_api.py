@@ -472,8 +472,12 @@ def test_multisource_same_id_detail_export_search():
         storage.upsert_session(Session(session_id="dup", summary="Codex two", source="codex"))
         storage.insert_events(
             [
-                _make_event(event_id="c1", session_id="dup", text="CLAUDEMARKER alpha", source="claude"),
-                _make_event(event_id="x1", session_id="dup", text="CODEXMARKER beta", source="codex"),
+                _make_event(
+                    event_id="c1", session_id="dup", text="CLAUDEMARKER alpha", source="claude"
+                ),
+                _make_event(
+                    event_id="x1", session_id="dup", text="CODEXMARKER beta", source="codex"
+                ),
             ]
         )
         storage.close()
@@ -497,10 +501,14 @@ def test_multisource_same_id_detail_export_search():
         assert "CLAUDEMARKER" not in codex_export
 
         # Search: source filter bounds hits to that tool.
-        claude_hits = client.get("/api/search", params={"q": "CLAUDEMARKER", "source": "claude"}).json()
+        claude_hits = client.get(
+            "/api/search", params={"q": "CLAUDEMARKER", "source": "claude"}
+        ).json()
         assert claude_hits["meta"]["total"] == 1
         assert "CLAUDEMARKER" in claude_hits["data"][0]["content_text"]
-        codex_hits = client.get("/api/search", params={"q": "CLAUDEMARKER", "source": "codex"}).json()
+        codex_hits = client.get(
+            "/api/search", params={"q": "CLAUDEMARKER", "source": "codex"}
+        ).json()
         assert codex_hits["meta"]["total"] == 0
         # Un-scoped search still finds the unique claude term exactly once.
         unscoped = client.get("/api/search", params={"q": "CLAUDEMARKER"}).json()
