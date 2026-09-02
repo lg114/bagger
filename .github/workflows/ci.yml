@@ -182,10 +182,15 @@ jobs:
 
       - name: Locate MSI
         id: msi
-        shell: bash
+        # pwsh, not bash: bash's `ls msi/*.msi` emits a forward-slash relative
+        # path, and msiexec cannot open the mixed-separator path that pwsh then
+        # builds from it (CWD + "/file.msi" -> msiexec exit 1619).
+        shell: pwsh
         run: |
-          msi=$(ls msi/*.msi | head -n1)
-          echo "path=$msi" >> "$GITHUB_OUTPUT"
+          $msi = Get-ChildItem -Path msi -Filter *.msi -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+          if (-not $msi) { throw "no .msi found under ./msi — did the artifact download fail?" }
+          "path=$($msi.FullName)" >> $env:GITHUB_OUTPUT
 
       - name: Run installer smoke test
         shell: pwsh

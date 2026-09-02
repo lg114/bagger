@@ -46,9 +46,33 @@ function Fail([string] $msg) {
     exit 1
 }
 
+# msiexec speaks in bare numbers; translate the ones we are likely to hit so a
+# CI failure explains itself without someone decoding exit codes by hand.
+function Get-MsiErrorHint([int] $code) {
+    $hints = @{
+        1603 = "fatal error during installation — read the MSI log above"
+        1605 = "product not found (upgrade/uninstall target missing)"
+        1618 = "another installation is already in progress on this machine"
+        1619 = "package could not be opened — check the path actually reaches msiexec"
+        1620 = "package could not be opened — MSI may be invalid or corrupt"
+        1638 = "a different version of this product is already installed"
+    }
+    if ($hints.ContainsKey($code)) { return " — $($hints[$code])" }
+    return ""
+}
+
 # ── 0. sanity ─────────────────────────────────────────────
-if (-not (Test-Path $MsiPath)) { Fail "MSI not found at '$MsiPath'" }
+if (-not (Test-Path -LiteralPath $MsiPath)) { Fail "MSI not found at '$MsiPath'" }
+
+# msiexec cannot open a mixed-separator path. A caller passing "msi\app.msi"
+# (forward slash) makes PowerShell glue it onto the CWD, producing
+# "D:\repo\msi\app.msi" — PowerShell resolves that fine, but msiexec fails
+# with 1619 ("package could not be opened"). Normalize to a fully-qualified,
+# backslash-only filesystem path before handing it to msiexec.
+$MsiPath = (Resolve-Path -LiteralPath $MsiPath).ProviderPath
+
 Write-Host ">> Installing MSI: $MsiPath"
+Write-Host (">> MSI size: {0:N0} bytes" -f (Get-Item -LiteralPath $MsiPath).Length)
 
 # ── 1. install ────────────────────────────────────────────
 $log = Join-Path $env:TEMP "bagger-install.log"
@@ -56,7 +80,9 @@ $installArgs = @("/i", "`"$MsiPath`"", "/qn", "/norestart", "/L*v", "`"$log`"")
 $proc = Start-Process msiexec.exe -Wait -PassThru -ArgumentList $installArgs
 if ($proc.ExitCode -ne 0) {
     if (Test-Path $log) { Get-Content $log | Select-Object -Last 40 | Write-Host }
-    Fail "msiexec install exited with code $($proc.ExitCode)"
+    Write-Host ">> MSI resolved path: $MsiPath"
+    Write-Host ">> MSI still exists on disk: $(Test-Path -LiteralPath $MsiPath)"
+    Fail "msiexec install exited with code $($proc.ExitCode)$(Get-MsiErrorHint $proc.ExitCode)"
 }
 Write-Host ">> Install OK (exit 0)"
 
@@ -94,7 +120,8 @@ if ($up.ExitCode -ne 0) {
     if (Test-Path "$env:TEMP\bagger-upgrade.log") {
         Get-Content "$env:TEMP\bagger-upgrade.log" | Select-Object -Last 40 | Write-Host
     }
-    Fail "msiexec upgrade/reinstall exited with code $($up.ExitCode)"
+    Write-Host ">> MSI resolved path: $MsiPath"
+    Fail "msiexec upgrade/reinstall exited with code $($up.ExitCode)$(Get-MsiErrorHint $up.ExitCode)"
 }
 # Re-verify the binary survived the upgrade with the same version.
 if (-not (Test-Path $expectedExe)) { Fail "app binary missing after upgrade" }
