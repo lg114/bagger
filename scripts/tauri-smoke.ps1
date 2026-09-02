@@ -87,11 +87,27 @@ if ($proc.ExitCode -ne 0) {
 Write-Host ">> Install OK (exit 0)"
 
 # ── 2. locate binary + version ────────────────────────────
-$expectedExe = Join-Path $env:LOCALAPPDATA "$ProductName\$ProductName.exe"
-if (-not (Test-Path $expectedExe)) {
-    # Fallback: search LOCALAPPDATA for the product exe (install dir can vary).
-    $found = Get-ChildItem -Path $env:LOCALAPPDATA -Recurse -Filter "$ProductName.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $found) { Fail "installed '$ProductName.exe' not found under $env:LOCALAPPDATA" }
+# Tauri's WiX template installs per-machine by default
+# (InstallScope="perMachine", INSTALLDIR under ProgramFiles64Folder), so the
+# exe lands in "C:\Program Files\<ProductName>\" — NOT %LOCALAPPDATA%. Check
+# the real candidates first, then fall back to a broad search of both roots.
+$candidates = @(
+    (Join-Path ${env:ProgramFiles} "$ProductName\$ProductName.exe"),
+    (Join-Path ${env:LOCALAPPDATA} "$ProductName\$ProductName.exe")
+)
+if (${env:ProgramFiles(x86)}) {
+    $candidates += (Join-Path ${env:ProgramFiles(x86)} "$ProductName\$ProductName.exe")
+}
+$expectedExe = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+
+if (-not $expectedExe) {
+    $searchRoots = @(${env:ProgramFiles}, ${env:LOCALAPPDATA}) | Where-Object { $_ }
+    $found = $searchRoots | ForEach-Object {
+        Get-ChildItem -Path $_ -Recurse -Filter "$ProductName.exe" -ErrorAction SilentlyContinue
+    } | Select-Object -First 1
+    if (-not $found) {
+        Fail "installed '$ProductName.exe' not found under Program Files or LOCALAPPDATA"
+    }
     $expectedExe = $found.FullName
 }
 Write-Host ">> App binary: $expectedExe"
