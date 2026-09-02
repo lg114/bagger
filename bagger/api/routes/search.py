@@ -17,10 +17,16 @@ def search_events(
 ) -> dict:
     """Full-text search across all conversation events.
 
-    English/ASCII queries use FTS5 with BM25 ranking and snippet highlighting.
-    CJK queries fall back to LIKE-based search. Results carry a `source` field
-    so the UI can badge each event with its originating tool, and `source=`
-    scopes the search to one tool.
+    Queries run as FTS5 ``MATCH`` queries ranked by BM25, with snippet
+    highlighting. CJK queries are pre-tokenized with jieba before ``MATCH`` —
+    SQLite's ``unicode61`` tokenizer does not split Han/Kana/Hangul on its own.
+    When jieba is missing the query is matched untokenized and CJK searches
+    return no results at all; that is not a LIKE fallback, see
+    ``bagger.cjk.JIEBA_CJK_WARNING``. LIKE is used only when the FTS5 table is
+    absent.
+
+    Results carry a `source` field so the UI can badge each event with its
+    originating tool, and `source=` scopes the search to one tool.
     """
     with get_storage() as storage:
         result = storage.search_paginated(

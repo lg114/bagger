@@ -1,12 +1,11 @@
 [project]
 name = "bagger"
-version = "0.1.0"
+version = "0.2.0"
 description = "AI Coding Agent Data Collector — sync Claude Code JSONL transcripts to a searchable local database"
 requires-python = ">=3.12"
 dependencies = [
     "click>=8.0",
     "pydantic>=2.0",
-    "watchdog>=3.0",  # event-driven watcher: incremental sync on file change instead of 1s full scan
 ]
 
 [project.optional-dependencies]

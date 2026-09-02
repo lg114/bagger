@@ -184,8 +184,9 @@ tools never collide even when they share an ID.
   characters, so bagger pre-tokenizes CJK text with **jieba** on both the write
   path (index) and the read path (query). Indexed output keeps jieba word
   tokens *plus* every single CJK character, so substring queries still hit.
-- **Fallback** — if FTS5 is unavailable or jieba isn't installed, search
-  degrades to a `LIKE` full-table scan.
+- **Fallback** — a `LIKE` full-table scan is used only when the FTS5 table is
+  missing. A missing jieba does *not* fall back: the CJK query is then matched
+  untokenized against a blob-indexed corpus, which returns nothing.
 
 jieba ships in the `web` extra. **Without it, CJK queries silently return
 nothing**, because the text was indexed as one opaque blob. bagger warns you

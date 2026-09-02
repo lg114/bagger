@@ -153,7 +153,7 @@ export default function SearchPage() {
         <EmptyState
           icon={SearchIcon}
           title="Search your conversation history"
-          description="FTS5 with BM25 ranking. CJK falls back to LIKE."
+          description="Full-text search with BM25 ranking. CJK is tokenized with jieba."
         />
       )}
     </div>

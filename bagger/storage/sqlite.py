@@ -944,8 +944,9 @@ class SqliteSearchIndex:
     ) -> list[dict]:
         """FTS5 with BM25 ranking; CJK queries are pre-tokenized before MATCH.
 
-        Falls back to LIKE only when FTS5 is unavailable or jieba isn't
-        installed for CJK text.
+        Falls back to LIKE only when the FTS5 table is missing. A missing jieba
+        does NOT trigger that fallback — the query is then matched untokenized
+        and CJK searches return nothing, see ``bagger.cjk.JIEBA_CJK_WARNING``.
         """
         if self._fts_enabled():
             tokenized = self._tokenized_fts_query(query)
@@ -962,7 +963,7 @@ class SqliteSearchIndex:
         per_page: int = 20,
         source: str | None = None,
     ) -> dict:
-        """FTS5 with pre-tokenization; LIKE fallback. Paginated for API."""
+        """FTS5 with pre-tokenization; LIKE fallback if FTS5 is absent. Paginated."""
         if self._fts_enabled():
             tokenized = self._tokenized_fts_query(query)
             return self.search_fts(
