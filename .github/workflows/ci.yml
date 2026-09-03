@@ -47,6 +47,12 @@ jobs:
       - name: Check formatting with ruff
         run: ruff format --check .
 
+      # Docs drift is invisible to ruff and pytest. One matrix leg is enough —
+      # the check compares text against code, so it is platform-independent.
+      - name: Check docs and version consistency
+        if: matrix.python-version == '3.12'
+        run: python scripts/check_consistency.py
+
       - name: Test with pytest
         run: pytest tests/ -q --cov=bagger --cov-report=term-missing --cov-report=xml
 
